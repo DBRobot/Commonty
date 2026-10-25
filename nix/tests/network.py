@@ -201,8 +201,8 @@ box.fail("grep -q kim /etc/ssh/authorized_keys.d/admin 2>/dev/null")
 # started before dd-control answered read everyone as no member and took the
 # fleet owner's laptop off the network for two hours). The gate goes by the
 # control plane's agreed state, with dd-control down at its start.
-# The replay gate before it would take kim's devices off on its own next
-# pass (she is on no member list): it is stopped while they are made.
+# The replay gate before it would take jo's devices off on its own next
+# pass (jo is on no member list): it is stopped while they are made.
 box.succeed("systemctl stop dd-verify.service")
 
 
@@ -212,10 +212,12 @@ def node_names():
     )
 
 
-# three more devices, made in headscale itself: kim's (her membership is
-# revoked), ivy's (a member) and zed's, whom the agreed state does not have
+# three more devices, made in headscale itself: jo's (jo's membership is
+# revoked), ivy's (a member) and zed's, whom the agreed state does not have.
+# The revoked one is not kim: a box's host is on the reaper's keep list
+# (App::reap_guard), so the host's devices never come off by the reaper
 for user, node, reg in (
-    ("kim", "phone", "c" * 24),
+    ("jo", "phone", "c" * 24),
     ("ivy", "tablet", "a" * 24),
     ("zed", "pc", "b" * 24),
 ):
@@ -228,12 +230,14 @@ box.succeed("mkdir -p /run/dd-test")
 box.succeed(
     'echo \'{"boxes": {"box": {}}, "validators": [{"name": "box"}]}\' > /run/dd-test/control.json'
 )
-# sarah (the fleet's admin) and ivy are members, kim's membership was revoked
+# sarah (the fleet's admin), kim (the box's host) and ivy are members, jo's
+# membership was revoked
 box.succeed(
     "jq -n '{height: 5, members: {"
     'sarah: {status: "member", access: "invite"}, '
+    'kim: {status: "member", access: "invite"}, '
     'ivy: {status: "member", access: "invite"}, '
-    'kim: {status: "revoked", access: "none"}}}\' > /run/dd-test/identity.json'
+    'jo: {status: "revoked", access: "none"}}}\' > /run/dd-test/identity.json'
 )
 box.succeed(
     "printf '[Service]\\n"
@@ -268,8 +272,8 @@ def wait_seen(text, times=1, timeout=60):
 # everyone and saying why
 wait_seen("kept laptop - whether sarah is a member is not known", times=3, timeout=60)
 assert everyone <= node_names(), node_names()
-assert seen("kept phone - whether kim is a member is not known"), (
-    "kept phone - whether kim is a member is not known"
+assert seen("kept phone - whether jo is a member is not known"), (
+    "kept phone - whether jo is a member is not known"
 )
 assert not seen("network: removed"), "network: removed"
 # nothing ended or deleted, and the services that delete hear nothing to do
@@ -285,21 +289,21 @@ def code(path):
 assert code("/internal/leaving") == "503", code("/internal/leaving")
 assert code("/internal/storage/members") == "503"
 
-# dd-control answers: who is who is known, then the grace runs, then kim's
+# dd-control answers: who is who is known, then the grace runs, then jo's
 # devices come off, and zed's (known now: the agreed state has no zed); the
-# admin's and ivy's stay
+# admin's, the host's and ivy's stay
 box.succeed(
     f"systemd-run --unit dd-control-standin $(command -v python3) {nix['standin']} /run/dd-test/identity.json"
 )
 wait_seen("NOT reaping: who is a member has been known for", timeout=60)
-wait_seen("network: removed phone - kim is not a member", timeout=60)
+wait_seen("network: removed phone - jo is not a member", timeout=60)
 wait_seen("network: removed pc - zed is not a member", timeout=30)
 left = node_names()
-assert {"laptop", "tablet"} <= left and not {"phone", "other", "pc"} & left, left
+assert {"laptop", "other", "tablet"} <= left and not {"phone", "pc"} & left, left
 assert code("/internal/leaving") == "200", code("/internal/leaving")
 box.succeed("grep -qx 'dd_reap_brake 0' /var/lib/dd-facts/reap-brake.prom")
 
-# The agreed state suddenly drops ivy (half of who has access): more likely
+# The agreed state suddenly drops ivy (a third of who has access): more likely
 # wrong than true. Nothing comes off, pass after pass, and the brake is up
 # where the fleet's alerts read it; restored, it is off, and ivy kept hers.
 # The drop lands while a pass is waiting on headscale (CI run 882: that pass
@@ -349,7 +353,7 @@ held = time.monotonic() - paused
 print(f"headscale paused {held:.1f} s")
 assert held < 9, f"headscale paused {held:.1f} s: the gate's call ran out"
 wait_seen("NOT reaping this pass: the state changed while it was judged", timeout=30)
-wait_seen("NOT reaping, the brake is on: 1 of the 2", times=3, timeout=60)
+wait_seen("NOT reaping, the brake is on: 1 of the 3", times=3, timeout=60)
 assert not seen("removed tablet"), "removed tablet"
 assert "tablet" in node_names(), node_names()
 box.succeed("grep -qx 'dd_reap_brake 1' /var/lib/dd-facts/reap-brake.prom")
