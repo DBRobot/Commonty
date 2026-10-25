@@ -144,6 +144,10 @@ const (
 	mib = 1 << 20
 )
 
+// WhereItsDataIs starts the why of a writer kept on, or given back to,
+// the box holding its lease (cmd/dd-control/placed.go reads it)
+const WhereItsDataIs = "where its data is: "
+
 // ComputerService is the placed service a remote computer is
 func ComputerService(id string) string { return "computer-" + id }
 
@@ -812,7 +816,27 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 			if n == 0 {
 				n = 1
 			}
+			// a writer stays with the box holding its lease, or comes back
+			// to it once its lease lapsed, while that box is alive and can
+			// run it: its data is there, the newest epoch's, and a box
+			// that only failed to renew (2026-10-24: node1's TPM stopped
+			// signing; node2, with no base backup, took postgres) gets it
+			// back. The agreed state says who holds it; no box's word on
+			// what it keeps steers a writer. A holder that cannot start it
+			// refuses it (cmd/dd-control/placed.go), and then, or with its
+			// holder gone, any box may have it
+			first := []string{}
+			if l := s.Leases["svc/"+svc]; sv.Lease && l != nil && len(cands) > 1 {
+				for _, name := range cands {
+					if name == l.Holder && can(name, svc) {
+						first = append(first, name)
+					}
+				}
+			}
 			for n -= count[svc]; n > 0; n-- { // less what came beside what needs it
+				if len(first) > 0 && choose(first, WhereItsDataIs) {
+					continue
+				}
 				if !choose(cands, "") {
 					p.Unplaced[svc] = "no live box that can run it has room"
 					break
