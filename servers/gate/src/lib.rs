@@ -733,10 +733,7 @@ impl App {
     /// never takes off, how many it takes off at most, and whether it may
     /// take anyone off now
     fn reap_guard<'a>(&self, now: &'a (dyn Fn() -> network::Mark + Sync)) -> network::Guard<'a> {
-        let mut keep: std::collections::BTreeSet<String> = network::people_named();
-        keep.extend(self.admin.iter().cloned());
-        keep.extend(self.owner.iter().cloned());
-        keep.extend(self.boxes.values().filter_map(|b| b.owner.clone()));
+        let keep = network::reap_keep(network::people_named(), self.admin.as_deref());
         let grace = network::reap_grace();
         let hold = if !self.directory.settled() {
             Some("who is a member is not known yet: the agreed state is not read, not current, or not recent".to_string())

@@ -53,9 +53,9 @@ pub type Mark = (u64, std::collections::BTreeSet<String>);
 
 /// What holds the reaper back (App::reap_guard)
 pub struct Guard<'a> {
-    /// whose devices never come off: the fleet's admin, the people the
-    /// release names, the boxes' owners. One of them reading as no member is
-    /// a fault to look into, not a reason to cut them off
+    /// whose devices never come off (reap_keep): the fleet's admin and the
+    /// people the release names. One of them reading as no member is a fault
+    /// to look into, not a reason to cut them off
     pub keep: std::collections::BTreeSet<String>,
     /// why nothing may come off now, if anything holds it
     pub hold: Option<String>,
@@ -357,6 +357,19 @@ pub fn people_named() -> std::collections::BTreeSet<String> {
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .collect()
+}
+
+/// Who the reaper never takes off: the people the release names and the
+/// fleet's admin, whom a wrong state must not lock out. Not a box's host:
+/// a host whose membership is revoked loses their devices like anyone, and
+/// the brake and the state-moved guard hold a state that drops them wrongly
+pub fn reap_keep(
+    people: std::collections::BTreeSet<String>,
+    admin: Option<&str>,
+) -> std::collections::BTreeSet<String> {
+    let mut keep = people;
+    keep.extend(admin.map(str::to_string));
+    keep
 }
 
 pub struct Door {
@@ -1671,6 +1684,68 @@ mod tests {
         assert_eq!(b.acknowledge(&h, now), Err(AckRefused::Empty));
         b.state.lock().unwrap().ack = Some((h, now + ACK_FOR));
         assert!(b.check(&none, &set(&["ann"])).is_err(), "even a forced ack");
+    }
+
+    /// A box's host is not on the keep list (reap_keep): kept while a
+    /// member, their devices off once their membership is revoked, and a
+    /// state that drops the host with enough others is held by the brake
+    #[tokio::test]
+    async fn a_revoked_host_loses_their_devices_and_the_brake_still_holds() {
+        use crate::ident::Answer;
+        let (door, deleted) = headscale_with(serde_json::json!({ "nodes": [
+            person_node("1", "laptop", "david", "2026-01-01T00:00:00Z"),
+            person_node("2", "phone", "kim", "2026-01-02T00:00:00Z"),
+            person_node("3", "other", "kim", "2026-01-03T00:00:00Z"),
+            person_node("4", "tablet", "ann", "2026-01-04T00:00:00Z"),
+            person_node("5", "pc", "bob", "2026-01-05T00:00:00Z"),
+        ]}))
+        .await;
+        let d = facts("host");
+        let brake = Arc::new(Brake::new(
+            Some(d.join("acted.json")),
+            Some(d.join("f.prom")),
+            2,
+        ));
+        // kim hosts this box (VERIFY_OWNER) and a box elsewhere; david is
+        // the fleet's admin, sarah a person the release names
+        let keep = reap_keep(set(&["sarah"]), Some("david"));
+        assert_eq!(keep, set(&["david", "sarah"]));
+        let guard = |members: &[&str]| Guard {
+            keep: keep.clone(),
+            ..brake_guard(&brake, members)
+        };
+        let by = |m: &'static [&'static str]| move |u: &str| Answer::of(m.contains(&u));
+
+        // the host is a member: every device stays
+        const ALL: &[&str] = &["david", "kim", "ann", "bob", "cy", "dee", "eve", "fay"];
+        assert_eq!(door.reap(by(ALL), None, &guard(ALL)).await.unwrap(), 0);
+        assert!(deleted.lock().unwrap().is_empty());
+
+        // a state that drops the host and two more at once (3 of 8): the
+        // brake holds it, and the host keeps every device
+        const SHRUNK: &[&str] = &["david", "cy", "dee", "eve", "fay"];
+        for _ in 0..2 {
+            assert_eq!(
+                door.reap(by(SHRUNK), None, &guard(SHRUNK)).await.unwrap(),
+                0
+            );
+            assert!(deleted.lock().unwrap().is_empty());
+            assert!(brake.on().is_some());
+        }
+
+        // the host's membership is revoked, alone: both of kim's devices
+        // come off, nobody else's
+        const NO_KIM: &[&str] = &["david", "ann", "bob", "cy", "dee", "eve", "fay"];
+        assert_eq!(
+            door.reap(by(NO_KIM), None, &guard(NO_KIM)).await.unwrap(),
+            2
+        );
+        assert_eq!(
+            *deleted.lock().unwrap(),
+            vec!["2".to_string(), "3".to_string()]
+        );
+        assert!(brake.on().is_none());
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     /// One person known to be no member loses every device, however many

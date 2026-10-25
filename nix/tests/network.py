@@ -214,8 +214,7 @@ def node_names():
 
 # three more devices, made in headscale itself: jo's (jo's membership is
 # revoked), ivy's (a member) and zed's, whom the agreed state does not have.
-# The revoked one is not kim: a box's host is on the reaper's keep list
-# (App::reap_guard), so the host's devices never come off by the reaper
+# kim, the box's host, is revoked last, at the end
 for user, node, reg in (
     ("jo", "phone", "c" * 24),
     ("ivy", "tablet", "a" * 24),
@@ -371,4 +370,33 @@ box.succeed(
 wait_seen("the state is consistent again; the brake is off", timeout=60)
 box.succeed("grep -qx 'dd_reap_brake 0' /var/lib/dd-facts/reap-brake.prom")
 assert {"laptop", "tablet"} <= node_names(), node_names()
+
+# The box's host, revoked, loses their devices like anyone: the reaper keeps
+# the admin and the people the release names, not a host (network::reap_keep).
+# kim's other joined over real tailscale and nothing before took it off.
+# Four more members first, so kim going is one of seven people with access,
+# under the brake's quarter (a state that drops the host with others at once
+# is still held: network.rs a_revoked_host_loses_their_devices_and_the_brake_still_holds)
+assert "other" in node_names(), node_names()
+box.succeed(
+    "jq '.members += {"
+    'ann: {status: "member", access: "invite"}, '
+    'bob: {status: "member", access: "invite"}, '
+    'cy: {status: "member", access: "invite"}, '
+    'dee: {status: "member", access: "invite"}'
+    "} | .height = 8' /run/dd-test/identity.json > /run/dd-test/i && mv /run/dd-test/i /run/dd-test/identity.json"
+)
+# a pass has acted on the state with them in it
+box.wait_until_succeeds(
+    "jq -e '.acted | any(. == \"dee\")' /var/lib/dd-verify/reap-acted.json",
+    timeout=60,
+)
+box.succeed(
+    'jq \'.members.kim = {status: "revoked", access: "none"} | .height = 9\' /run/dd-test/identity.json > /run/dd-test/i && mv /run/dd-test/i /run/dd-test/identity.json'
+)
+wait_seen("network: removed other - kim is not a member", timeout=60)
+left = node_names()
+assert "other" not in left and {"laptop", "tablet"} <= left, left
+assert not seen("NOT removing other"), "NOT removing other"
+box.succeed("grep -qx 'dd_reap_brake 0' /var/lib/dd-facts/reap-brake.prom")
 box.succeed("systemctl stop dd-control-standin.service")
