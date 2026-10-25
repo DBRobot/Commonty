@@ -227,7 +227,7 @@ const WITNESS_BOOT_MS = 20000;
 const WITNESS_RETRY_MS = 60000;
 
 // what the witness registers, and the relay calls
-const HOOKS = ['controlState', 'controlIdentity', 'controlPlaced', 'controlReceive', 'controlSend', 'controlPersist', 'controlReady'];
+const HOOKS = ['controlState', 'controlIdentity', 'controlPlaced', 'controlReceive', 'controlSend', 'controlPersist', 'controlReady', 'controlExit'];
 
 function unhook() {
   for (const h of HOOKS) delete globalThis[h];
@@ -319,12 +319,15 @@ export class Relay {
     globalThis.controlSend = (to, kind, arr) => { if (this.self !== null) this.route(BigInt(to), this.self, kind, arr); };
     globalThis.controlPersist = (s) => { this.ctx.storage.put('saved', s); };
     const ready = new Promise((r) => { globalThis.controlReady = r; });
+    // why it stopped, as it says before it exits (cmd/witness)
+    let why = null;
+    globalThis.controlExit = (m) => { why = String(m); };
     const go = new Go();
     const inst = await WebAssembly.instantiate(witnessWasm, go.importObject);
     let up = false;
     const exited = go.run(inst).then(
-      () => { throw new Error('the witness exited before it was ready'); },
-      (e) => { throw new Error(`the witness failed: ${e && e.message}`); },
+      () => { throw new Error(`the witness exited before it was ready${why ? `: ${why}` : ''}`); },
+      (e) => { throw new Error(`the witness failed: ${why ?? (e && e.message)}`); },
     );
     // and once it ran: gone, it is no witness, and the next request starts
     // one again (from what it saved since)
