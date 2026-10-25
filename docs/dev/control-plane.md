@@ -354,6 +354,16 @@ state's JSON holds, follows these rules:
 
 - Box keys are the TPM-held keys already in fleet/boxes.json (unlockKey).
   Validator keys are the same keys.
+- dd-control signs in process
+  ([tpmsign.go](../../servers/system/control/cmd/dd-control/tpmsign.go)):
+  one connection to `/dev/tpmrm0`, the key loaded once, one signature at
+  a time, a policy session per signature that is never saved. An error
+  starts afresh and is tried again for up to 8 s; a TPM out of room for
+  contexts first has its stale sessions flushed. Running tpm2-tools,
+  five processes a signature, a stopped dd-control left a session saved
+  for good, and 65535 contexts later node1's TPM signed nothing
+  (2026-10-24 23:52). Every user of the TPM on a box (dd-control and the
+  scripts still on tpm2-tools) takes `/run/dd-tpm/lock`, root's alone.
 - Voting weight is per house: a house runs one validator however many boxes
   it has.
 - Witnesses are validators listed in the membership with no boxes behind
@@ -564,6 +574,13 @@ release gives to the boxes able to run it:
   not. dd-control does that, and so does `dd-placed-fence`, a 2-second
   timer that needs nothing but the flag, so a dd-control that crashed or
   hangs does not leave a writer running.
+- The plan keeps a writer with the box holding its lease, or gives it
+  back once its lease lapsed, while that box is alive and can run it,
+  whatever another scores: its data is there. On 2026-10-24 node1 only
+  failed to renew, and node2, with no base backup, took postgres.
+- A box that took a writer over and cannot start it within 3 minutes
+  refuses it (`refused/<service>`, for 10 minutes), and the plan gives it
+  to a box that can. One taking back its own lapsed lease never does.
 - Moved by the plan, it stops its units, waits for them, and only then
   gives the lease back. Another box is refused the lease until it is
   given back or has lapsed, by which time the old holder has stopped.
