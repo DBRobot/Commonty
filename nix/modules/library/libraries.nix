@@ -79,7 +79,8 @@ in
       })
       # the old pool, until it goes: the bucket there, and the copy into the
       # store, which reads with this key
-      (lib.optionalAttrs (options.dd ? garage) {
+      # a box with no store (the leaving test's) has no move to make
+      (lib.optionalAttrs (options.dd ? garage && options.dd ? store) {
         dd.store.migrate = lib.mkIf own (
           lib.genAttrs [ "libraries" "mail" ] (_: {
             envFile = cfg.keyFile;
@@ -89,6 +90,8 @@ in
             once = true;
           })
         );
+      })
+      (lib.optionalAttrs (options.dd ? garage) {
         dd.garage.setupEnvFiles = [ cfg.keyFile ];
         dd.garage.buckets.libraries = {
           key = {
