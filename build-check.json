@@ -1,8 +1,8 @@
 {
   "payload": {
     "flake": "git+https://git.commonty.org/david/commonty",
-    "id": "check-1-1792825837",
-    "issued": 1792825842,
+    "id": "check-1-1792913131",
+    "issued": 1792913133,
     "jobs": [
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
@@ -12,18 +12,18 @@
         ],
         "name": "android",
         "part": "android",
-        "path": "/nix/store/6wmgj1fdjr6kg01qywm11ig040p9rk33-commonty-android-0.0.1",
+        "path": "/nix/store/fnva459cqm31x9lfb5imf6vdwwzs30k2-commonty-android-0.0.1",
         "version": "0.0.1"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
         "builders": [
-          "node1",
-          "node2"
+          "node2",
+          "node1"
         ],
         "name": "dd-windows",
         "part": "dd-windows",
-        "path": "/nix/store/073ww6r8smc511jkr3j74p586k4x0wv3-dd-windows-0.0.1",
+        "path": "/nix/store/ismi71jz40vbx5p6h39b7zaqjqf15syi-dd-windows-0.0.1",
         "version": "0.0.1"
       },
       {
@@ -34,24 +34,24 @@
         ],
         "name": "linux",
         "part": "linux",
-        "path": "/nix/store/9i4xy4h93mg00lf8z3iw30fvp4w80b0d-commonty-linux-0.0.1",
+        "path": "/nix/store/bk349haf4ic278vqr4lhwsfcgcv7k7cn-commonty-linux-0.0.1",
         "version": "0.0.1"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
         "builders": [
-          "node2",
-          "node1"
+          "node1",
+          "node2"
         ],
         "name": "windows",
         "part": "windows",
-        "path": "/nix/store/hkgc3fgs5nxyla9fqlnymdyqvrrf7z74-commonty-windows-0.0.1",
+        "path": "/nix/store/3fk3vsf0zmjs2a1plpjvmxzq05ikpb4y-commonty-windows-0.0.1",
         "version": "0.0.1"
       }
     ],
     "kind": "build-order",
-    "rev": "83d19dfdf22126ebc819359fe7c67254fa10d0d4"
+    "rev": "1a66ed25effc4f9d358a7c099b6c0efc2eb27583"
   },
   "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
-  "signature": "vxc+lM7GyGMTjrQ/81VSzQce3YvStHHXXWd9YhikVmPtTDAi+qe5p18+I1Wo3o5Lv25H64ZJaD8O/eMFTbFxAA=="
+  "signature": "d+AL9UfuCHLemQmfy9bs3nMX786E4kp75BgcVNMdVlzffepLZpIwPWvqTasP8YNP2qjlOOLMRheEKdgiZlPPDA=="
 }
