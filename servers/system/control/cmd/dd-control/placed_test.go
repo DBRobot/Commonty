@@ -34,8 +34,8 @@ func newPlacer(t *testing.T) (*placer, *[]string) {
 		dir:     filepath.Join(t.TempDir(), "dd-placed"),
 		carries: map[string][]string{"web": {"web.service"}, "photos": {"ente.service", "ente-web.service"}},
 		run: func(args ...string) error {
-			if args[0] == "is-active" {
-				return errors.New("inactive") // nothing runs, unless a test says so
+			if args[0] == "is-active" || args[0] == "is-failed" {
+				return errors.New("inactive") // nothing runs or failed, unless a test says so
 			}
 			calls = append(calls, strings.Join(args, " "))
 			return nil
@@ -671,5 +671,71 @@ func TestWhatRunsWithoutItsFlagStopsOnce(t *testing.T) {
 	p.reconcile(place.Plan{Boxes: map[string][]place.Decision{"node1": {{Service: "photos"}}}}, state.New())
 	if len(*calls) != 2 {
 		t.Fatalf("checked again: %v", *calls)
+	}
+}
+
+// node2 on 2026-10-24: given postgres when node1 was gone, its take could
+// not start it. It refuses it, says so, and gives the lease back once the
+// plan moves it
+func TestAWriterThatFailsToStartIsRefused(t *testing.T) {
+	p, calls, clock, s := leasedPlacer(t)
+	failed := false
+	p.run = func(args ...string) error {
+		switch args[0] {
+		case "is-active":
+			return errors.New("inactive")
+		case "is-failed":
+			if !failed {
+				return errors.New("not failed")
+			}
+			return nil
+		}
+		*calls = append(*calls, strings.Join(args, " "))
+		return nil
+	}
+	s.Leases["svc/db"] = &state.Lease{Holder: "node2", Epoch: 3, Expires: s.Time - 1}
+	p.reconcile(wantDB, s)
+	grant(p, s, 4)
+	p.reconcile(wantDB, s)
+	*clock += leaseMargin.Milliseconds()
+	p.reconcile(wantDB, s)
+	if !p.up("db") {
+		t.Fatal("not started")
+	}
+	if p.facts()["refused/db"] != 0 {
+		t.Fatal("refused before it failed")
+	}
+	failed = true
+	*clock += 2000
+	grant(p, s, 4)
+	p.reconcile(wantDB, s)
+	if p.facts()["refused/db"] != 1 {
+		t.Fatal("a writer that failed to start is not refused")
+	}
+	// the plan moves it: stopped, and the lease given back; not asked for again
+	p.reconcile(place.Plan{Boxes: map[string][]place.Decision{"node1": {}}}, s)
+	if p.up("db") || (*calls)[len(*calls)-1] != "lease release" {
+		t.Fatalf("not handed back: %v", *calls)
+	}
+	delete(s.Leases, "svc/db")
+	n := len(*calls)
+	p.reconcile(wantDB, s)
+	if len(*calls) != n {
+		t.Fatalf("asked again for a writer it refused: %v", (*calls)[n:])
+	}
+	// taking back its own lapsed lease, it has the writer's data: never refused
+	p2, _, clock2, s2 := leasedPlacer(t)
+	p2.run = p.run
+	s2.Leases["svc/db"] = &state.Lease{Holder: "node1", Epoch: 4, Expires: s2.Time - 1}
+	p2.reconcile(wantDB, s2)
+	grant(p2, s2, 5)
+	p2.reconcile(wantDB, s2)
+	*clock2 += leaseMargin.Milliseconds()
+	p2.reconcile(wantDB, s2)
+	*clock2 += 2000
+	grant(p2, s2, 5)
+	p2.reconcile(wantDB, s2)
+	if !p2.up("db") || p2.facts()["refused/db"] != 0 {
+		t.Fatal("refused a writer whose lapsed lease was its own")
 	}
 }

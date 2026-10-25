@@ -102,7 +102,19 @@ type placer struct {
 	// a writer being handed over whose final copy has not succeeded yet:
 	// since when (uptime). Its flag stays, and its lease is renewed
 	handing map[string]int64
+	// a writer taken over from another box (or from none): when (uptime)
+	// it was started here under its lease; and one that failed to start
+	// since, refused: a box that took a writer it cannot run (no base
+	// backup, a key it cannot open) says so, and the plan gives it to a
+	// box that can (2026-10-24, node2). One taking back its own lapsed
+	// lease has the writer's data, and is never refused
+	started, failed map[string]int64
+	// who held a writer's lease when this box asked for it
+	before map[string]string
 }
+
+// how long after a writer is started here a failure to start refuses it
+const failWithin = 3 * time.Minute
 
 // how long a handover asks again for its final copy before it gives the
 // lease back without it, its last writes kept here alone
@@ -188,6 +200,9 @@ func (p *placer) facts() map[string]float64 {
 			f["runs/"+svc] = 1
 		}
 		if at, ok := p.refused[svc]; ok && now-at < refuseFor.Milliseconds() {
+			f["refused/"+svc] = 1
+		}
+		if p.failedLately(svc) {
 			f["refused/"+svc] = 1
 		}
 	}
@@ -515,6 +530,19 @@ func (p *placer) reconcile(plan place.Plan, s *state.State) {
 	}
 }
 
+func (p *placer) failedLately(svc string) bool {
+	at, ok := p.failed[svc]
+	return ok && p.uptime()-at < refuseFor.Milliseconds()
+}
+
+// startUnits: what starts a service, of its units
+func (p *placer) startUnits(svc string) []string {
+	if us, ok := p.starts[svc]; ok && !computerFlag.MatchString(svc) {
+		return us
+	}
+	return p.units(svc)
+}
+
 func (p *placer) reconcileLeased(svc string, want bool, s *state.State) {
 	l := s.Leases[leaseOf(svc)]
 	mine := l != nil && l.Holder == p.box && l.Expires > s.Time
@@ -525,7 +553,14 @@ func (p *placer) reconcileLeased(svc string, want bool, s *state.State) {
 			// agreed and fresh: someone else's, or nobody's
 			_ = p.stop(svc, "its lease is not this box's", false)
 		}
-		if want && p.fits(svc, s) {
+		if want && p.fits(svc, s) && !p.failedLately(svc) {
+			if p.before == nil {
+				p.before = map[string]string{}
+			}
+			p.before[svc] = ""
+			if l != nil {
+				p.before[svc] = l.Holder
+			}
 			p.send(svc, state.LeaseOp{Role: leaseOf(svc), Op: "acquire"})
 		}
 		return
@@ -581,6 +616,15 @@ func (p *placer) reconcileLeased(svc string, want bool, s *state.State) {
 		}
 		p.start(svc)
 	}
+	if at, ok := p.started[svc]; ok && p.up(svc) && now-at < failWithin.Milliseconds() &&
+		p.run(append([]string{"is-failed", "--quiet"}, p.startUnits(svc)...)...) == nil {
+		log.Printf("placed: %s failed to start here under its lease; refusing it, so the plan gives it to a box that can run it", svc)
+		if p.failed == nil {
+			p.failed = map[string]int64{}
+		}
+		p.failed[svc] = now
+		delete(p.started, svc)
+	}
 	if p.up(svc) {
 		// the newer of what the flag has and what is now known
 		if h := p.holding(svc); h.Until >= until {
@@ -601,6 +645,13 @@ func (p *placer) reconcileLeased(svc string, want bool, s *state.State) {
 	}
 	if first {
 		p.start(svc)
+		if b, asked := p.before[svc]; asked && b != p.box {
+			if p.started == nil {
+				p.started = map[string]int64{}
+			}
+			p.started[svc] = now
+		}
+		delete(p.before, svc)
 	}
 }
 

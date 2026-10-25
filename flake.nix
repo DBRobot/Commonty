@@ -1962,6 +1962,10 @@
           # and release 360's switch: both boxes at once with the witness
           # off; the writers run again on their leases within a lease's time
           control-together = import ./nix/tests/control-upgrade.nix (args // { scenario = "together"; });
+          # and node1's TPM failing to sign, as on 2026-10-24: 20 s moves
+          # nothing; longer, the writers go to node2 only once node1 is gone,
+          # and come back to node1, which has their data, once it signs again
+          control-signfail = import ./nix/tests/control-upgrade.nix (args // { scenario = "signfail"; });
           # the app carried the site's signed-in pages, their scripts, the
           # stylesheet and the fonts at the site's paths (app/carried
           # lists them, scripts/sync-app-web copies them); two copies, kept
