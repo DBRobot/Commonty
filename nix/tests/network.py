@@ -333,11 +333,19 @@ def standin_asked(text):
     ).strip()
 
 
+# A call headscale read just before it stopped shows nothing waiting; it
+# runs out unseen and the next pass's call is the one caught. The clock
+# starts at the last look that did not see the caught call: it began after
+# that, so it is still waiting while under its 10 s from there.
+began = time.monotonic()
 box.succeed("systemctl kill -s SIGSTOP headscale.service")
-paused = time.monotonic()
-end = paused + 30
-while not gate_waiting_on_headscale():
-    assert time.monotonic() < end, "the gate never called headscale"
+end = began + 30
+while True:
+    look = time.monotonic()
+    if gate_waiting_on_headscale():
+        break
+    assert look < end, "the gate never called headscale"
+    began = look
     time.sleep(0.2)  # sleep-ok: fast polls, under the gate's 10 s call
 box.succeed(
     "jq 'del(.members.ivy) | .height = 6' /run/dd-test/identity.json > /run/dd-test/i && mv /run/dd-test/i /run/dd-test/identity.json"
@@ -349,9 +357,9 @@ while standin_asked("GET /identity?since=6 ") == "0":
     time.sleep(0.2)  # sleep-ok: fast polls, under the gate's 10 s call
 box.succeed("systemctl kill -s SIGCONT headscale.service")
 # under the gate's 10 s on a headscale call, or the pass never judged
-held = time.monotonic() - paused
-print(f"headscale paused {held:.1f} s")
-assert held < 9, f"headscale paused {held:.1f} s: the gate's call ran out"
+held = time.monotonic() - began
+print(f"the gate's call held {held:.1f} s")
+assert held < 9, f"the gate's call held {held:.1f} s: it ran out"
 wait_seen("NOT reaping this pass: the state changed while it was judged", timeout=30)
 wait_seen("NOT reaping, the brake is on: 1 of the 3", times=3, timeout=60)
 assert not seen("removed tablet"), "removed tablet"
