@@ -22,9 +22,14 @@ package main
 // they are: by then they are what keeps every TPM user here failing.
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/asn1"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -36,6 +41,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"commonty/control/state"
 
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
@@ -408,4 +415,128 @@ func (b *tpmBackend) flushStale() (int, error) {
 		}
 	}
 	return n, errors.Join(errs...)
+}
+
+// release flushes the key and closes the connection: what a TPM spoken to
+// without the kernel's resource manager (a test's swtpm) would keep
+func (b *tpmBackend) release() {
+	if b.t != nil {
+		_, _ = tpm2.FlushContext{FlushHandle: b.key.Handle}.Execute(b.t)
+	}
+	b.reset()
+}
+
+// checkMessage is what -check-sign signs: no other message starts so
+func checkMessage(box string) []byte { return []byte("commonty sign check v1\x00" + box) }
+
+// enrolledKey: the key the fleet knows for this box (SPKI, base64), from
+// the release's config, else the key it joins with
+func enrolledKey(configPath, box, joinKey string) (string, error) {
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		return "", err
+	}
+	var cfg struct {
+		Boxes map[string]struct {
+			Key string `json:"key"`
+		} `json:"boxes"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return "", fmt.Errorf("%s: %w", configPath, err)
+	}
+	if b, ok := cfg.Boxes[box]; ok && b.Key != "" {
+		return b.Key, nil
+	}
+	if joinKey == "" {
+		return "", fmt.Errorf("%s is not in %s, and no -join-key names its key", box, configPath)
+	}
+	k, err := os.ReadFile(joinKey)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(k)), nil
+}
+
+// checkSign signs checkMessage once on dev, under the box-wide lock held
+// for the whole check, and checks it under spki: "<alg> sha256:<hex of
+// the SPKI>" when it checks. Nothing is left loaded in the TPM
+func checkSign(dev tpmDevice, lock, box, spki string) (string, error) {
+	der, err := base64.StdEncoding.DecodeString(spki)
+	if err != nil {
+		return "", fmt.Errorf("the enrolled key: %w", err)
+	}
+	k, err := x509.ParsePKIXPublicKey(der)
+	if err != nil {
+		return "", fmt.Errorf("the enrolled key: %w", err)
+	}
+	pub, ok := k.(*ecdsa.PublicKey)
+	if !ok || pub.Curve != elliptic.P256() {
+		return "", errors.New("the enrolled key is not P-256")
+	}
+	fp := sha256.Sum256(der)
+	if lock != "" {
+		f, err := openLock(lock)
+		if err != nil {
+			return "", err
+		}
+		defer f.Close()
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+			if err == nil {
+				break
+			}
+			if !errors.Is(err, syscall.EWOULDBLOCK) {
+				return "", fmt.Errorf("%s: %w", lock, err)
+			}
+			if time.Now().After(deadline) {
+				return "", fmt.Errorf("%s: held by another for 30 s", lock)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		defer func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
+	}
+	if r, ok := dev.(interface{ release() }); ok {
+		defer r.release()
+	} else {
+		defer dev.reset()
+	}
+	msg := checkMessage(box)
+	digest := sha256.Sum256(msg)
+	sig, err := dev.sign(digest[:])
+	if err != nil {
+		return "", errSigning{err}
+	}
+	if !state.P256(spki, msg, base64.RawURLEncoding.EncodeToString(sig)) {
+		why := "the signature does not check under the enrolled key sha256:" + hex.EncodeToString(fp[:])
+		if b, ok := dev.(*tpmBackend); ok {
+			if mine, err := b.publicKey(); err == nil && !mine.Equal(pub) {
+				why += "; the key in " + filepath.Join(b.keys, "sig.pub") + " is not the enrolled one"
+			}
+		}
+		return "", errors.New(why)
+	}
+	return "ecdsa-p256-sha256 sha256:" + hex.EncodeToString(fp[:]), nil
+}
+
+// publicKey: the key sig.pub holds
+func (b *tpmBackend) publicKey() (*ecdsa.PublicKey, error) {
+	raw, err := os.ReadFile(filepath.Join(b.keys, "sig.pub"))
+	if err != nil {
+		return nil, err
+	}
+	p, err := tpm2.Unmarshal[tpm2.TPM2BPublic](raw)
+	if err != nil {
+		return nil, err
+	}
+	pt, err := p.Contents()
+	if err != nil {
+		return nil, err
+	}
+	ecc, err := pt.Unique.ECC()
+	if err != nil {
+		return nil, err
+	}
+	return &ecdsa.PublicKey{Curve: elliptic.P256(),
+		X: new(big.Int).SetBytes(ecc.X.Buffer), Y: new(big.Int).SetBytes(ecc.Y.Buffer)}, nil
 }

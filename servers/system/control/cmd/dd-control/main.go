@@ -555,6 +555,7 @@ func main() {
 	testWedge := flag.String("test-wedge", "", "tests only: while this file exists, delivering a decision hangs, as a wedged consensus does")
 	testDeaf := flag.String("test-deaf", "", "tests only: while this file exists, consensus frames from the relay are dropped")
 	testSlow := flag.String("test-slow-proposals", "", "tests only: while this file exists, a proposal this validator sends goes out 2.5 s late")
+	checkSignFlag := flag.Bool("check-sign", false, "sign a test message with the box's TPM-held key (-tpm-keys), check it under the key the fleet has for -box (-config, else -join-key), print \"ok <alg> <key's fingerprint>\" and exit; touches no state, relay or lease")
 	testSignFail := flag.String("test-sign-fail", "", "tests only: while this file exists, every signature this box makes fails as a TPM out of room for contexts does")
 	flag.Parse()
 	log.SetFlags(0)
@@ -566,6 +567,23 @@ func main() {
 		}
 		fmt.Println(base64.StdEncoding.EncodeToString(k.Public().(ed25519.PublicKey)))
 		return
+	}
+
+	if *checkSignFlag {
+		spki, err := enrolledKey(*configPath, *box, *joinKey)
+		if err == nil {
+			var dev tpmDevice = newTPMBackend(*tpmKeys)
+			if *softKey != "" {
+				dev = softDevice(*softKey)
+			}
+			var out string
+			if out, err = checkSign(dev, tpmLock, *box, spki); err == nil {
+				fmt.Println("ok " + out)
+				return
+			}
+		}
+		fmt.Fprintln(os.Stderr, "check-sign:", err)
+		os.Exit(1)
 	}
 
 	if *computerJoin != "" {

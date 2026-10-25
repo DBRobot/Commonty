@@ -2,6 +2,8 @@ package main
 
 import (
 	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
@@ -318,6 +320,28 @@ func TestSignWithSoftwareTPM(t *testing.T) {
 			t.Fatalf("signature %d does not check under the enrolled key", i)
 		}
 	}
+	// -check-sign: checks under the enrolled key and leaves nothing loaded
+	b.release()
+	if _, err := checkSign(b, "", "node1", base64.StdEncoding.EncodeToString(der)); err != nil {
+		t.Fatal(err)
+	}
+	t2, err := b.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, first := range []tpm2.TPMHT{tpm2.TPMHTTransient, tpm2.TPMHTHMACSession, tpm2.TPMHTPolicySession} {
+		rsp, err := tpm2.GetCapability{Capability: tpm2.TPMCapHandles, Property: uint32(first) << 24, PropertyCount: 64}.Execute(t2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hs, _ := rsp.CapabilityData.Data.Handles()
+		for _, h := range hs.Handle {
+			if tpm2.TPMHT(h>>24) == first {
+				t.Fatalf("-check-sign left %#x in the TPM", uint32(h))
+			}
+		}
+	}
+	_ = t2.Close()
 	// a session tpm2-tools saved and nobody flushed, as a killed dd-control left one
 	if tools, err := exec.LookPath("tpm2_startauthsession"); err == nil {
 		b.reset() // swtpm serves one connection at a time
@@ -334,5 +358,90 @@ func TestSignWithSoftwareTPM(t *testing.T) {
 		if _, err := s.Sign([]byte("after the flush")); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func softKeyFile(t *testing.T) (string, string) {
+	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, _ := x509.MarshalPKCS8PrivateKey(k)
+	path := filepath.Join(t.TempDir(), "box.key")
+	if err := os.WriteFile(path, der, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	spki, _ := x509.MarshalPKIXPublicKey(&k.PublicKey)
+	return path, base64.StdEncoding.EncodeToString(spki)
+}
+
+func TestCheckSign(t *testing.T) {
+	key, spki := softKeyFile(t)
+	cfg := filepath.Join(t.TempDir(), "config.json")
+	_ = os.WriteFile(cfg, []byte(`{"boxes":{"node1":{"key":"`+spki+`"}}}`), 0o644)
+	got, err := enrolledKey(cfg, "node1", "")
+	if err != nil || got != spki {
+		t.Fatalf("enrolledKey: %q, %v", got, err)
+	}
+	if _, err := enrolledKey(cfg, "node9", ""); err == nil {
+		t.Fatal("a box the config does not list, with no -join-key, has a key")
+	}
+	lock := filepath.Join(t.TempDir(), "dd-tpm", "lock")
+	out, err := checkSign(softDevice(key), lock, "node1", spki)
+	der, _ := base64.StdEncoding.DecodeString(spki)
+	fp := sha256.Sum256(der)
+	if err != nil || out != fmt.Sprintf("ecdsa-p256-sha256 sha256:%x", fp) {
+		t.Fatalf("checkSign: %q, %v", out, err)
+	}
+	// made as the signer makes it
+	for p, want := range map[string]os.FileMode{filepath.Dir(lock): 0o700, lock: 0o600} {
+		if fi, _ := os.Stat(p); fi.Mode().Perm() != want {
+			t.Fatalf("%s: %v, want %v", p, fi.Mode().Perm(), want)
+		}
+	}
+	// another box's key does not pass
+	_, other := softKeyFile(t)
+	if _, err := checkSign(softDevice(key), lock, "node1", other); err == nil || !strings.Contains(err.Error(), "does not check") {
+		t.Fatalf("checked under a key not the box's: %v", err)
+	}
+	// a TPM that fails says so
+	f := &fakeTPM{fails: []error{tpm2.TPMRCPolicyFail}}
+	if _, err := checkSign(f, lock, "node1", spki); !errors.Is(err, tpm2.TPMRCPolicyFail) {
+		t.Fatalf("a failed signature: %v", err)
+	}
+	if f.resets != 1 {
+		t.Fatalf("the connection was not let go: %d resets", f.resets)
+	}
+}
+
+func TestCheckSignWaitsForTheLock(t *testing.T) {
+	key, spki := softKeyFile(t)
+	lock := filepath.Join(t.TempDir(), "dd-tpm", "lock")
+	held, err := openLock(lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = syscall.Flock(int(held.Fd()), syscall.LOCK_EX)
+	done := make(chan error, 1)
+	go func() { _, err := checkSign(softDevice(key), lock, "node1", spki); done <- err }()
+	select {
+	case <-done:
+		t.Fatal("signed while another held the TPM's lock")
+	case <-time.After(200 * time.Millisecond):
+	}
+	_ = syscall.Flock(int(held.Fd()), syscall.LOCK_UN)
+	held.Close()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("not signed once the lock was let go")
+	}
+	// one others may open is refused, not signed without
+	_ = os.Chmod(lock, 0o644)
+	if _, err := checkSign(softDevice(key), lock, "node1", spki); err == nil {
+		t.Fatal("used a lock others may open")
 	}
 }
