@@ -148,6 +148,7 @@ in
         pkgs.jq
         pkgs.curl
         pkgs.tpm2-tools
+        pkgs.util-linux # flock: one user of the TPM at a time
         pkgs.coreutils
       ];
       environment = {
@@ -187,6 +188,7 @@ in
         pkgs.jq
         pkgs.curl
         pkgs.tpm2-tools
+        pkgs.util-linux # flock: one user of the TPM at a time
         pkgs.coreutils
       ];
       environment = {

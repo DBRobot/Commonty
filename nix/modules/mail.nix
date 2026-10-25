@@ -72,6 +72,7 @@ in
       description = "Sign one mail with the TPM and hand it to the mail Worker";
       path = [
         pkgs.tpm2-tools
+        pkgs.util-linux # flock: one user of the TPM at a time
         pkgs.curl
         pkgs.jq
         pkgs.coreutils

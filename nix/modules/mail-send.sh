@@ -35,19 +35,30 @@ nonce=$(head -c 18 /dev/urandom | base64 -w0 | tr '+/' '-_')
 digest=$(sha256sum "$w/msg" | cut -c1-64)
 printf 'commonty mail send v1\0%s\0%s\0%s\0%s\0%s' "$BOX" "$at" "$nonce" "$to" "$digest" >"$w/sign"
 
-# the same key and policy as the unlock (box/disk-unlock-boot.sh)
-if ! tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx" ||
-  ! tpm2_load -Q -C "$w/srk.ctx" -u "$KEYS/sig.pub" -r "$KEYS/sig.priv" -c "$w/sig.ctx" ||
-  ! tpm2_startauthsession -Q --policy-session -S "$w/s.ctx" ||
-  ! tpm2_policypcr -Q -S "$w/s.ctx" -l sha256:7 ||
-  ! tpm2_sign -Q -c "$w/sig.ctx" -g sha256 -s ecdsa -f plain -p "session:$w/s.ctx" -o "$w/sig.bin" "$w/sign"; then
+# the same key and policy as the unlock (box/disk-unlock-boot.sh); one
+# user of the TPM at a time on the box (cmd/dd-control/tpmsign.go)
+lock=/run/dd-tpm/lock
+# root's alone (box/control.nix); without it, a lock of its own
+if [ ! -r "$lock" ]; then
+  lock="$w/lock"
+  : >"$lock"
+fi
+{
+  flock -w 10 9 || true
+  tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx" &&
+    tpm2_load -Q -C "$w/srk.ctx" -u "$KEYS/sig.pub" -r "$KEYS/sig.priv" -c "$w/sig.ctx" &&
+    tpm2_startauthsession -Q --policy-session -S "$w/s.ctx" &&
+    tpm2_policypcr -Q -S "$w/s.ctx" -l sha256:7 &&
+    tpm2_sign -Q -c "$w/sig.ctx" -g sha256 -s ecdsa -f plain -p "session:$w/s.ctx" -o "$w/sig.bin" "$w/sign"
+  r=$?
   tpm2_flushcontext "$w/s.ctx" >/dev/null 2>&1 || true
+  tpm2_flushcontext -t >/dev/null 2>&1 || true
+} 9<"$lock"
+if [ "$r" != 0 ]; then
   echo "dd-mail: the TPM would not sign" >&2
   echo "error: the TPM would not sign"
   exit 0
 fi
-tpm2_flushcontext "$w/s.ctx" >/dev/null 2>&1 || true
-tpm2_flushcontext -t >/dev/null 2>&1 || true
 sig=$(base64 -w0 <"$w/sig.bin" | tr '+/' '-_' | tr -d '=')
 
 code=$(curl -sS --max-time 30 -o "$w/answer" -w '%{http_code}' -X POST "$URL/send" \

@@ -81,6 +81,7 @@ in
             pkgs.curl
             pkgs.openssl
             pkgs.tpm2-tools
+            pkgs.util-linux # flock: one user of the TPM at a time
           ];
           environment.TPM2TOOLS_TCTI = "device:/dev/tpmrm0";
           script = (import ../../lib/script.nix { inherit lib; }) ./acme-ask.sh {

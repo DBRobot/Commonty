@@ -628,7 +628,10 @@ func (p *placer) send(svc string, op state.LeaseOp) {
 	at := p.uptime()
 	seq, err := p.ask(op)
 	if err != nil {
-		log.Printf("placed: lease %s %s: %v", op.Op, op.Role, err)
+		// the signer says once when the TPM fails, and when it is back
+		if !errors.As(err, new(errSigning)) {
+			log.Printf("placed: lease %s %s: %v", op.Op, op.Role, err)
+		}
 		return
 	}
 	if p.sent[svc] == nil {
