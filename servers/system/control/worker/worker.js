@@ -223,6 +223,8 @@ const RELAY_NAME = 'relay-1023';
 
 // how long the witness may take to start before the relay gives up on it
 const WITNESS_BOOT_MS = 20000;
+// how long after a failed start the witness is tried again
+const WITNESS_RETRY_MS = 60000;
 
 // what the witness registers, and the relay calls
 const HOOKS = ['controlState', 'controlIdentity', 'controlPlaced', 'controlReceive', 'controlSend', 'controlPersist', 'controlReady'];
@@ -268,10 +270,21 @@ export class Relay {
   // (2026-10-22, when one that never started stopped every box's dial)
   boot() {
     if (!this.env.WITNESS_KEY) return null;
-    this.booting ??= this.start().catch((e) => {
-      console.log(`witness: ${e.message}; relaying without it`);
-      this.drop();
-    });
+    // one that failed is tried again a minute on: the boxes keep this object
+    // open, so it was otherwise never tried again (off from 2026-10-23 until
+    // a redeploy, with nothing saying why)
+    if (this.booting && this.failedAt && Date.now() - this.failedAt > WITNESS_RETRY_MS) {
+      this.booting = null;
+    }
+    this.booting ??= this.start().then(
+      () => { this.failedAt = 0; this.witnessError = null; },
+      (e) => {
+        console.log(`witness: ${e.message}; relaying without it`);
+        this.failedAt = Date.now();
+        this.witnessError = e.message;
+        this.drop();
+      },
+    );
     return this.booting;
   }
 
@@ -397,7 +410,7 @@ export class Relay {
     if (url.pathname === '/health') {
       let height = null;
       try { height = this.witnessUp() ? JSON.parse(globalThis.controlState()).height : null; } catch { /* starting */ }
-      return Response.json({ connected: this.socks.size, witness: this.witnessUp(), height });
+      return Response.json({ connected: this.socks.size, witness: this.witnessUp(), height, witnessError: this.witnessUp() ? null : (this.witnessError ?? null) });
     }
     // what only the witness knows is never answered without it, nor from
     // whatever a witness that failed left behind
