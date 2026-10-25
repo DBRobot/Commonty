@@ -147,13 +147,21 @@ bad = json.dumps(
 )
 
 # ---- a witness that panics on boot: its key is no validator of the config
-p = relay(seed(ed25519.Ed25519PrivateKey.generate()))
+stranger = ed25519.Ed25519PrivateKey.generate()
+p = relay(seed(stranger))
 c, h, t = health()
 ok(
     c == 200 and t < 5,
     f"/health answers at once though the witness cannot start ({c} {h}, {t:.1f} s)",
 )
-until("the witness given up", lambda: health()[1]["witness"] is False, 10)
+until("the witness given up", lambda: health()[1]["witnessError"], 10)
+why = health()[1]["witnessError"]
+ok(
+    "is not a validator in the config" in why
+    and base64.b64encode(raw(stranger)).decode() in why
+    and seed(stranger) not in why,
+    f"/health says why: the key's public half, never the key ({why!r})",
+)
 line, t = handshake(1)
 ok(
     " 101 " in line and t < 5,

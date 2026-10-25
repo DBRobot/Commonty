@@ -41,24 +41,39 @@ func (jsTransport) Send(to uint64, kind byte, p []byte) {
 }
 
 func main() {
+	// why it stopped before it was ready, for the relay's health
+	// (worker.js controlExit): the object's own log cannot be read
+	defer func() {
+		if r := recover(); r != nil {
+			if f := js.Global().Get("controlExit"); f.Type() == js.TypeFunction {
+				f.Invoke(fmt.Sprint(r))
+			}
+			panic(r)
+		}
+	}()
 	init := js.Global().Get("controlInit")
 	cfg := &state.Config{}
 	if err := json.Unmarshal([]byte(init.Get("config").String()), cfg); err != nil {
-		panic(err)
+		panic(fmt.Sprintf("the config: %v", err))
 	}
 	seed, err := base64.StdEncoding.DecodeString(init.Get("key").String())
-	if err != nil || len(seed) != ed25519.SeedSize {
-		panic("the witness key is not an ed25519 seed")
+	if err != nil {
+		panic("the witness key is not base64")
+	}
+	if len(seed) != ed25519.SeedSize {
+		panic(fmt.Sprintf("the witness key is %d bytes, not a 32-byte ed25519 seed", len(seed)))
 	}
 	key := ed25519.NewKeyFromSeed(seed)
+	pub := base64.StdEncoding.EncodeToString(key.Public().(ed25519.PublicKey))
 	var id uint64
 	for _, v := range cfg.Validators {
-		if v.Key == base64.StdEncoding.EncodeToString(key.Public().(ed25519.PublicKey)) {
+		if v.Key == pub {
 			id = v.ID
 		}
 	}
+	// its public half, to set against fleet/control.json
 	if id == 0 {
-		panic("the witness key is not a validator in the config")
+		panic(fmt.Sprintf("the witness key (public %s) is not a validator in the config", pub))
 	}
 	var saved *validator.Saved
 	if s := init.Get("saved"); s.Type() == js.TypeString && s.String() != "" {
@@ -84,7 +99,7 @@ func main() {
 		v, err = validator.New(o)
 	}
 	if err != nil {
-		panic(err)
+		panic(fmt.Sprintf("the validator: %v", err))
 	}
 	js.Global().Set("controlReceive", js.FuncOf(func(_ js.Value, a []js.Value) any {
 		b := make([]byte, a[2].Get("length").Int())
@@ -141,7 +156,7 @@ func main() {
 		}))
 	}
 	if err := v.Start(); err != nil {
-		panic(err)
+		panic(fmt.Sprintf("starting: %v", err))
 	}
 	js.Global().Call("controlReady", int(id))
 	select {}

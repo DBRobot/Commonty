@@ -1,9 +1,9 @@
 # The relay without a working witness (servers/system/control/worker): the
 # bundle this release builds, under wrangler. A witness that panics on boot,
-# with or without a saved state, leaves /health and /relay answering and
-# /leases and /identity refused; a fresh object's witness starts, and so
-# does one whose saved state does not hold together. The DNS and mail
-# Workers bind the same object.
+# with or without a saved state, leaves /health and /relay answering, its
+# health saying why, and /leases and /identity refused; a fresh object's
+# witness starts, and so does one whose saved state does not hold
+# together. The DNS and mail Workers bind the same object.
 { pkgs, self, ... }:
 let
   sys = pkgs.stdenv.hostPlatform.system;
