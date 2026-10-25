@@ -56,7 +56,15 @@ let
       /^MemoryPeak=/ { peak = substr($0, 12) }
       /^MemoryCurrent=/ { cur = substr($0, 15) }
       END { flush(); for (s in mem) printf "dd_service_memory_bytes{service=\"%s\"} %d\n", s, mem[s] }
-    ' | sort > "$out.new" && mv "$out.new" "$out"
+    ' > "$out.now"
+    # a service no longer running here keeps what it last held here: a box
+    # is sized by its own measure, and a stopped one would otherwise be
+    # charged the biggest box's (node2's CI runner, stopped by a drain,
+    # 2026-10-25, never came back on node1's 13.5G)
+    if [ -e "$out" ]; then
+      awk 'NR == FNR { split($0, f, " "); now[f[1]] = 1; next } !(($1) in now)' "$out.now" "$out" >> "$out.now"
+    fi
+    sort "$out.now" > "$out.new" && rm -f "$out.now" && mv "$out.new" "$out"
   '';
 in
 {
