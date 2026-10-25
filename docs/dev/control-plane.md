@@ -405,6 +405,10 @@ state's JSON holds, follows these rules:
   for good, and 65535 contexts later node1's TPM signed nothing
   (2026-10-24 23:52). Every user of the TPM on a box (dd-control and the
   scripts still on tpm2-tools) takes `/run/dd-tpm/lock`, root's alone.
+- `dd-control -check-sign -box <name>` tries a box's signing on its own:
+  one signature through the same path, checked under the key the fleet
+  has for the box, under the lock, leaving nothing in the TPM and touching
+  no state, relay or lease. It prints `ok <alg> sha256:<SPKI hash>`.
 - Voting weight is per house: a house runs one validator however many boxes
   it has.
 - Witnesses are validators listed in the membership with no boxes behind
