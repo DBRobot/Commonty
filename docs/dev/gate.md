@@ -849,7 +849,14 @@ With `VERIFY_HEADSCALE_API` set (the gateway, `dd.verify.network`):
   sees another state the ack is void. It is spent on that pass and runs
   out after ten minutes. A state that gives nobody access is never reaped
   from, acknowledged or not (2026-10-22: a gate started before dd-control
-  answered took the owner's laptop off for two hours).
+  answered took the owner's laptop off for two hours). A pass judges each
+  device by the state of that moment, and the brake weighs who has access
+  as the pass began; if the state moves in between (its height or who has
+  access), the pass takes nothing off (`NOT reaping this pass: the state
+  changed while it was judged`) and the next pass weighs the new state
+  whole. The state moving while devices come off stops the pass there
+  (CI run 882: a drop of half the members landed while a pass waited on
+  headscale, and that pass took the dropped member's tablet).
 
   Nothing new is given while who is who is not known: every place the
   gate makes a session, an OIDC code or token, a network key, a friend

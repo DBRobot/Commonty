@@ -732,7 +732,7 @@ impl App {
     /// What may hold the network reaper back (network.rs Guard): who it
     /// never takes off, how many it takes off at most, and whether it may
     /// take anyone off now
-    fn reap_guard(&self) -> network::Guard {
+    fn reap_guard<'a>(&self, now: &'a (dyn Fn() -> network::Mark + Sync)) -> network::Guard<'a> {
         let mut keep: std::collections::BTreeSet<String> = network::people_named();
         keep.extend(self.admin.iter().cloned());
         keep.extend(self.owner.iter().cloned());
@@ -750,18 +750,22 @@ impl App {
                 )),
             }
         };
+        let (height, members) = now();
         network::Guard {
             keep,
             hold,
-            members: self.members_now(),
+            members,
             brake: Some(self.reap_brake.clone()),
+            height,
+            now: Some(now),
         }
     }
 
-    /// Who has access by the state this box goes by: the agreed state's
-    /// members with access, or the replay's members. What the reaper's
-    /// brake compares with the last state it acted on
-    fn members_now(&self) -> std::collections::BTreeSet<String> {
+    /// Who has access by the state this box goes by, and that state's
+    /// height: the agreed state's members with access, or the replay's
+    /// members (height 0). What the reaper's brake compares with the last
+    /// state it acted on, read from one state
+    fn reap_mark(&self) -> network::Mark {
         if self.directory.ident_from == ident::From::Agreed {
             return self
                 .directory
@@ -769,21 +773,25 @@ impl App {
                 .as_ref()
                 .and_then(|a| a.state())
                 .map(|s| {
-                    s.members
+                    let who = s
+                        .members
                         .iter()
                         .filter(|(_, m)| m.has_access())
                         .map(|(n, _)| n.clone())
-                        .collect()
+                        .collect();
+                    (s.height, who)
                 })
                 .unwrap_or_default();
         }
-        self.directory
+        let who = self
+            .directory
             .list()
             .unwrap_or_default()
             .into_iter()
             .map(|l| l.name)
             .filter(|n| n != pages::DEMO_USER && self.replay_member(n))
-            .collect()
+            .collect();
+        (0, who)
     }
 
     /// A new session, while who is who is not known: none (503). One held
@@ -806,11 +814,12 @@ impl App {
         if self.members.as_ref().is_none_or(|m| m.members.is_empty()) {
             return;
         }
+        let now = || self.reap_mark();
         if let Err(e) = door
             .reap(
                 |u| self.network_answer(u),
                 self.control.as_deref(),
-                &self.reap_guard(),
+                &self.reap_guard(&now),
             )
             .await
         {

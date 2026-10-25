@@ -47,8 +47,12 @@ impl Off {
     }
 }
 
+/// The state a reaper pass goes by, as the brake sees it: the agreed
+/// state's height (0 off agreed) and who has access in it
+pub type Mark = (u64, std::collections::BTreeSet<String>);
+
 /// What holds the reaper back (App::reap_guard)
-pub struct Guard {
+pub struct Guard<'a> {
     /// whose devices never come off: the fleet's admin, the people the
     /// release names, the boxes' owners. One of them reading as no member is
     /// a fault to look into, not a reason to cut them off
@@ -60,9 +64,15 @@ pub struct Guard {
     pub members: std::collections::BTreeSet<String>,
     /// the sanity brake on the state itself; None: none (tests)
     pub brake: Option<Arc<Brake>>,
+    /// the height of the state `members` is from
+    pub height: u64,
+    /// the state as it is now. A pass judges each device as it goes, by the
+    /// state of that moment; one that moved since `members` was read would
+    /// be judged by one state and braked by another, so it takes nothing off
+    pub now: Option<&'a (dyn Fn() -> Mark + Sync)>,
 }
 
-impl Guard {
+impl Guard<'_> {
     #[cfg(test)]
     pub fn open() -> Self {
         Self {
@@ -70,7 +80,17 @@ impl Guard {
             hold: None,
             members: Default::default(),
             brake: None,
+            height: 0,
+            now: None,
         }
+    }
+
+    /// whether the state moved since `members` was read
+    fn moved(&self) -> bool {
+        self.now.is_some_and(|now| {
+            let (h, m) = now();
+            h != self.height || m != self.members
+        })
     }
 }
 
@@ -633,7 +653,7 @@ impl Door {
         &self,
         member: impl Fn(&str) -> crate::ident::Answer,
         control: Option<&str>,
-        guard: &Guard,
+        guard: &Guard<'_>,
     ) -> Result<usize> {
         use crate::ident::Answer;
         let now_ms = SystemTime::now()
@@ -741,6 +761,18 @@ impl Door {
             });
         }
         let mut gone = 0;
+        // judged while the state moved: some devices by the old one, some
+        // by the new, and the brake would weigh the old. The next pass
+        // judges the new state whole, the brake first
+        let moved = guard.moved();
+        if moved && !off.is_empty() {
+            eprintln!(
+                "network: NOT reaping this pass: the state changed while it was judged; the next pass judges the new one. {} device(s) would have come off: {}",
+                off.len(),
+                Off::names(&off)
+            );
+            off.clear();
+        }
         if !off.is_empty()
             && let Some(why) = &guard.hold
         {
@@ -754,6 +786,7 @@ impl Door {
         // a person known to be no member loses every device; the brake
         // holds a state that looks wrong
         if guard.hold.is_none()
+            && !moved
             && let Some(brake) = &guard.brake
         {
             let people = off
@@ -772,7 +805,14 @@ impl Door {
             }
         }
         off.sort_by(|a, b| (&a.made, a.num).cmp(&(&b.made, b.num)));
-        for o in off {
+        for (i, o) in off.iter().enumerate() {
+            if guard.moved() {
+                eprintln!(
+                    "network: the state changed while devices came off; stopped, the next pass judges the rest: {}",
+                    Off::names(&off[i..])
+                );
+                break;
+            }
             self.call(
                 reqwest::Method::DELETE,
                 &format!("/api/v1/node/{}", o.id),
@@ -1568,7 +1608,7 @@ mod tests {
         assert_eq!(gone(), vec!["3".to_string(), "4".to_string()]);
     }
 
-    fn brake_guard(brake: &Arc<Brake>, members: &[&str]) -> Guard {
+    fn brake_guard(brake: &Arc<Brake>, members: &[&str]) -> Guard<'static> {
         Guard {
             members: members.iter().map(|m| m.to_string()).collect(),
             brake: Some(brake.clone()),
@@ -1682,7 +1722,7 @@ mod tests {
         let d = facts("drop");
         let acted = d.join("acted.json");
         let brake = Arc::new(Brake::new(Some(acted.clone()), Some(d.join("f.prom")), 2));
-        let keep = |g: Guard| Guard {
+        let keep = |g: Guard<'static>| Guard {
             keep: ["david".to_string()].into(),
             ..g
         };
@@ -1753,6 +1793,96 @@ mod tests {
         );
         assert!(brake.on().is_none());
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// CI run 882: the agreed state dropped ivy (half of who has access)
+    /// while a pass was waiting on headscale. The pass had read who has
+    /// access before (ivy in), judged ivy's tablet by the state after (ivy
+    /// out), and the brake, weighing the first, let the tablet go. A pass
+    /// the state moves under takes nothing off; the next one is braked
+    #[tokio::test]
+    async fn a_pass_the_state_moves_under_takes_nothing_off() {
+        use crate::ident::Answer;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let (door, deleted) = headscale_with(serde_json::json!({ "nodes": [
+            person_node("1", "laptop", "sarah", "2026-01-01T00:00:00Z"),
+            person_node("2", "tablet", "ivy", "2026-01-02T00:00:00Z"),
+        ]}))
+        .await;
+        let brake = Arc::new(Brake::new(None, None, 2));
+        let state = std::sync::Mutex::new((5u64, set(&["sarah", "ivy"])));
+        let now = || state.lock().unwrap().clone();
+        let guard = || {
+            let (height, members) = now();
+            Guard {
+                members,
+                height,
+                brake: Some(brake.clone()),
+                now: Some(&now),
+                ..Guard::open()
+            }
+        };
+        let answers = |u: &str| Answer::of(state.lock().unwrap().1.contains(u));
+        // a good state, acted on
+        assert_eq!(door.reap(answers, None, &guard()).await.unwrap(), 0);
+
+        // the state drops ivy after the pass read it, before it judged her
+        let g = guard();
+        let dropped = AtomicBool::new(false);
+        let landing = |u: &str| {
+            if !dropped.swap(true, Ordering::SeqCst) {
+                *state.lock().unwrap() = (6, set(&["sarah"]));
+            }
+            answers(u)
+        };
+        assert_eq!(door.reap(landing, None, &g).await.unwrap(), 0);
+        assert!(deleted.lock().unwrap().is_empty(), "{:?}", deleted);
+        assert!(brake.on().is_none(), "nothing weighed: {:?}", brake.on());
+
+        // the next pass weighs the new state whole: the brake
+        for _ in 0..3 {
+            assert_eq!(door.reap(answers, None, &guard()).await.unwrap(), 0);
+            assert!(deleted.lock().unwrap().is_empty());
+            assert!(
+                brake.on().unwrap().contains("1 of the 2"),
+                "{:?}",
+                brake.on()
+            );
+        }
+    }
+
+    /// The state moving while devices come off stops the pass there: the
+    /// rest are judged again, by the new state, next pass
+    #[tokio::test]
+    async fn the_state_moving_mid_removal_stops_the_pass() {
+        use crate::ident::Answer;
+        let (door, deleted) = headscale_with(serde_json::json!({ "nodes": [
+            person_node("1", "laptop", "sarah", "2026-01-01T00:00:00Z"),
+            person_node("2", "phone", "kim", "2026-01-02T00:00:00Z"),
+            person_node("3", "tablet", "kim", "2026-01-03T00:00:00Z"),
+        ]}))
+        .await;
+        let brake = Arc::new(Brake::new(None, None, 2));
+        let members = set(&["sarah", "ann", "bob", "cy"]);
+        // a new state lands once the first device is off
+        let now = || {
+            let h = if deleted.lock().unwrap().is_empty() {
+                5
+            } else {
+                6
+            };
+            (h, members.clone())
+        };
+        let g = Guard {
+            members: members.clone(),
+            height: 5,
+            brake: Some(brake.clone()),
+            now: Some(&now),
+            ..Guard::open()
+        };
+        let answers = |u: &str| Answer::of(u != "kim");
+        assert_eq!(door.reap(answers, None, &g).await.unwrap(), 1);
+        assert_eq!(*deleted.lock().unwrap(), vec!["2".to_string()]);
     }
 
     /// A box's key: only for a box of the fleet, signed by that box, now,

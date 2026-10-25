@@ -297,10 +297,55 @@ box.succeed("grep -qx 'dd_reap_brake 0' /var/lib/dd-facts/reap-brake.prom")
 # The agreed state suddenly drops ivy (half of who has access): more likely
 # wrong than true. Nothing comes off, pass after pass, and the brake is up
 # where the fleet's alerts read it; restored, it is off, and ivy kept hers.
+# The drop lands while a pass is waiting on headscale (CI run 882: that pass
+# had read who has access before, judged ivy by the state after, and took
+# her tablet): headscale is paused until the gate is in a call to it, the
+# state changes, the gate reads it, and headscale goes on.
+gate_pid = box.succeed("systemctl show -p MainPID --value dd-verify").strip()
+
+
+def gate_waiting_on_headscale():
+    mine = box.succeed("ss -Htnp state established '( dport = :8085 )'")
+    ports = {
+        line.split()[2].rsplit(":", 1)[1]
+        for line in mine.splitlines()
+        if f"pid={gate_pid}," in line
+    }
+    theirs = box.succeed("ss -Htn state established '( sport = :8085 )'")
+    return any(
+        int(line.split()[0]) > 0 and line.split()[3].rsplit(":", 1)[1] in ports
+        for line in theirs.splitlines()
+    )
+
+
+def standin_asked(text):
+    return box.succeed(
+        f"journalctl -u dd-control-standin -o cat | grep -c '{text}' || true"
+    ).strip()
+
+
+box.succeed("systemctl kill -s SIGSTOP headscale.service")
+paused = time.monotonic()
+end = paused + 30
+while not gate_waiting_on_headscale():
+    assert time.monotonic() < end, "the gate never called headscale"
+    time.sleep(0.2)  # sleep-ok: fast polls, under the gate's 10 s call
 box.succeed(
     "jq 'del(.members.ivy) | .height = 6' /run/dd-test/identity.json > /run/dd-test/i && mv /run/dd-test/i /run/dd-test/identity.json"
 )
+# the gate asks for what is newer than 6 once it holds 6
+end = time.monotonic() + 30
+while standin_asked("GET /identity?since=6 ") == "0":
+    assert time.monotonic() < end, "the gate never read height 6"
+    time.sleep(0.2)  # sleep-ok: fast polls, under the gate's 10 s call
+box.succeed("systemctl kill -s SIGCONT headscale.service")
+# under the gate's 10 s on a headscale call, or the pass never judged
+held = time.monotonic() - paused
+print(f"headscale paused {held:.1f} s")
+assert held < 9, f"headscale paused {held:.1f} s: the gate's call ran out"
+wait_seen("NOT reaping this pass: the state changed while it was judged", timeout=30)
 wait_seen("NOT reaping, the brake is on: 1 of the 2", times=3, timeout=60)
+assert not seen("removed tablet"), "removed tablet"
 assert "tablet" in node_names(), node_names()
 box.succeed("grep -qx 'dd_reap_brake 1' /var/lib/dd-facts/reap-brake.prom")
 box.succeed(
