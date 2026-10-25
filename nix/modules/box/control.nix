@@ -51,6 +51,13 @@ in
       '')
     ];
     environment.etc."dd-control/config.json".source = pkg.control-config;
+    # what every user of the TPM here locks around its use (flock): this,
+    # and the scripts that sign with tpm2-tools (cmd/dd-control/tpmsign.go).
+    # Root's alone, as the TPM is: whoever could open it could hold it
+    systemd.tmpfiles.rules = [
+      "d /run/dd-tpm 0700 root root -"
+      "f /run/dd-tpm/lock 0600 root root -"
+    ];
     systemd.services.dd-control = {
       # the voters are in the config; a new list read only at start would sit
       # unread (176 did: no votes until a hand restart)
@@ -68,13 +75,9 @@ in
       unitConfig.ConditionHost = lib.mkIf (config.networking.hostName == "joining") "!joining";
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
-      path = [
-        pkgs.tpm2-tools
-      ]
       # where the network's control server runs: where each box that joined
       # on its own key is on the network, into the agreed state
-      ++ lib.optional config.services.headscale.enable config.services.headscale.package;
-      environment.TPM2TOOLS_TCTI = "device:/dev/tpmrm0";
+      path = lib.optional config.services.headscale.enable config.services.headscale.package;
       serviceConfig = {
         ExecStart = lib.concatStringsSep " " [
           "${pkg.dd-control}/bin/dd-control"
@@ -119,6 +122,8 @@ in
           "/var/lib/dd-control"
           # made by tmpfiles (box/placed.nix); a switch may start this first
           "-/run/dd-placed"
+          # the TPM's lock, made here if tmpfiles has not yet (tpmsign.go)
+          "-/run/dd-tpm"
           # -metrics, where node_exporter reads (observe/metrics.nix)
           "-/var/lib/dd-facts"
         ];

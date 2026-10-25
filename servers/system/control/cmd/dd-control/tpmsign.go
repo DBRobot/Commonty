@@ -1,0 +1,411 @@
+package main
+
+// Signing with the box's TPM-held key, under its signed boot (PCR 7): the
+// key dd-unlock-enrol made on the boot partition (sig.pub, sig.priv).
+//
+// One connection to /dev/tpmrm0 for the life of the process, one signature
+// at a time. The key is loaded once and kept; a policy session is made for
+// each signature and flushed after it. Nothing is ever saved to a file, so
+// a dd-control killed mid-signature leaves nothing behind in the TPM: the
+// kernel flushes what a connection held when it closes.
+//
+// It used to run tpm2-tools, five processes a signature, each saving the
+// policy session to a file for the next. A dd-control stopped between two
+// of them left that session saved in the TPM for good, and once the TPM had
+// saved 65535 contexts since the oldest one it refused to save any more
+// (TPM_RC_CONTEXT_GAP): every signature failed, heartbeats and lease renewals
+// with them, and node1's writers moved to node2 (2026-10-24 23:52).
+//
+// So on an error it starts afresh (a new connection, the key loaded again)
+// and tries again for a while; and when the TPM looks out of room for
+// contexts, it first flushes the sessions saved or loaded in it, whoever's
+// they are: by then they are what keeps every TPM user here failing.
+
+import (
+	"crypto/sha256"
+	"encoding/asn1"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"io/fs"
+	"log"
+	"math/big"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/google/go-tpm/tpm2"
+	"github.com/google/go-tpm/tpm2/transport"
+	"github.com/google/go-tpm/tpm2/transport/linuxtpm"
+)
+
+// tpmLock is the file every user of the TPM on a box takes (flock) around
+// its use: dd-control, and the scripts that sign with tpm2-tools
+// (gate/box-sign.sh, gate/acme-ask.sh, mail-send.sh), all root, as the
+// device is root's alone. In a directory only root may enter, the file
+// root's and 0600: a user who could open it could hold it, and every
+// signature here would wait on them (box/control.nix makes both)
+const tpmLock = "/run/dd-tpm/lock"
+
+// tpmDevice is what the signer needs of a TPM: the real one (tpmBackend)
+// or a test's
+type tpmDevice interface {
+	// sign: an ECDSA signature (DER) over a SHA-256 digest
+	sign(digest []byte) ([]byte, error)
+	// reset drops the connection and what it holds; the next sign opens
+	// a new one and loads the key again
+	reset()
+	// flushStale flushes every session saved or loaded in the TPM: how
+	// many it flushed
+	flushStale() (int, error)
+}
+
+// errSigning: the TPM did not sign. Its burst is logged once, here; the
+// callers need not log it again
+type errSigning struct{ err error }
+
+func (e errSigning) Error() string { return "the TPM did not sign: " + e.err.Error() }
+func (e errSigning) Unwrap() error { return e.err }
+
+type signer struct {
+	mu  sync.Mutex
+	dev tpmDevice
+	// the box-wide lock file; "" for none
+	lock string
+	// how long one signature is tried for: well within a lease (45 s),
+	// which a renewal every 5 s keeps
+	budget time.Duration
+	// the first wait between tries, doubled each time up to maxWait
+	wait, maxWait time.Duration
+	sleep         func(time.Duration)
+	now           func() time.Time
+	logf          func(format string, a ...any)
+	// tests only: an error in place of the TPM's while it says one
+	fault func() error
+	// the burst under way: failures since the last signature, from when
+	failures int
+	since    time.Time
+	flushed  int
+	// the lock file could not be opened: said once
+	noLock bool
+}
+
+func newSigner(dev tpmDevice) *signer {
+	return &signer{
+		dev: dev, lock: tpmLock, budget: 8 * time.Second,
+		wait: 100 * time.Millisecond, maxWait: 2 * time.Second,
+		sleep: time.Sleep, now: time.Now, logf: log.Printf,
+	}
+}
+
+// Sign signs msg, retrying what may pass, and returns the signature as
+// base64url
+func (s *signer) Sign(msg []byte) (string, error) {
+	digest := sha256.Sum256(msg)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	start := s.now()
+	wait := s.wait
+	// a burst older than one signature's tries: one try each, so a round
+	// of renewals is not held up while the TPM stays down. The callers'
+	// own rounds are the retries then
+	budget := s.budget
+	if s.failures > 0 && start.Sub(s.since) > s.budget {
+		budget = 0
+	}
+	for {
+		sig, err := s.once(digest[:])
+		if err == nil {
+			if s.failures > 0 {
+				s.logf("tpm: signing again, after %d failed tries over %s", s.failures, s.now().Sub(s.since).Round(time.Millisecond))
+				s.failures, s.flushed = 0, 0
+			}
+			return base64.RawURLEncoding.EncodeToString(sig), nil
+		}
+		s.dev.reset()
+		gap := contextGap(err)
+		flushed := 0
+		if gap {
+			flushed = s.flush()
+		}
+		if s.failures == 0 {
+			s.since = s.now()
+			why := "retrying"
+			if gap {
+				why = fmt.Sprintf("out of room for contexts: flushed %d stale sessions, retrying", flushed)
+			}
+			s.logf("tpm: a signature failed (%v); %s, and saying nothing more until one succeeds", err, why)
+		} else if gap && flushed > 0 && s.flushed == 0 {
+			s.logf("tpm: out of room for contexts: flushed %d stale sessions", flushed)
+		}
+		s.failures++
+		s.flushed += flushed
+		if permanent(err) || s.now().Sub(start)+wait > budget {
+			return "", errSigning{err}
+		}
+		s.sleep(wait)
+		wait = min(wait*2, s.maxWait)
+	}
+}
+
+// once: one try, under the box-wide lock
+func (s *signer) once(digest []byte) ([]byte, error) {
+	unlock := s.take()
+	defer unlock()
+	if s.fault != nil {
+		if err := s.fault(); err != nil {
+			return nil, err
+		}
+	}
+	return s.dev.sign(digest)
+}
+
+func (s *signer) flush() int {
+	unlock := s.take()
+	defer unlock()
+	n, err := s.dev.flushStale()
+	if err != nil {
+		s.logf("tpm: flushing stale sessions: %v", err)
+	}
+	return n
+}
+
+// take holds the box-wide lock, if there is one: a lock held by another
+// for longer than a signature may take is waited out only so long, and
+// then the TPM is used anyway
+func (s *signer) take() func() {
+	if s.lock == "" {
+		return func() {}
+	}
+	f, err := openLock(s.lock)
+	if err != nil {
+		if !s.noLock {
+			s.logf("tpm: %v; signing without the lock", err)
+		}
+		s.noLock = true
+		return func() {}
+	}
+	deadline := s.now().Add(5 * time.Second)
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN); _ = f.Close() }
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) || s.now().After(deadline) {
+			_ = f.Close()
+			return func() {}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// openLock opens the lock file, made 0600 in a 0700 directory if missing,
+// and refuses one that anybody but this process's user owns or may open:
+// whoever can open it can hold it
+func openLock(path string) (*os.File, error) {
+	_ = os.Mkdir(filepath.Dir(path), 0o700)
+	f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range []string{filepath.Dir(path), path} {
+		fi, err := os.Stat(p)
+		if err != nil {
+			_ = f.Close()
+			return nil, err
+		}
+		st, ok := fi.Sys().(*syscall.Stat_t)
+		if !ok || int(st.Uid) != os.Getuid() || fi.Mode().Perm()&0o077 != 0 {
+			_ = f.Close()
+			return nil, fmt.Errorf("%s: not %d's alone (%v, uid %d)", p, os.Getuid(), fi.Mode().Perm(), st.Uid)
+		}
+	}
+	return f, nil
+}
+
+// contextGap: the TPM refused to save a context. Through the kernel's
+// resource manager that comes back as EFAULT from the device (the kernel
+// logs "tpm2_save_context: failed with a TPM error 0x0901"); a TPM spoken
+// to directly says TPM_RC_CONTEXT_GAP. Out of room for sessions or objects
+// is cleared the same way
+func contextGap(err error) bool {
+	return errors.Is(err, tpm2.TPMRCContextGap) || errors.Is(err, tpm2.TPMRCSessionMemory) ||
+		errors.Is(err, tpm2.TPMRCObjectMemory) || errors.Is(err, tpm2.TPMRCSessionHandles) ||
+		errors.Is(err, syscall.EFAULT) || strings.Contains(err.Error(), "bad address")
+}
+
+// permanent: what no retry within a lease mends. PCR 7 not as the key's
+// policy wants (disk-check spoils it on a pool not this box's), a key that
+// does not load under this TPM's primary, or no key files at all
+func permanent(err error) bool {
+	return errors.Is(err, tpm2.TPMRCPolicyFail) || errors.Is(err, tpm2.TPMRCIntegrity) ||
+		errors.Is(err, fs.ErrNotExist)
+}
+
+// tpmBackend: the TPM itself, through the kernel's resource manager
+type tpmBackend struct {
+	keys string
+	open func() (transport.TPMCloser, error)
+	t    transport.TPMCloser
+	key  tpm2.NamedHandle
+}
+
+func newTPMBackend(keys string) *tpmBackend {
+	return &tpmBackend{keys: keys, open: func() (transport.TPMCloser, error) { return linuxtpm.Open("/dev/tpmrm0") }}
+}
+
+// srkTemplate is what `tpm2_createprimary -C o -G ecc256` makes (tpm2-tools
+// 5.7), the parent dd-unlock-enrol made the key under: the same template
+// gives the same key from the owner's seed
+var srkTemplate = tpm2.TPMTPublic{
+	Type:    tpm2.TPMAlgECC,
+	NameAlg: tpm2.TPMAlgSHA256,
+	ObjectAttributes: tpm2.TPMAObject{
+		FixedTPM: true, FixedParent: true, SensitiveDataOrigin: true,
+		UserWithAuth: true, Restricted: true, Decrypt: true,
+	},
+	Parameters: tpm2.NewTPMUPublicParms(tpm2.TPMAlgECC, &tpm2.TPMSECCParms{
+		Symmetric: tpm2.TPMTSymDefObject{
+			Algorithm: tpm2.TPMAlgAES,
+			KeyBits:   tpm2.NewTPMUSymKeyBits(tpm2.TPMAlgAES, tpm2.TPMKeyBits(128)),
+			Mode:      tpm2.NewTPMUSymMode(tpm2.TPMAlgAES, tpm2.TPMAlgCFB),
+		},
+		Scheme:  tpm2.TPMTECCScheme{Scheme: tpm2.TPMAlgNull},
+		CurveID: tpm2.TPMECCNistP256,
+		KDF:     tpm2.TPMTKDFScheme{Scheme: tpm2.TPMAlgNull},
+	}),
+	Unique: tpm2.NewTPMUPublicID(tpm2.TPMAlgECC, &tpm2.TPMSECCPoint{}),
+}
+
+// ready opens the TPM and loads the key, if not done already
+func (b *tpmBackend) ready() error {
+	if b.t != nil {
+		return nil
+	}
+	pubRaw, err := os.ReadFile(filepath.Join(b.keys, "sig.pub"))
+	if err != nil {
+		return err
+	}
+	privRaw, err := os.ReadFile(filepath.Join(b.keys, "sig.priv"))
+	if err != nil {
+		return err
+	}
+	pub, err := tpm2.Unmarshal[tpm2.TPM2BPublic](pubRaw)
+	if err != nil {
+		return fmt.Errorf("sig.pub: %w", err)
+	}
+	priv, err := tpm2.Unmarshal[tpm2.TPM2BPrivate](privRaw)
+	if err != nil {
+		return fmt.Errorf("sig.priv: %w", err)
+	}
+	t, err := b.open()
+	if err != nil {
+		return err
+	}
+	srk, err := tpm2.CreatePrimary{
+		PrimaryHandle: tpm2.TPMRHOwner,
+		InPublic:      tpm2.New2B(srkTemplate),
+	}.Execute(t)
+	if err != nil {
+		_ = t.Close()
+		return fmt.Errorf("creating the primary: %w", err)
+	}
+	// the parent is needed only to load the key
+	defer func() { _, _ = tpm2.FlushContext{FlushHandle: srk.ObjectHandle}.Execute(t) }()
+	l, err := tpm2.Load{
+		ParentHandle: tpm2.AuthHandle{Handle: srk.ObjectHandle, Name: srk.Name, Auth: tpm2.PasswordAuth(nil)},
+		InPrivate:    *priv,
+		InPublic:     *pub,
+	}.Execute(t)
+	if err != nil {
+		_ = t.Close()
+		return fmt.Errorf("loading the key: %w", err)
+	}
+	b.t, b.key = t, tpm2.NamedHandle{Handle: l.ObjectHandle, Name: l.Name}
+	return nil
+}
+
+func (b *tpmBackend) sign(digest []byte) ([]byte, error) {
+	if err := b.ready(); err != nil {
+		return nil, err
+	}
+	pcr7 := func(t transport.TPM, h tpm2.TPMISHPolicy, _ tpm2.TPM2BNonce) error {
+		_, err := tpm2.PolicyPCR{
+			PolicySession: h,
+			Pcrs: tpm2.TPMLPCRSelection{PCRSelections: []tpm2.TPMSPCRSelection{{
+				Hash: tpm2.TPMAlgSHA256, PCRSelect: tpm2.PCClientCompatible.PCRs(7),
+			}}},
+		}.Execute(t)
+		return err
+	}
+	rsp, err := tpm2.Sign{
+		KeyHandle: tpm2.AuthHandle{Handle: b.key.Handle, Name: b.key.Name, Auth: tpm2.Policy(tpm2.TPMAlgSHA256, 16, pcr7)},
+		Digest:    tpm2.TPM2BDigest{Buffer: digest},
+		InScheme: tpm2.TPMTSigScheme{
+			Scheme:  tpm2.TPMAlgECDSA,
+			Details: tpm2.NewTPMUSigScheme(tpm2.TPMAlgECDSA, &tpm2.TPMSSchemeHash{HashAlg: tpm2.TPMAlgSHA256}),
+		},
+		// the key is not restricted: a null ticket
+		Validation: tpm2.TPMTTKHashCheck{Tag: tpm2.TPMSTHashCheck, Hierarchy: tpm2.TPMRHNull},
+	}.Execute(b.t)
+	if err != nil {
+		return nil, err
+	}
+	ecc, err := rsp.Signature.Signature.ECDSA()
+	if err != nil {
+		return nil, err
+	}
+	// as tpm2_sign -f plain wrote it for an ECDSA key, and as the
+	// validators read it: DER
+	return asn1.Marshal(struct{ R, S *big.Int }{
+		new(big.Int).SetBytes(ecc.SignatureR.Buffer),
+		new(big.Int).SetBytes(ecc.SignatureS.Buffer),
+	})
+}
+
+func (b *tpmBackend) reset() {
+	if b.t != nil {
+		_ = b.t.Close()
+	}
+	b.t = nil
+}
+
+// flushStale flushes the sessions the TPM holds, loaded or saved, on a
+// connection of its own that holds none
+func (b *tpmBackend) flushStale() (int, error) {
+	b.reset()
+	t, err := b.open()
+	if err != nil {
+		return 0, err
+	}
+	defer t.Close()
+	n := 0
+	var errs []error
+	for _, first := range []tpm2.TPMHandle{tpm2.TPMHandle(tpm2.TPMHTHMACSession) << 24, tpm2.TPMHandle(tpm2.TPMHTPolicySession) << 24} {
+		rsp, err := tpm2.GetCapability{Capability: tpm2.TPMCapHandles, Property: uint32(first), PropertyCount: 64}.Execute(t)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		hs, err := rsp.CapabilityData.Data.Handles()
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		for _, h := range hs.Handle {
+			// a loaded policy session is listed among the loaded ones
+			if ht := tpm2.TPMHT(h >> 24); ht != tpm2.TPMHTHMACSession && ht != tpm2.TPMHTPolicySession {
+				continue
+			}
+			if _, err := (tpm2.FlushContext{FlushHandle: h}).Execute(t); err != nil {
+				errs = append(errs, fmt.Errorf("%#x: %w", uint32(h), err))
+				continue
+			}
+			n++
+		}
+	}
+	return n, errors.Join(errs...)
+}

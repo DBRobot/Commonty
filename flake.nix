@@ -828,7 +828,7 @@
                 pname = "dd-control";
                 version = "0.1.0";
                 inherit src;
-                vendorHash = "sha256-0Pw/n4fnU3oM71OMEp2MkneaDXRXEmILhvF4VKTuAJE=";
+                vendorHash = "sha256-PdyOvSGb4sSM/5lYK1O2WwwfGPpkWtGxAoJ2RfuzjRU=";
                 # and dd-plan-check: a release's plan against what the boxes run (scripts/plan-check)
                 subPackages = [
                   "cmd/dd-control"

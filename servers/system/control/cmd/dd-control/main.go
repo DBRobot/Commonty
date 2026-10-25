@@ -151,46 +151,6 @@ func (r *relay) run(receive func(from uint64, kind byte, p []byte), connected fu
 	}
 }
 
-// tpmSign signs with the box's TPM-held key, under its signed boot (PCR 7),
-// the key dd-unlock-enrol made on the boot partition.
-func tpmSign(keys string, msg []byte) (string, error) {
-	dir, err := os.MkdirTemp("", "dd-control-sign")
-	if err != nil {
-		return "", err
-	}
-	defer os.RemoveAll(dir)
-	p := func(n string) string { return filepath.Join(dir, n) }
-	if err := os.WriteFile(p("msg"), msg, 0o600); err != nil {
-		return "", err
-	}
-	steps := [][]string{
-		{"tpm2_createprimary", "-Q", "-C", "o", "-G", "ecc256", "-c", p("srk.ctx")},
-		{"tpm2_load", "-Q", "-C", p("srk.ctx"), "-u", filepath.Join(keys, "sig.pub"), "-r", filepath.Join(keys, "sig.priv"), "-c", p("sig.ctx")},
-		{"tpm2_startauthsession", "-Q", "--policy-session", "-S", p("s.ctx")},
-		{"tpm2_policypcr", "-Q", "-S", p("s.ctx"), "-l", "sha256:7"},
-		{"tpm2_sign", "-Q", "-c", p("sig.ctx"), "-g", "sha256", "-s", "ecdsa", "-f", "plain", "-p", "session:" + p("s.ctx"), "-o", p("sig.bin"), p("msg")},
-	}
-	var failed error
-	for _, s := range steps {
-		cmd := exec.Command(s[0], s[1:]...)
-		cmd.Env = append(os.Environ(), "TPM2TOOLS_TCTI=device:/dev/tpmrm0")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			failed = fmt.Errorf("%s: %v: %s", s[0], err, strings.TrimSpace(string(out)))
-			break
-		}
-	}
-	_ = exec.Command("tpm2_flushcontext", p("s.ctx")).Run()
-	_ = exec.Command("tpm2_flushcontext", "-t").Run()
-	if failed != nil {
-		return "", failed
-	}
-	sig, err := os.ReadFile(p("sig.bin"))
-	if err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(sig), nil
-}
-
 // reportMessage is what a box signs over its own report: the files' hashes
 // under a label no heartbeat starts with, so neither signature passes for
 // the other (nix/checks/box-reports.py checks it the same way)
@@ -595,6 +555,7 @@ func main() {
 	testWedge := flag.String("test-wedge", "", "tests only: while this file exists, delivering a decision hangs, as a wedged consensus does")
 	testDeaf := flag.String("test-deaf", "", "tests only: while this file exists, consensus frames from the relay are dropped")
 	testSlow := flag.String("test-slow-proposals", "", "tests only: while this file exists, a proposal this validator sends goes out 2.5 s late")
+	testSignFail := flag.String("test-sign-fail", "", "tests only: while this file exists, every signature this box makes fails as a TPM out of room for contexts does")
 	flag.Parse()
 	log.SetFlags(0)
 
@@ -612,10 +573,7 @@ func main() {
 			log.Fatalf("not a computer's id: %q", *computerJoin)
 		}
 		now := time.Now().Unix()
-		sign := func(m []byte) (string, error) { return tpmSign(*tpmKeys, m) }
-		if *softKey != "" {
-			sign = softSigner(*softKey)
-		}
+		sign := boxSigner(*tpmKeys, *softKey, "")
 		sig, err := sign(computerJoinMessage(*box, *computerJoin, now))
 		if err != nil {
 			log.Fatal(err)
@@ -626,10 +584,7 @@ func main() {
 
 	if *join {
 		now := time.Now().Unix()
-		sign := func(m []byte) (string, error) { return tpmSign(*tpmKeys, m) }
-		if *softKey != "" {
-			sign = softSigner(*softKey)
-		}
+		sign := boxSigner(*tpmKeys, *softKey, "")
 		sig, err := sign(joinMessage(*box, now))
 		if err != nil {
 			log.Fatal(err)
@@ -643,10 +598,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		sign := func(m []byte) (string, error) { return tpmSign(*tpmKeys, m) }
-		if *softKey != "" {
-			sign = softSigner(*softKey)
-		}
+		sign := boxSigner(*tpmKeys, *softKey, "")
 		sig, err := sign(msg)
 		if err != nil {
 			log.Fatal(err)
@@ -714,10 +666,7 @@ func main() {
 	if mine != nil {
 		self = mine.ID // a voting box is addressed as its validator
 	}
-	sign := func(m []byte) (string, error) { return tpmSign(*tpmKeys, m) }
-	if *softKey != "" {
-		sign = softSigner(*softKey)
-	}
+	sign := boxSigner(*tpmKeys, *softKey, *testSignFail)
 	r := &relay{url: *relayURL, self: self, hello: sign}
 	if joining != nil {
 		r.key = joining.Key
@@ -828,19 +777,22 @@ func main() {
 	}
 	go r.run(receive, ask)
 
-	// Everything this box asks the validators, signed by the TPM, under one
-	// rising sequence: a heartbeat and a directory item never share a number
+	// Everything this box asks the validators, signed by the TPM, under one: a heartbeat and a directory item never share a number
+	// rising sequence: a heartbeat and a directory item never share a number.
+	// Numbered, signed and sent in one turn, so they leave in order: the
+	// validators refuse a sequence at or below the last they took, and a
+	// renewal signed first but sent after a later heartbeat was dropped
 	var seqMu sync.Mutex
 	seq := uint64(time.Now().UnixMilli()) // above any earlier run's
 	submit := func(kind string, body []byte) (uint64, error) {
 		seqMu.Lock()
-		seq++
-		q := state.Request{Kind: kind, Box: *box, Seq: seq, Body: body}
-		seqMu.Unlock()
+		defer seqMu.Unlock()
+		q := state.Request{Kind: kind, Box: *box, Seq: seq + 1, Body: body}
 		sig, err := sign(q.Bytes())
 		if err != nil {
 			return 0, err
 		}
+		seq = q.Seq
 		q.Sig = sig
 		b, _ := json.Marshal(q)
 		r.Send(wire.ToValidators, wire.Submit, b)
@@ -949,7 +901,7 @@ func main() {
 				}
 			}
 			body, _ := json.Marshal(state.Heartbeat{Facts: f})
-			if _, err := submit("heartbeat", body); err != nil {
+			if _, err := submit("heartbeat", body); err != nil && !errors.As(err, new(errSigning)) {
 				log.Printf("heartbeat: %v", err)
 			}
 			ask()
@@ -1289,29 +1241,47 @@ func memberBoxes(ids *ident.Server, s *state.State) map[string]bool {
 	return out
 }
 
-// softSigner: for tests on machines without this box's TPM
-func softSigner(path string) func([]byte) (string, error) {
-	return func(m []byte) (string, error) {
-		der, err := os.ReadFile(path)
-		if err != nil {
-			return "", err
-		}
-		k, err := x509.ParsePKCS8PrivateKey(der)
-		if err != nil {
-			return "", err
-		}
-		ek, ok := k.(*ecdsa.PrivateKey)
-		if !ok {
-			return "", errors.New("not a P-256 key")
-		}
-		h := sha256.Sum256(m)
-		sig, err := ecdsa.SignASN1(rand.Reader, ek, h[:])
-		if err != nil {
-			return "", err
-		}
-		return base64.RawURLEncoding.EncodeToString(sig), nil
+// boxSigner signs as this box: with its TPM, or a test's key file
+// (softKey). With failWhile, every signature fails while that file exists
+func boxSigner(keys, softKey, failWhile string) func([]byte) (string, error) {
+	var dev tpmDevice = newTPMBackend(keys)
+	if softKey != "" {
+		dev = softDevice(softKey)
 	}
+	s := newSigner(dev)
+	if failWhile != "" {
+		s.fault = func() error {
+			if exists(failWhile) {
+				return fmt.Errorf("%s: %w", failWhile, syscall.EFAULT)
+			}
+			return nil
+		}
+	}
+	return s.Sign
 }
+
+// softDevice: for tests on machines without this box's TPM, a PKCS#8
+// P-256 key file
+type softDevice string
+
+func (path softDevice) sign(digest []byte) ([]byte, error) {
+	der, err := os.ReadFile(string(path))
+	if err != nil {
+		return nil, err
+	}
+	k, err := x509.ParsePKCS8PrivateKey(der)
+	if err != nil {
+		return nil, err
+	}
+	ek, ok := k.(*ecdsa.PrivateKey)
+	if !ok {
+		return nil, errors.New("not a P-256 key")
+	}
+	return ecdsa.SignASN1(rand.Reader, ek, digest)
+}
+
+func (softDevice) reset()                   {}
+func (softDevice) flushStale() (int, error) { return 0, nil }
 
 // computerLease: a computer and its lease as one agreed state has them,
 // with the release's owner of the box that holds it

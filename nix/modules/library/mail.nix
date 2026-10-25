@@ -110,6 +110,7 @@ in
       description = "Sign one hold request with the TPM";
       path = [
         pkgs.tpm2-tools
+        pkgs.util-linux # flock: one user of the TPM at a time
         pkgs.openssl
         pkgs.coreutils
         pkgs.gnused
