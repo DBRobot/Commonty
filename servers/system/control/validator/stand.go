@@ -41,6 +41,8 @@ const (
 	standEvery = 5 * time.Second
 	// how old a stand may be in the block that agrees it, ms
 	standFresh = 60_000
+	// how far a stand may be ahead of its block's agreed time, ms
+	standAhead = 2000
 	// how long, after the last validator stood for a config, a live box on
 	// an older version holds it back, ms
 	boxGrace = 30 * 60_000
@@ -203,7 +205,7 @@ func (a *activation) check(v *Validator, st *state.State, t int64) error {
 		if s.Machine < a.Machine || s.Config != d {
 			return fmt.Errorf("validator %d stands for version %d and config %.12s", s.ID, s.Machine, s.Config)
 		}
-		if s.Time < t-standFresh || s.Time > t+ClockTolerance {
+		if s.Time < t-standFresh || s.Time > t+standAhead {
 			return fmt.Errorf("validator %d's stand is not fresh", s.ID)
 		}
 		// a stand from before the config in force was agreed speaks of

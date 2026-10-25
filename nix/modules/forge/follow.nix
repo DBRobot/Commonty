@@ -116,9 +116,23 @@ let
     flock 9
     E=$(cat ${state}/epoch 2>/dev/null || echo 0)
     [ "$E" -gt 0 ] || { echo "the forge has not started here yet"; exit 0; }
-    zfs destroy ${dataset}@dd-copy 2>/dev/null || true
+    # A snapshot read through .zfs stays mounted for minutes after, and is
+    # busy until it is unmounted: on 2026-10-24 each copy's own destroy
+    # failed so, every copy after it found the snapshot there, and so did
+    # the handover's. Unmounted first, and gone before a new one is taken
+    snap=${dir}/.zfs/snapshot/dd-copy
+    drop() {
+      zfs list -H -o name ${dataset}@dd-copy >/dev/null 2>&1 || return 0
+      for _ in 1 2 3 4 5 6 7 8 9 10; do
+        if grep -q " $snap " /proc/self/mounts; then umount "$snap" || { sleep 1; continue; }; fi
+        zfs destroy ${dataset}@dd-copy && return 0
+        sleep 1
+      done
+      return 1
+    }
+    drop || echo "the last copy's snapshot will not go"
     zfs snapshot ${dataset}@dd-copy || { echo "no snapshot: not copied this time"; [ -z "$strict" ] || exit 1; exit 0; }
-    src=${dir}/.zfs/snapshot/dd-copy
+    src=$snap
     # what the snapshot holds: what a restore takes, and nothing else
     rclone lsf -R --files-only --filter-from ${filters} "$src" | sort > ${state}/manifest.new
     if rclone sync --checksum --filter-from ${filters} "$src" here:forge/files \
@@ -129,7 +143,7 @@ let
       echo "not copied this time"
       failed=1
     fi
-    zfs destroy ${dataset}@dd-copy || true
+    drop || echo "this copy's snapshot will not go: the next copy tries again"
     [ -z "$strict" ] || exit "''${failed:-0}"
     exit 0
   '';
@@ -157,9 +171,16 @@ in
         # started with postgres by the plan: its role and database first
         after = [ "postgresql-setup.service" ];
         wants = [ "postgresql-setup.service" ];
+        # postgres may be up after this starts: its lease or its restore can come
+        # later than this one's. Retried until it is, never a failed unit
+        # (2026-10-24: museum gave up after five tries and Photos stayed down)
+        startLimitIntervalSec = 0;
         serviceConfig = {
           ExecStartPre = lib.mkBefore [ "+${take}" ];
           ExecStartPost = [ "+${started}" ];
+          RestartSec = 2;
+          RestartSteps = 5;
+          RestartMaxDelaySec = 30;
         };
       };
       # its hooks are made again where they were restored: a copy keeps no

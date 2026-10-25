@@ -154,6 +154,15 @@ in
         # started with postgres by the plan: its role and database first
         systemd.services.vaultwarden.after = [ "postgresql-setup.service" ];
         systemd.services.vaultwarden.wants = [ "postgresql-setup.service" ];
+        # postgres may be up after this starts: its lease or its restore can come
+        # later than this one's. Retried until it is, never a failed unit
+        # (2026-10-24: museum gave up after five tries and Photos stayed down)
+        systemd.services.vaultwarden.startLimitIntervalSec = 0;
+        systemd.services.vaultwarden.serviceConfig = {
+          RestartSec = 2;
+          RestartSteps = 5;
+          RestartMaxDelaySec = 30;
+        };
         dd.vault.envFile = "${keys}/env";
         dd.vault.oidcSecretFile = "${keys}/oidc";
         systemd.services.dd-vault-keys = {

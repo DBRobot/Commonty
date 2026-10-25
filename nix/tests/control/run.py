@@ -3,8 +3,8 @@
 # box keys, agreeing; one killed and the rest carrying on; it restarted and
 # catching up from its log; one left exactly a sequence behind rejoining by
 # itself; one whose consensus hangs finding that out, exiting to be started
-# afresh, and catching up, while the rest decide throughout; a hello signed
-# by the wrong key refused. Then
+# afresh, and catching up, while the rest decide throughout; proposals that
+# go out late still decided; a hello signed by the wrong key refused. Then
 # a gate on each box with the directory as the agreed log: a new name is
 # its claimant's once every voting box's gate has acknowledged it, and not
 # before; an update by its owner reaches every box. Last, a placed
@@ -104,6 +104,8 @@ def run(i):
             f"{T}/wedge{i}",
             "-test-deaf",
             f"{T}/deaf{i}",
+            "-test-slow-proposals",
+            f"{T}/slow{i}",
             "-metrics",
             f"{T}/control{i}.prom",
         ],
@@ -251,6 +253,31 @@ ok(
 mark = height(2)
 until("node2 deciding", lambda: height(2) > mark, 30)
 ok(height(2) > mark, "and keeps deciding")
+
+# ---- proposals that go out 2.5 s after they were made, as node1's did on
+# 2026-10-24 while it was busy on disk: release 361 refused each one as
+# from a clock 2 s off, and two validators never agreed again. They are
+# taken, and the fleet goes on deciding
+bad = lambda: sum(
+    log_of(i).count("proposer's clock") + log_of(i).count("first seen here")
+    for i in (1, 2, 3)
+)
+bad0 = bad()
+for i in (1, 2, 3):
+    open(f"{T}/slow{i}", "w").close()
+h = max(height(i) for i in (1, 2, 3))
+until(
+    "deciding with late proposals",
+    lambda: all(height(i) >= h + 5 for i in (1, 2, 3)),
+    120,
+)
+for i in (1, 2, 3):
+    os.remove(f"{T}/slow{i}")
+ok(
+    all(height(i) >= h + 5 for i in (1, 2, 3)),
+    f"proposals 2.5 s late are decided ({h} -> {[height(i) for i in (1, 2, 3)]})",
+)
+ok(bad() == bad0, f"and none refused for its time ({bad() - bad0} refused)")
 
 req = urllib.request.Request(
     f"http://127.0.0.1:8789/relay?id=1&at={int(time.time())}&sig=AAAA",

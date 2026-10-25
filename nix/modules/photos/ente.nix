@@ -185,6 +185,15 @@ in
       # by the plan on a box taking photos over, museum waits for them
       systemd.services.ente.after = [ "postgresql-setup.service" ];
       systemd.services.ente.wants = [ "postgresql-setup.service" ];
+      # postgres may be up after this starts: its lease or its restore can come
+      # later than this one's. Retried until it is, never a failed unit
+      # (2026-10-24: museum gave up after five tries and Photos stayed down)
+      systemd.services.ente.startLimitIntervalSec = 0;
+      systemd.services.ente.serviceConfig = {
+        RestartSec = 2;
+        RestartSteps = 5;
+        RestartMaxDelaySec = 30;
+      };
       systemd.services.ente.preStart = lib.mkAfter ''
         psql -v ON_ERROR_STOP=1 -q -d ente <<'SQL'
         DO $$ BEGIN IF to_regclass('public.tokens') IS NOT NULL THEN

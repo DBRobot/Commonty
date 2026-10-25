@@ -32,8 +32,17 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// how far a proposer's clock may be from ours
-const ClockTolerance = 2000 // ms
+// How far a proposal's agreed time may be from this validator's clock, ms
+// (docs/dev/control-plane.md, "Time"). Ahead: of its clock as it checks.
+// Behind: of when it first saw the newest request the proposal carries,
+// never of when the proposal reached it, so a proposal that took long to
+// arrive, or is checked late, is still taken. Their sum stays inside the
+// two lease margins (cmd/dd-control/placed.go, leaseMargin), and does with
+// a validator of release 361 (2 s either way) too
+const (
+	ClockAhead  = 1000
+	ClockBehind = 4000
+)
 
 type Transport interface {
 	Send(to uint64, kind byte, payload []byte)
@@ -111,6 +120,7 @@ type Validator struct {
 	// requests and keeps them in its pool after it catches up
 	keepDecided bool
 	limit       limiter
+	seen        seenAt
 	boxIDs      map[uint64]bool
 	asks        chan uint64
 	done        chan struct{}
@@ -281,6 +291,7 @@ func (v *Validator) Receive(from uint64, kind byte, payload []byte) {
 		if done || !signed {
 			return
 		}
+		v.seen.saw(v.RequestID(payload), v.o.Now().UnixMilli())
 		// it counts as waiting only if it is newer than what was agreed of
 		// its box and not a join: replays never make a stall
 		if fresh && v.pulse.idle() {
@@ -717,8 +728,12 @@ func (v *Validator) VerifyProposal(p bft.Proposal) ([]bft.RequestInfo, error) {
 	if h.Time <= st.Time {
 		return nil, errors.New("the clock went back")
 	}
-	if d := v.o.Now().UnixMilli() - h.Time; d > ClockTolerance || d < -ClockTolerance {
-		return nil, fmt.Errorf("the proposer's clock is %d ms off", d)
+	now := v.o.Now().UnixMilli()
+	if d := h.Time - now; d > ClockAhead {
+		return nil, fmt.Errorf("the proposer's clock is %d ms ahead", d)
+	}
+	if seen := v.newestSeen(p.Payload, st, now); h.Time < seen-ClockBehind {
+		return nil, fmt.Errorf("stamped %d ms before a request it carries was first seen here", seen-h.Time)
 	}
 	if h.Activate != nil {
 		if err := h.Activate.check(v, st, h.Time); err != nil {
@@ -726,6 +741,23 @@ func (v *Validator) VerifyProposal(p bft.Proposal) ([]bft.RequestInfo, error) {
 		}
 	}
 	return v.RequestsFromProposal(p), nil
+}
+
+// newestSeen: when this validator first saw the newest of the requests a
+// payload carries that st can still apply, 0 for none. A request it never
+// saw counts as seen now
+func (v *Validator) newestSeen(payload []byte, st *state.State, now int64) int64 {
+	var raw [][]byte
+	_ = json.Unmarshal(payload, &raw)
+	var newest int64
+	for _, r := range raw {
+		var q state.Request
+		if json.Unmarshal(r, &q) != nil || decided(st.Boxes[q.Box], q) {
+			continue
+		}
+		newest = max(newest, v.seen.first(v.RequestID(r), now))
+	}
+	return newest
 }
 
 func (v *Validator) RequestsFromProposal(p bft.Proposal) []bft.RequestInfo {

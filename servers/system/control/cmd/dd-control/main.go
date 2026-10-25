@@ -47,6 +47,8 @@ import (
 	"github.com/coder/websocket"
 	"github.com/hyperledger/SmartBFT/pkg/metrics/disabled"
 	"github.com/hyperledger/SmartBFT/pkg/wal"
+	"github.com/hyperledger/SmartBFT/smartbftprotos"
+	"google.golang.org/protobuf/proto"
 )
 
 type logger struct{}
@@ -81,6 +83,22 @@ func (r *relay) Send(to uint64, kind byte, p []byte) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = c.Write(ctx, websocket.MessageBinary, wire.Frame(to, r.self, kind, p))
+}
+
+// tests only: while file exists, a proposal this validator sends goes out
+// 2.5 s after it was made, as one did on 2026-10-24 from a box busy on disk
+type slowProposals struct {
+	validator.Transport
+	file string
+}
+
+func (s slowProposals) Send(to uint64, kind byte, p []byte) {
+	m := &smartbftprotos.Message{}
+	if kind == wire.Consensus && exists(s.file) && proto.Unmarshal(p, m) == nil && m.GetPrePrepare() != nil {
+		time.AfterFunc(2500*time.Millisecond, func() { s.Transport.Send(to, kind, p) })
+		return
+	}
+	s.Transport.Send(to, kind, p)
 }
 
 func (r *relay) run(receive func(from uint64, kind byte, p []byte), connected func()) {
@@ -576,6 +594,7 @@ func main() {
 	metrics := flag.String("metrics", "", "a validator writes its progress and self-heals here, as metrics (node_exporter's textfile); empty: nowhere")
 	testWedge := flag.String("test-wedge", "", "tests only: while this file exists, delivering a decision hangs, as a wedged consensus does")
 	testDeaf := flag.String("test-deaf", "", "tests only: while this file exists, consensus frames from the relay are dropped")
+	testSlow := flag.String("test-slow-proposals", "", "tests only: while this file exists, a proposal this validator sends goes out 2.5 s late")
 	flag.Parse()
 	log.SetFlags(0)
 
@@ -726,8 +745,12 @@ func main() {
 				saved = nil
 			}
 		}
+		var t validator.Transport = r
+		if *testSlow != "" {
+			t = slowProposals{r, *testSlow}
+		}
 		v, err := validator.New(validator.Options{
-			Config: cfg, ID: mine.ID, Key: key, Transport: r, Logger: logger{}, WAL: w, WALEntries: walEntries, Saved: saved,
+			Config: cfg, ID: mine.ID, Key: key, Transport: t, Logger: logger{}, WAL: w, WALEntries: walEntries, Saved: saved,
 			Persist: func(s validator.Saved) {
 				for *testWedge != "" && exists(*testWedge) {
 					time.Sleep(100 * time.Millisecond)

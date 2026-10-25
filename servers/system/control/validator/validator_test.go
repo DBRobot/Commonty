@@ -35,6 +35,8 @@ type relay struct {
 	mu   sync.Mutex
 	in   map[uint64]chan [3]any
 	down map[uint64]bool
+	// how long a frame waits before it goes on, if at all
+	slow func(kind byte, p []byte) time.Duration
 }
 
 func (r *relay) send(from, to uint64, kind byte, p []byte) {
@@ -43,12 +45,26 @@ func (r *relay) send(from, to uint64, kind byte, p []byte) {
 	if r.down[from] {
 		return
 	}
+	var wait time.Duration
+	if r.slow != nil {
+		wait = r.slow(kind, p)
+	}
 	deliver := func(id uint64) {
 		if id == from || r.down[id] {
 			return
 		}
+		f, ch := [3]any{from, kind, append([]byte(nil), p...)}, r.in[id]
+		if wait > 0 {
+			time.AfterFunc(wait, func() {
+				select {
+				case ch <- f:
+				default:
+				}
+			})
+			return
+		}
 		select {
-		case r.in[id] <- [3]any{from, kind, append([]byte(nil), p...)}:
+		case ch <- f:
 		default:
 		}
 	}

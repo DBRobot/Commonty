@@ -127,10 +127,20 @@ hand_over(a, "ente-museum", "ente.service ente-health.service", "ente.service")
 hand_over(a, "postgresql", "postgresql.service", "postgresql.service")
 
 # b takes epoch 2 from its own store: postgres restored, museum on keys of
-# b's own that a never had
+# b's own that a never had. Museum's lease comes first and postgres's after,
+# as on 2026-10-24: museum, which gave up after five quick tries then and
+# kept Photos down, waits postgres out by itself
+flag = json.dumps({"epoch": 2, "until": 10**12})
+b.succeed(f"echo '{flag}' > /run/dd-placed/ente-museum")
+b.succeed("systemctl start --no-block ente.service")
+b.wait_until_succeeds(
+    '[ "$(systemctl show -P NRestarts ente.service)" -ge 3 ]', timeout=120
+)
+b.fail("systemctl is-failed --quiet ente.service")
 hold(b, 2)
-b.succeed("systemctl start postgresql.service ente.service")
+b.succeed("systemctl start postgresql.service")
 b.wait_until_succeeds("curl -sf http://127.0.0.1:8080/ping", timeout=180)
+assert b.succeed("systemctl show -P Result ente.service").strip() == "success"
 ka = a.succeed("cat /var/lib/dd-ente-keys/encryption /var/lib/dd-ente-keys/hash")
 kb = b.succeed("cat /var/lib/dd-ente-keys/encryption /var/lib/dd-ente-keys/hash")
 assert ka != kb, "b has a's keys"

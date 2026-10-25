@@ -65,8 +65,34 @@ Rules, copy counts and role requirements come from the signed release, not
 from the log.
 
 **Time.** The proposer stamps each batch. A validator rejects a batch whose
-stamp is more than 2 s from its own clock and earlier than the last one.
-Lease expiry uses this agreed time, so no single clock can end a lease early.
+stamp is not after the last one, more than 1 s ahead of its own clock, or
+more than 4 s before it first saw the newest request the batch carries (one
+it never saw counts as seen as it checks). Lease expiry uses this agreed
+time, so no single clock can end a lease early.
+
+- How late a batch arrives never counts. On 2026-10-24 node1 stamped a
+  batch and sent it 2.9 s later, busy on disk (a VM test, a third of its
+  time in I/O wait). The rule then was 2 s either way of the checker's own
+  clock, so node2 refused it, and with the witness off the two never agreed
+  again (below). SmartBFT checks a proposal once, as it arrives, and a
+  delay between the stamp and that, at the proposer, the relay or the
+  checker, now costs nothing as long as the requests reached the checker
+  on time. Each box sends every request to all the validators, so they
+  do; the checker keeps when it first saw each one for 2 to 4 minutes.
+- Why leases stay safe. A renewal sets the lease to the batch's time plus
+  the TTL, and its holder stops 3 s before its send time plus the TTL
+  (below). A batch is never stamped more than 4 s before a request it
+  carries was first seen, so before it was sent. Another box's grant needs
+  a later batch stamped past the expiry, never more than 1 s ahead of a
+  checker's clock, and it waits 3 s more before it starts. So the old
+  holder has stopped before the new one starts with 1 s to spare: 4 s +
+  1 s within the two 3 s margins. During the switch from 361, whose
+  checkers allow 2 s either way, the sum is 6 s, still within them. An
+  honest proposer stamps after it has the requests, so only a lying one
+  could use the 4 s.
+- A batch with nothing left to apply is held only to the order and the
+  1 s. An old stamp there can only keep a lease or a box alive a little
+  longer, never end one sooner.
 
 **Fencing.** Each lease grant raises the role's epoch. The holder stamps its
 epoch on what it writes (WAL segments, for example), and readers ignore
@@ -184,6 +210,21 @@ a wedge stops every writer once its lease lapses.
   have restarted one after 120 s of waiting requests. Before switching
   validators from 359, check that neither keeps logging "got viewChange
   ... expected view" with the same numbers, and restart that one first.
+- **A witness in the config but off makes every third view change.**
+  With n = 3, f is 0: a view change needs both boxes, and leader rotation
+  hands every third view to the witness, which never sends a heartbeat. On
+  2026-10-24 the views changed every 5 to 20 s all evening. After node2
+  refused node1's late proposal (above, "Time") the two fell a view apart:
+  each kept sending its vote for a view the other had already left ("got
+  viewChange ... with view 2833, expected view 2834") and refused the
+  other's new view ("expected sender to be 3"). SmartBFT moves a view at a
+  time, and a vote for the view before is answered only now and then
+  ("help the lagging nodes"), so nothing agreed for over a minute and every
+  lease lapsed. Restarting one box at a time did not clear it: the one
+  restarted came back at the view in its log, several behind. Stopping
+  both and starting them together did, within about 30 s. While the witness
+  is off, restart both validators together, never one after the other; the
+  lasting fix is the witness on, or out of the config while it is off.
 - **A validator heals itself.** Every 5 s it checks itself. It exits, and
   systemd starts it afresh (`Restart=always`), when:
   - a call into consensus, or the delivery of a decision, has not returned
@@ -556,8 +597,9 @@ release gives to the boxes able to run it:
   before it may still be stopping), then raises the flag and starts.
 - It renews every 5 seconds (the lease lasts 15). The agreed state keeps
   which of the holder's requests last set the lease. A request can't be
-  agreed before it was sent, so the lease can't end sooner than that
-  request's send time plus the TTL (45 s). That send time, less 3 seconds, is
+  agreed at a time more than 4 s before it was sent ("Time", above), so
+  the lease can't end sooner than that request's send time plus the TTL
+  (45 s), less those 4 s. That send time, less 3 seconds, is
   *until*, kept by the box's clock since boot (suspend included), not its
   wall clock. The flag holds the epoch and *until*.
 - It stops at *until* unless a renewal is seen agreed, fresh state or
@@ -569,7 +611,8 @@ release gives to the boxes able to run it:
   given back or has lapsed, by which time the old holder has stopped.
 - No box's wall clock matters. What has to hold is that the agreed clock
   runs at about the rate of the boxes' own, within the two 3-second
-  margins over a lease. After a dd-control restart, the flag's *until*
+  margins over a lease ("Time", above, says why the validators' bounds fit
+  inside them). After a dd-control restart, the flag's *until*
   stands until a renewal the box sent, and has a record of, is agreed.
 - A rule ships in the release that brings it. A box still on the release
   before skips that lease's requests, and agrees again once its switch

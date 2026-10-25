@@ -127,6 +127,12 @@ copy_out(a)
 a.succeed(
     "systemctl stop dd-store-copy.timer dd-store-copy-recent.timer dd-forge-copy.timer"
 )
+# a copy's snapshot left behind and still mounted, as one read through .zfs
+# stays for minutes after (2026-10-24: the handover's copy found it there
+# and copied nothing). The handover's copy takes it away and a new one
+a.succeed("zfs snapshot tank/enc/forgejo@dd-copy")
+a.succeed(f"ls {dir}/.zfs/snapshot/dd-copy >/dev/null")
+a.succeed(f"grep -q ' {dir}/.zfs/snapshot/dd-copy ' /proc/mounts")
 # made the moment before the handover: in no copy yet
 api(
     a,
@@ -145,6 +151,7 @@ api(
 # forge's files go to its store, and both out to b
 hand_over(a, "forgejo", forge_units, "forgejo.service")
 hand_over(a, "postgresql", "postgresql.service", "postgresql.service")
+a.fail("zfs list -H -t snapshot tank/enc/forgejo@dd-copy")
 
 # b takes epoch 2 from its own store
 hold(b, 2)
