@@ -831,8 +831,12 @@ With `VERIFY_HEADSCALE_API` set (the gateway, `dd.verify.network`):
   vouches for. While who is who is not known (agreed mode, the state not
   settled) the device stays and the log says `kept <device> - whether
   <name> is a member is not known`. Then the guard (`network::Guard`):
-  nobody the release names (`VERIFY_PEOPLE`, the admin, the box owners)
-  comes off, whatever they read as (`NOT removing`); nothing comes off
+  nobody the release names (`VERIFY_PEOPLE` and the admin,
+  `network::reap_keep`) comes off, whatever they read as (`NOT removing`).
+  A box's host (`box.json` owner, `VERIFY_OWNER`) is not on that list: a
+  host whose membership is revoked loses their devices like anyone, and
+  the brake and the state-moved check below hold a state that drops a host
+  wrongly. Nothing comes off
   until who is who has been known for 120 s without a break (a start, or
   a return after an outage; `NOT reaping`). A person known to be no
   member loses every device, however many. The brake (`network::Brake`)
