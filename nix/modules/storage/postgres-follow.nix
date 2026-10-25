@@ -360,6 +360,10 @@ in
           EnvironmentFile = cfg.envFile;
           ExecStartPre = lib.mkBefore [ "+${take}" ];
           ExecStartPost = [ "+${started}" ];
+          # the take opens the archive's key with this box's TPM-held
+          # secrets key; the unit's device policy (closed) binds a + command
+          # too, and age-plugin-tpm died at the open on node2 (2026-10-24)
+          DeviceAllow = [ "/dev/tpmrm0 rw" ];
           # a restore is started once it has replayed the archive (started),
           # however long that takes; a writer that loses its lease meanwhile
           # is stopped by its fence (box/placed-fence.sh)

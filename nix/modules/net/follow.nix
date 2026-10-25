@@ -149,6 +149,10 @@ in
         serviceConfig = {
           ExecStartPre = lib.mkBefore [ "+${take}" ];
           ExecStartPost = [ "+${started}" ];
+          # the take opens the copy with this box's TPM-held secrets key;
+          # the unit's device policy (closed) binds a + command too, and
+          # age-plugin-tpm died at the open on node2 (2026-10-24)
+          DeviceAllow = [ "/dev/tpmrm0 rw" ];
         };
       };
       systemd.services.dd-headscale-copy = {
