@@ -125,9 +125,50 @@ for i in (1, 2):
         {w: [f"{w}.service"] for w in WRITERS},
         open(f"{T}/carries-together{i}.json", "w"),
     )
+# the signfail scenario's: the together scenario's fleet on this release
+# alone, node2 suiting the writers better by score and unable to start
+# postgres (SYSTEMCTL_FAILED: no base backup, as on 2026-10-24); forgejo
+# needs postgres on its box
+s_place = copy.deepcopy(t_place)
+s_place["boxes"]["node2"]["can"] = {w: 1.5 for w in WRITERS}
+s_place["services"]["forgejo"]["local"] = ["postgresql"]
+s_place["buckets"] = {
+    "postgres-wal": {"copies": 2, "service": "postgresql"},
+    "forge": {"copies": 2, "service": "forgejo"},
+}
+open(f"{T}/placement-signfail.json", "w").write(json.dumps(s_place))
+json.dump(t_new, open(f"{T}/new/config-signfail.json", "w"))
+for i, wal in ((1, 156 << 20), (2, 759 << 10)):
+    json.dump(
+        {w: [f"{w}.service"] for w in WRITERS},
+        open(f"{T}/carries-signfail{i}.json", "w"),
+    )
+    json.dump(
+        {
+            "store_size_bytes": 1000 << 30,
+            "store_free_bytes": 900 << 30,
+            "store/postgres-wal/bytes": wal,
+            "store/forge/bytes": 2 << 30,
+        },
+        open(f"{T}/facts-signfail{i}.json", "w"),
+    )
 os.makedirs(f"{T}/bin", exist_ok=True)
+# nothing it starts runs: is-active says not, as of a unit stopped; and
+# is-failed only of the units SYSTEMCTL_FAILED names
 with open(f"{T}/bin/systemctl", "w") as f:
-    f.write('#!/bin/sh\necho "$@" >> "$SYSTEMCTL_LOG"\n')
+    f.write(
+        """#!/bin/sh
+echo "$@" >> "$SYSTEMCTL_LOG"
+case "$1" in
+  is-active) exit 3 ;;
+  is-failed)
+    for u in "$@"; do
+      case " ${SYSTEMCTL_FAILED:-} " in *" $u "*) exit 0 ;; esac
+    done
+    exit 1 ;;
+esac
+"""
+    )
 os.chmod(f"{T}/bin/systemctl", 0o755)
 
 
@@ -217,6 +258,10 @@ class Fleet:
             os.environ,
             PATH=f"{T}/bin:" + os.environ["PATH"],
             SYSTEMCTL_LOG=f"{self.dir}/systemctl{i}.log",
+            # node2 cannot start postgres: no base backup (2026-10-24)
+            SYSTEMCTL_FAILED="postgresql.service"
+            if self.kind == "-signfail" and i == 2
+            else "",
         )
         self.procs[i] = subprocess.Popen(
             [
@@ -241,7 +286,17 @@ class Fleet:
                 f"{T}/carries{self.kind}{i}.json",
                 "-placed-dir",
                 f"{self.dir}/placed{i}",
-            ],
+            ]
+            + (
+                [
+                    "-test-facts",
+                    f"{T}/facts-signfail{i}.json",
+                    "-test-sign-fail",
+                    f"{self.dir}/sign-fail{i}",
+                ]
+                if self.kind == "-signfail"
+                else []
+            ),
             env=env,
             stdout=open(f"{self.dir}/n{i}.log", "a"),
             stderr=subprocess.STDOUT,
@@ -388,6 +443,109 @@ class Fleet:
             f"{self.name}: a writer's lease granted only under version 2 (early at {early[:3]})",
         )
 
+    # node1's TPM stops signing, as on 2026-10-24 23:52: heartbeats and
+    # renewals fail. For 20 s nothing may move. For longer than a box
+    # counts as alive, node2 may take the writers once node1 is gone, never
+    # while node1, which held them, is alive; node2 cannot start postgres
+    # and refuses it, and they come back to node1 once it signs again
+    def signfail(self, short=20, long=110):
+        self.start_relay("new")
+        for i in self.boxes:
+            self.start_box(i, "new")
+
+        def leases():
+            got = self.state(2).get("leases") or {}
+            return {w: got.get(f"svc/{w}") or {} for w in WRITERS}
+
+        def on(box, mark=0):
+            return all(
+                lease.get("holder") == box
+                and self.runs(int(box[-1]), w, lease["epoch"], mark)
+                for w, lease in leases().items()
+            )
+
+        wait(f"{self.name}: the writers run on node1", lambda: on("node1"), timeout=150)
+        held = {w: (l["holder"], l["epoch"]) for w, l in leases().items()}
+        t = threading.Thread(target=self.watch)
+        t.start()
+        # a short failure: renewals resume well within the lease
+        fail = f"{self.dir}/sign-fail1"
+        open(fail, "w").close()
+        time.sleep(short)  # sleep-ok: the failure lasts this long
+        os.remove(fail)
+        time.sleep(10)  # sleep-ok: renewals agreed again
+        seen = {
+            (
+                w,
+                (s.get("leases") or {}).get(f"svc/{w}", {}).get("holder"),
+                (s.get("leases") or {}).get(f"svc/{w}", {}).get("epoch"),
+            )
+            for _, _, _, s in self.samples
+            for w in WRITERS
+        }
+        ok(
+            seen == {(w, h, e) for w, (h, e) in held.items()},
+            f"{self.name}: {short}s of failed signatures moved no lease (saw {sorted(seen, key=str)})",
+        )
+        ok(
+            on("node1"),
+            f"{self.name}: the writers still run on node1 after {short}s of failed signatures",
+        )
+        log = open(f"{self.dir}/n1.log").read()
+        ok(
+            log.count("tpm: a signature failed") == 1
+            and log.count("tpm: signing again") == 1,
+            f"{self.name}: one line when signing failed, one when it was back",
+        )
+        # a long failure: node1 is counted gone after 90 s
+        self.samples.clear()
+        open(fail, "w").close()
+        t0 = time.time()
+        time.sleep(long)  # sleep-ok: the failure lasts this long
+        marks = {i: os.path.getsize(f"{self.dir}/systemctl{i}.log") for i in self.boxes}
+        os.remove(fail)
+        t1 = time.time()
+        back = wait(
+            f"{self.name}: the writers back on node1 once it signs again",
+            lambda: on("node1", marks[1]),
+            timeout=150,
+        )
+        if back:
+            ok(
+                True,
+                f"{self.name}: the writers back on node1 {time.time() - t1:.1f}s after it signed again",
+            )
+        self.stop_watch = True
+        t.join()
+        # while node1 was alive, by the agreed state, no writer's lease
+        # was granted to node2: at the first state with node2 holding it at
+        # an epoch, node1 had gone unheard longer than a box counts alive
+        first = {}
+        for at, _, _, st in sorted(self.samples, key=lambda x: x[3]["height"]):
+            for w in WRITERS:
+                lease = (st.get("leases") or {}).get(f"svc/{w}") or {}
+                if lease.get("holder") == "node2":
+                    first.setdefault((w, lease.get("epoch")), (at, st))
+        early = sorted(
+            round(at - t0)
+            for at, st in first.values()
+            if st["time"] - (st.get("boxes") or {}).get("node1", {}).get("lastSeen", 0)
+            <= 90000
+        )
+        ok(first != {}, f"{self.name}: node2 took the writers once node1 was gone")
+        ok(
+            not early,
+            f"{self.name}: no writer's lease went to node2 while node1, which held them, was alive (at {early[:5]}s)",
+        )
+        log2 = open(f"{self.dir}/n2.log").read()
+        ok(
+            "postgresql failed to start here" in log2,
+            f"{self.name}: node2 refused the postgres it could not start",
+        )
+        for i in self.boxes:
+            self.stop_box(i)
+        self.stop_relay()
+
     def run(self, order):
         self.start_relay("old")
         for i in (1, 2, 3):
@@ -513,7 +671,10 @@ class Fleet:
             )
 
 
-if os.environ.get("SCENARIO") == "together":
+if os.environ.get("SCENARIO") == "signfail":
+    fleets = ["d"]
+    Fleet("d", 8794, 4590, boxes=(1, 2), witness=False, kind="-signfail").signfail()
+elif os.environ.get("SCENARIO") == "together":
     fleets = ["c"]
     Fleet("c", 8793, 4490, boxes=(1, 2), witness=False, kind="-together").together(
         advance=int(os.environ.get("ADVANCE", "30")), ttl=45, margin=30

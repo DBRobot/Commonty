@@ -8,6 +8,11 @@
 # scenario "together": release 360's switch of 2026-10-24, the witness in
 # the config and off, both boxes switched at once; the leased writers must
 # run again within the lease's time and a margin (checks.control-together).
+#
+# scenario "signfail": node1's signatures fail (dd-control -test-sign-fail),
+# first for 20 s, then for longer than a box counts as alive; the writers
+# go to node2, which lacks their data, only while node1 is gone, and back
+# to node1 once it signs again (checks.control-signfail).
 {
   pkgs,
   self,

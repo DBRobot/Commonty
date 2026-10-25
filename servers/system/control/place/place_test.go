@@ -785,3 +785,130 @@ func TestASharedBucketStaysInItsHomeWhereverItsServiceRuns(t *testing.T) {
 		t.Fatalf("photos moved off big for a bucket kept on nas: %+v", p.Boxes)
 	}
 }
+
+// node1 and node2 as on 2026-10-24: postgresql and forgejo (which needs
+// postgres on its box) are writers under leases; node1 holds their data,
+// node2's store has a few WAL segments and no base backup
+func writers() (Inputs, *state.State) {
+	in := Inputs{
+		Boxes: map[string]Box{
+			"node1": {Site: "a", Can: map[string]float64{"postgresql": 1, "forgejo": 1}},
+			"node2": {Site: "a", Can: map[string]float64{"postgresql": 1.5, "forgejo": 1.5}},
+		},
+		Services: map[string]Service{
+			"postgresql": {Enabled: true, Instances: 1, Placed: true, Lease: true, Class: "low", MemoryGiB: 0.5, StorageGiB: 20},
+			"forgejo":    {Enabled: true, Instances: 1, Placed: true, Lease: true, Class: "low", MemoryGiB: 1, StorageGiB: 20, Local: []string{"postgresql"}},
+		},
+		Buckets: map[string]Bucket{
+			"postgres-wal": {Copies: 2, Service: "postgresql"},
+			"forge":        {Copies: 2, Service: "forgejo"},
+		},
+		Damping: Damping{Base: 0.3, PerGiB: 0.01},
+	}
+	s := state.New()
+	s.Time = 1_000_000
+	for _, name := range []string{"node1", "node2"} {
+		s.Boxes[name] = &state.BoxState{LastSeen: s.Time - 1000, Facts: map[string]float64{
+			"ram_bytes": 64 * gib, "store_size_bytes": 1000 * gib, "store_free_bytes": 900 * gib,
+			"carries/postgresql": 1, "carries/forgejo": 1,
+			"store/forge/bytes": 2 * gib,
+		}}
+	}
+	s.Boxes["node1"].Facts["store/postgres-wal/bytes"] = 156 << 20
+	s.Boxes["node2"].Facts["store/postgres-wal/bytes"] = 759 << 10
+	return in, s
+}
+
+func TestAWriterIsNotGivenToABoxWithoutItsData(t *testing.T) {
+	// node1's signatures failed: its leases lapsed, it is still alive, and
+	// node2 suits both better by score
+	in, s := writers()
+	s.Leases["svc/postgresql"] = &state.Lease{Holder: "node1", Epoch: 3, Expires: s.Time - 1}
+	p := Decide(in, s, 90_000, nil)
+	if !runs(p, "node1", "postgresql") || !runs(p, "node1", "forgejo") || runs(p, "node2", "postgresql") {
+		t.Fatalf("the writers left the box with their data: %+v", p.Boxes)
+	}
+	if !strings.Contains(why(p, "node1", "postgresql"), "where its data is") {
+		t.Fatalf("why: %q", why(p, "node1", "postgresql"))
+	}
+}
+
+func TestAWriterGoesBackToItsDataOnceThatBoxIsBack(t *testing.T) {
+	// node1 was counted gone, node2 took the leases at epoch 4 and has
+	// its flags up; postgres failed to start there (no base backup), so
+	// node2 refuses it (cmd/dd-control/placed.go). node1 is back. The
+	// writers return to node1, though node2 "runs" them
+	in, s := writers()
+	s.Leases["svc/postgresql"] = &state.Lease{Holder: "node2", Epoch: 4, Expires: s.Time + 40_000}
+	s.Leases["svc/forgejo"] = &state.Lease{Holder: "node2", Epoch: 4, Expires: s.Time + 40_000}
+	s.Boxes["node2"].Facts["runs/postgresql"], s.Boxes["node2"].Facts["runs/forgejo"] = 1, 1
+	s.Boxes["node2"].Facts["refused/postgresql"] = 1
+	p := Decide(in, s, 90_000, nil)
+	if !runs(p, "node1", "postgresql") || !runs(p, "node1", "forgejo") {
+		t.Fatalf("the writers stayed on the box without their data: %+v", p.Boxes)
+	}
+}
+
+// No box's word but the lease holder's says how much of a writer's data
+// there is: one box claiming a huge bucket neither draws the writer nor
+// keeps it from failing over to a box with its data
+func TestABoxClaimingMoreDataDrawsNoWriter(t *testing.T) {
+	in, s := writers()
+	in.Boxes["node3"] = Box{Site: "a", Can: map[string]float64{"postgresql": 3, "forgejo": 3}}
+	s.Boxes["node3"] = &state.BoxState{LastSeen: s.Time - 1000, Facts: map[string]float64{
+		"ram_bytes": 64 * gib, "store_size_bytes": 1000 * gib, "store_free_bytes": 900 * gib,
+		"carries/postgresql": 1, "carries/forgejo": 1,
+		"store/postgres-wal/bytes": 100_000 * gib, "store/forge/bytes": 100_000 * gib,
+	}}
+	// node1 holds the lapsed lease and is alive: it keeps the writers
+	s.Leases["svc/postgresql"] = &state.Lease{Holder: "node1", Epoch: 3, Expires: s.Time - 1}
+	p := Decide(in, s, 90_000, nil)
+	if !runs(p, "node1", "postgresql") || runs(p, "node3", "postgresql") {
+		t.Fatalf("a box claiming a huge bucket drew the writer: %+v", p.Boxes)
+	}
+	// node1 gone, node2 has a full copy: the claim does not stop the
+	// failover, and gives node3 nothing it would not get by its score
+	s.Boxes["node1"].LastSeen = 0
+	s.Boxes["node2"].Facts["store/postgres-wal/bytes"] = 156 << 20
+	in.Boxes["node3"].Can["postgresql"], in.Boxes["node3"].Can["forgejo"] = 0.5, 0.5
+	p = Decide(in, s, 90_000, nil)
+	if !runs(p, "node2", "postgresql") || !runs(p, "node2", "forgejo") {
+		t.Fatalf("no failover to the box with the data: %+v %v", p.Boxes, p.Unplaced)
+	}
+	// the holder alive at a new epoch on node2: node3's claim makes
+	// node2 no less a box with its data
+	s.Leases["svc/postgresql"] = &state.Lease{Holder: "node2", Epoch: 4, Expires: s.Time + 40_000}
+	s.Boxes["node2"].Facts["runs/postgresql"], s.Boxes["node2"].Facts["runs/forgejo"] = 1, 1
+	in.Boxes["node3"].Can["postgresql"], in.Boxes["node3"].Can["forgejo"] = 3, 3
+	p = Decide(in, s, 90_000, nil)
+	if !runs(p, "node2", "postgresql") {
+		t.Fatalf("node3's claim moved the writer off its holder: %+v", p.Boxes)
+	}
+}
+
+func TestAWriterMovesToABoxWithoutItsDataOnlyWhenNoneWithItIsAlive(t *testing.T) {
+	in, s := writers()
+	s.Leases["svc/postgresql"] = &state.Lease{Holder: "node1", Epoch: 3, Expires: s.Time - 1}
+	s.Boxes["node1"].LastSeen = s.Time - 100_000 // gone
+	p := Decide(in, s, 90_000, nil)
+	if !runs(p, "node2", "postgresql") || !runs(p, "node2", "forgejo") {
+		t.Fatalf("no box runs the writers with the box holding their data gone: %+v %v", p.Boxes, p.Unplaced)
+	}
+}
+
+func TestTheHolderKeepsItsWriterWhicheverBoxSuitsBetter(t *testing.T) {
+	// node2 holds them now at epoch 4 and runs them; node1 suits less
+	in, s := writers()
+	in.Boxes["node1"].Can["postgresql"], in.Boxes["node1"].Can["forgejo"] = 5, 5
+	s.Boxes["node2"].Facts["runs/postgresql"], s.Boxes["node2"].Facts["runs/forgejo"] = 1, 1
+	s.Leases["svc/postgresql"] = &state.Lease{Holder: "node2", Epoch: 4, Expires: s.Time + 40_000}
+	p := Decide(in, s, 90_000, nil)
+	if !runs(p, "node2", "postgresql") || !runs(p, "node2", "forgejo") {
+		t.Fatalf("a writer moved off its live holder: %+v", p.Boxes)
+	}
+	// a draining holder gives it up all the same
+	s.Boxes["node2"].Facts["draining"] = 1
+	if p := Decide(in, s, 90_000, nil); !runs(p, "node1", "postgresql") {
+		t.Fatalf("a draining holder kept its writer: %+v", p.Boxes)
+	}
+}
