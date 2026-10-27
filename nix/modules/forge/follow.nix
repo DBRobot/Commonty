@@ -9,8 +9,11 @@
 # newer than what it has: only what the list names, and of the repositories
 # only those its records (restored first, from postgres's archive, which is
 # newer than the list can be) still hold, so a repository deleted since is
-# not brought back; what it had before is set aside, never deleted. Its own
-# config and secrets stay its own.
+# not brought back; what it had before is set aside (the two newest of
+# those kept). A restore stopped part way goes on where it was. A copy
+# older than the records say was made is not taken: the box refuses the
+# forge, and one with the newer copy takes it. Its own config and secrets
+# stay its own.
 {
   config,
   options,
@@ -35,6 +38,8 @@ let
     "data/tmp/**"
     "data/actions_log/**"
     "data/actions_artifacts/**"
+    # what a takeover set aside (take)
+    ".before-e*/**"
   ];
   filters = pkgs.writeText "dd-forge-filters" (lib.concatMapStrings (p: "- /${p}\n") skip + "+ **\n");
   env = ''
@@ -55,7 +60,13 @@ let
     pkgs.util-linux
     config.boot.zfs.package
     config.services.postgresql.package
+    config.systemd.package
   ];
+
+  # the records of the copies made (copy, below), in postgres beside the
+  # forge's own, so a box taking over restores them with the rest: a copy
+  # older than the one before the newest they name is stale
+  records = "runuser -u postgres -- psql -X -v ON_ERROR_STOP=1 -tA";
 
   # before the forge starts at an epoch: the files it starts from
   take = pkgs.writeShellScript "dd-forge-take" ''
@@ -70,17 +81,31 @@ let
     # no copy yet reads as nothing, not a number: none
     copied=$(rclone cat here:forge/epoch 2>/dev/null | tr -dc 0-9 || true)
     copied=''${copied:-0}
-    if [ "$copied" -le "$mine" ]; then
-      echo "epoch $E: from this box's own files (the copy here is of epoch $copied, these of $mine)"
-      exit 0
-    fi
-    echo "epoch $E: restoring the copy of epoch $copied"
-    rclone copyto here:forge/manifest ${state}/manifest
     # the repositories the records hold, read once postgres has replayed its
     # archive: the list is up to two minutes older, and one deleted since
     # must not come back
     q() { runuser -u postgres -- psql -d ${config.services.forgejo.database.name} -v ON_ERROR_STOP=1 -tAc "$1"; }
     [ "$(q 'select pg_is_in_recovery()')" = f ] || { echo "epoch $E: postgres is still restoring"; exit 1; }
+    need=$(${records} -d dd_follow -c "select at from forge_copies order by at desc offset 1 limit 1" 2>/dev/null || true)
+    # a copy older than that: this box does not take the forge. Stopped rather
+    # than tried again, so dd-control refuses it and the plan gives
+    # it to a box with a newer one; nothing here is touched
+    stale() {
+      if [ -n "$need" ] && [ ! -e ${state}/take-older ] && [ "''${1:-0}" -lt "$need" ]; then
+        echo "epoch $E: $2 is of ''${1:-no time}, older than the copy before the newest the records name ($need): refusing it (${state}/take-older takes it all the same)"
+        systemctl --no-block stop forgejo.service
+        exit 1
+      fi
+    }
+    if [ "$copied" -le "$mine" ] && [ ! -e ${state}/restoring ]; then
+      stale "$(awk '{ print $2 }' ${state}/stamp 2>/dev/null || true)" "this box's own last copy"
+      echo "epoch $E: from this box's own files (the copy here is of epoch $copied, these of $mine)"
+      rm -f ${state}/take-older
+      exit 0
+    fi
+    stale "$(rclone cat here:forge/stamp 2>/dev/null | awk '{ print $2 }' || true)" "the copy here"
+    echo "epoch $E: restoring the copy of epoch $copied"
+    rclone copyto here:forge/manifest ${state}/manifest
     q "select u.lower_name || '/' || r.lower_name from repository r join \"user\" u on u.id = r.owner_id" \
       > ${state}/repos
     awk -F/ 'FILENAME == ARGV[1] { held[$0]; next }
@@ -92,17 +117,37 @@ let
       END { for (r in gone) print "not brought back, deleted since the list: " r > "/dev/stderr" }' \
       ${state}/repos ${state}/manifest > ${state}/manifest.held
     mv ${state}/manifest.held ${state}/manifest
-    aside="${dir}/.before-e$E.$(date +%Y%m%d%H%M%S)"
-    mkdir "$aside"
-    for d in ${dir}/* ${dir}/.[!.]*; do
-      [ -e "$d" ] || continue
-      case "$d" in ${dir}/.before-e*|${dir}/custom) continue ;; esac
-      mv "$d" "$aside/"
-    done
-    echo "what this box had kept at $aside"
+    # a restore stopped part way (2026-10-25: forgejo's start timed out
+    # under it every 90 s for an hour on node2, each try setting aside the
+    # last and leaving files root's) goes on where it was: what this box
+    # had is set aside once
+    if [ -e ${state}/restoring ]; then
+      echo "epoch $E: going on with a restore stopped part way; what this box had is set aside already"
+    else
+      aside="${dir}/.before-e$E.$(date +%Y%m%d%H%M%S)"
+      mkdir "$aside"
+      for d in ${dir}/* ${dir}/.[!.]*; do
+        [ -e "$d" ] || continue
+        case "$d" in ${dir}/.before-e*|${dir}/custom) continue ;; esac
+        mv "$d" "$aside/"
+      done
+      echo "what this box had kept at $aside"
+      echo "$E" > ${state}/restoring
+      # the two newest kept
+      for old in $(for d in ${dir}/.before-e*; do [ -d "$d" ] || continue; echo "''${d##*.} $d"; done | sort -n | head -n -2 | cut -d' ' -f2-); do
+        echo "removing $old: two newer are kept"
+        rm -rf --one-file-system "$old"
+      done
+    fi
     rclone copy --files-from ${state}/manifest here:forge/files ${dir}
-    chown -R forgejo:forgejo ${dir}
+    # the forge's own, but what it had set aside
+    chown forgejo:forgejo ${dir}
+    find ${dir} -mindepth 1 -maxdepth 1 ! -name '.before-e*' -exec chown -R forgejo:forgejo {} +
     touch ${state}/restored
+    # what is here is the store's copy: the next copy sends what changes
+    # from now on
+    date +%s > ${state}/copied-at
+    rm -f ${state}/restoring ${state}/take-older
   '';
   # the repositories and files, from a snapshot, into this box's store
   copy = pkgs.writeShellScript "dd-forge-copy" ''
@@ -116,34 +161,64 @@ let
     flock 9
     E=$(cat ${state}/epoch 2>/dev/null || echo 0)
     [ "$E" -gt 0 ] || { echo "the forge has not started here yet"; exit 0; }
+    # only the forge started under the lease this box holds now: one that
+    # has not (its take still restoring, or refused) would copy what it had
+    # before over the newer copy in this store
+    held=$(jq -r .epoch ${flag} 2>/dev/null || echo 0)
+    [ "$held" = "$E" ] || { echo "the forge has not started under this lease here (epoch $held; it last ran at $E): nothing to copy"; exit 0; }
     # A snapshot read through .zfs stays mounted for minutes after, and is
-    # busy until it is unmounted: on 2026-10-24 each copy's own destroy
-    # failed so, every copy after it found the snapshot there, and so did
-    # the handover's. Unmounted first, and gone before a new one is taken
-    snap=${dir}/.zfs/snapshot/dd-copy
+    # busy until it is unmounted (2026-10-24, and node1's handovers of
+    # 2026-10-26, which found the last one busy and took none). Each copy
+    # takes one of its own, and those before it go once they can
     drop() {
-      zfs list -H -o name ${dataset}@dd-copy >/dev/null 2>&1 || return 0
-      for _ in 1 2 3 4 5 6 7 8 9 10; do
-        if grep -q " $snap " /proc/self/mounts; then umount "$snap" || { sleep 1; continue; }; fi
-        zfs destroy ${dataset}@dd-copy && return 0
-        sleep 1
+      for s in $(zfs list -H -t snapshot -o name ${dataset} 2>/dev/null); do
+        case "$s" in ${dataset}@dd-copy*) ;; *) continue ;; esac
+        m=${dir}/.zfs/snapshot/''${s#*@}
+        if grep -qF " $m " /proc/self/mounts; then umount "$m" 2>/dev/null || true; fi
+        zfs destroy "$s" 2>/dev/null || echo "$s: busy; the next copy takes it away"
       done
-      return 1
     }
-    drop || echo "the last copy's snapshot will not go"
-    zfs snapshot ${dataset}@dd-copy || { echo "no snapshot: not copied this time"; [ -z "$strict" ] || exit 1; exit 0; }
-    src=$snap
+    drop
+    T=$(date +%s)
+    name=dd-copy-$(date +%s%N)
+    zfs snapshot "${dataset}@$name" || { echo "no snapshot: not copied this time"; [ -z "$strict" ] || exit 1; exit 0; }
+    src=${dir}/.zfs/snapshot/$name
     # what the snapshot holds: what a restore takes, and nothing else
     rclone lsf -R --files-only --filter-from ${filters} "$src" | sort > ${state}/manifest.new
-    if rclone sync --checksum --filter-from ${filters} "$src" here:forge/files \
+    # What changed since the snapshot the last copy was taken from (its
+    # time, less a margin), sent whatever the store has; then the rest by
+    # size alone, which sends what is new and deletes what is gone, reading
+    # no file. With --checksum every file was read, and a copy took 3
+    # minutes (node1, 18G): no handover's copy finished within the lease's
+    # time. A box with no copy of its own yet sends it all so
+    since=$(cat ${state}/copied-at 2>/dev/null | tr -dc 0-9 || true)
+    if [ -n "$since" ]; then
+      send() {
+        rclone copy --max-age "$((T - since + 120))s" --no-check-dest --filter-from ${filters} "$src" here:forge/files \
+          && rclone sync --size-only --fast-list --filter-from ${filters} "$src" here:forge/files
+      }
+    else
+      send() { rclone sync --checksum --fast-list --filter-from ${filters} "$src" here:forge/files; }
+    fi
+    if send \
       && rclone copyto ${state}/manifest.new here:forge/manifest \
-      && echo "$E" | rclone rcat here:forge/epoch; then
+      && echo "$E" | rclone rcat here:forge/epoch \
+      && echo "$E $T" | rclone rcat here:forge/stamp; then
       mv ${state}/manifest.new ${state}/manifest
+      echo "$E $T" > ${state}/stamp
+      echo "$T" > ${state}/copied-at
+      # and in the records: what a box taking over checks its copy against
+      { [ "$(${records} -d postgres -c "select 1 from pg_database where datname = 'dd_follow'")" = 1 ] \
+        || ${records} -d postgres -c "create database dd_follow" >/dev/null; } \
+        && ${records} -d dd_follow -c "create table if not exists forge_copies (at bigint primary key, epoch bigint not null)" >/dev/null \
+        && ${records} -d dd_follow -c "insert into forge_copies values ($T, $E) on conflict do nothing" >/dev/null \
+        && ${records} -d dd_follow -c "delete from forge_copies where at not in (select at from forge_copies order by at desc limit 10)" >/dev/null \
+        || echo "this copy is not in the records: a box taking over checks it against the one before"
     else
       echo "not copied this time"
       failed=1
     fi
-    drop || echo "this copy's snapshot will not go: the next copy tries again"
+    drop
     [ -z "$strict" ] || exit "''${failed:-0}"
     exit 0
   '';
@@ -178,6 +253,11 @@ in
         serviceConfig = {
           ExecStartPre = lib.mkBefore [ "+${take}" ];
           ExecStartPost = [ "+${started}" ];
+          # a restore of every repository takes minutes (node1, 18G): the
+          # 90 s default killed each one part way, again and again (node2,
+          # 2026-10-25). A forge whose lease lapses meanwhile is stopped by
+          # its fence (box/placed-fence.sh)
+          TimeoutStartSec = "infinity";
           RestartSec = 2;
           RestartSteps = 5;
           RestartMaxDelaySec = 30;

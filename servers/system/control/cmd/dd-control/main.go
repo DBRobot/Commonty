@@ -887,7 +887,7 @@ func main() {
 	}
 	placed := &placer{
 		box: *box, dir: *placedDir, carries: carried, starts: starts, leased: map[string]bool{},
-		run: systemctl, uptime: uptime, ttl: time.Duration(cfg.Rules.LeaseTTL) * time.Millisecond,
+		run: systemctl, show: systemdShow, uptime: uptime, ttl: time.Duration(cfg.Rules.LeaseTTL) * time.Millisecond,
 		since: map[string]int64{}, sent: map[string]map[uint64]int64{},
 		memory: map[string]float64{}, reserve: map[string]float64{}, free: memFree, refused: map[string]int64{},
 		copies: *placedCopies,
@@ -896,6 +896,7 @@ func main() {
 			return submit("lease", body)
 		},
 	}
+	placed.loadRefusals()
 	// a box with a store (where the plan's copies go) copies a writer's
 	// last writes out when it hands it over
 	if *placedCopies != "" {

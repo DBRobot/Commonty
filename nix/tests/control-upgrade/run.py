@@ -152,20 +152,44 @@ for i, wal in ((1, 156 << 20), (2, 759 << 10)):
         },
         open(f"{T}/facts-signfail{i}.json", "w"),
     )
+# the flap scenario's: the signfail fleet with both boxes signing, node2
+# suiting the writers better by score and able to run them
+open(f"{T}/placement-flap.json", "w").write(json.dumps(s_place))
+json.dump(t_new, open(f"{T}/new/config-flap.json", "w"))
+for i in (1, 2):
+    shutil.copy(f"{T}/carries-signfail{i}.json", f"{T}/carries-flap{i}.json")
+    shutil.copy(f"{T}/facts-signfail{i}.json", f"{T}/facts-flap{i}.json")
 os.makedirs(f"{T}/bin", exist_ok=True)
-# nothing it starts runs: is-active says not, as of a unit stopped; and
-# is-failed only of the units SYSTEMCTL_FAILED names
+# nothing it starts runs: is-active says not, as of a unit stopped. A unit
+# SYSTEMCTL_FAILED names, or the file SYSTEMCTL_FAILED_FILE does, failed;
+# the one SYSTEMCTL_SLOW names (unit:seconds) is still coming up that long
+# after it was started (a restore), and the rest are up
 with open(f"{T}/bin/systemctl", "w") as f:
     f.write(
         """#!/bin/sh
 echo "$@" >> "$SYSTEMCTL_LOG"
+failed() {
+  case " ${SYSTEMCTL_FAILED:-} $(cat "${SYSTEMCTL_FAILED_FILE:-/dev/null}" 2>/dev/null) " in *" $1 "*) return 0 ;; esac
+  return 1
+}
 case "$1" in
+  start)
+    shift
+    for u in "$@"; do date +%s > "$SYSTEMCTL_LOG.start.$u"; done ;;
   is-active) exit 3 ;;
   is-failed)
-    for u in "$@"; do
-      case " ${SYSTEMCTL_FAILED:-} " in *" $u "*) exit 0 ;; esac
-    done
+    for u in "$@"; do failed "$u" && exit 0; done
     exit 1 ;;
+  show)
+    for u in "$@"; do :; done
+    state=active job=
+    if failed "$u"; then
+      state=failed
+    elif [ "${SYSTEMCTL_SLOW%%:*}" = "$u" ] && [ -e "$SYSTEMCTL_LOG.start.$u" ] \\
+      && [ $(( $(date +%s) - $(cat "$SYSTEMCTL_LOG.start.$u") )) -lt "${SYSTEMCTL_SLOW#*:}" ]; then
+      state=activating job="1 start"
+    fi
+    printf 'Type=notify\\nActiveState=%s\\nJob=%s\\n' "$state" "$job" ;;
 esac
 """
     )
@@ -181,7 +205,7 @@ class Fleet:
         self.dir = f"{T}/{name}"
         os.makedirs(self.dir)
         self.procs, self.which, self.relay = {}, {}, None
-        self.samples = []
+        self.samples, self.plans = [], []
         self.stop_watch = False
         for i in (1, 2):
             shutil.copytree(f"{T}/keys{i}", f"{self.dir}/st{i}")
@@ -262,6 +286,10 @@ class Fleet:
             SYSTEMCTL_FAILED="postgresql.service"
             if self.kind == "-signfail" and i == 2
             else "",
+            # what the flap scenario fails as it goes, and postgres restoring
+            # for a minute wherever it starts
+            SYSTEMCTL_FAILED_FILE=f"{self.dir}/failed{i}",
+            SYSTEMCTL_SLOW="postgresql.service:60" if self.kind == "-flap" else "",
         )
         self.procs[i] = subprocess.Popen(
             [
@@ -296,7 +324,8 @@ class Fleet:
                 ]
                 if self.kind == "-signfail"
                 else []
-            ),
+            )
+            + (["-test-facts", self.facts(i)] if self.kind == "-flap" else []),
             env=env,
             stdout=open(f"{self.dir}/n{i}.log", "a"),
             stderr=subprocess.STDOUT,
@@ -317,7 +346,8 @@ class Fleet:
         except Exception:
             return {}
 
-    # every half second: each box's state, as (time, box, its release, state)
+    # every half second: each box's state, as (time, box, its release, state);
+    # in the flap scenario each box's plan too, as (time, box, plan)
     def watch(self):
         while not self.stop_watch:
             now = time.time()
@@ -325,7 +355,31 @@ class Fleet:
                 s = self.state(i)
                 if s.get("height"):
                     self.samples.append((now, i, self.which.get(i), s))
+                if self.kind == "-flap":
+                    try:
+                        plan = json.load(
+                            urllib.request.urlopen(
+                                f"http://127.0.0.1:{self.listen + i}/plan", timeout=2
+                            )
+                        )
+                        self.plans.append((now, i, plan))
+                    except Exception:
+                        pass
             time.sleep(0.5)  # sleep-ok: the sampling beat
+
+    # the flap scenario's facts a box adds to its heartbeat: its own file,
+    # changed as the scenario goes (dd-drain's "draining")
+    def facts(self, i):
+        path = f"{self.dir}/facts{i}.json"
+        if not os.path.exists(path):
+            shutil.copy(f"{T}/facts-flap{i}.json", path)
+        return path
+
+    def drain(self, i, on):
+        f = json.load(open(self.facts(i)))
+        f["draining"] = 1 if on else 0
+        json.dump(f, open(self.facts(i) + ".new", "w"))
+        os.replace(self.facts(i) + ".new", self.facts(i))
 
     def switch(self, who):
         if who == "witness":
@@ -546,6 +600,157 @@ class Fleet:
             self.stop_box(i)
         self.stop_relay()
 
+    # 2026-10-25/26: agreement stalled past the lease's time again and
+    # again; both boxes stopped their writers, the lapsed leases were gone
+    # from the agreed state, and the plan gave the group to whichever box
+    # suited it best, a box that took it over refused it seconds into its
+    # restore, and two refusals left it nowhere. Here: node1 holds the
+    # writers and node2 suits them better by score. A stall longer than the
+    # lease gives them back to node1, and nothing moves for minutes after;
+    # drained, node1 hands them to node2, whose postgres restores for a
+    # minute and is not refused for it; and with node2 drained and node1
+    # refusing postgres, the plan never leaves it nowhere
+    # a box's log so far; one it has not written yet is empty
+    def log(self, name):
+        try:
+            return open(f"{self.dir}/{name}").read()
+        except FileNotFoundError:
+            return ""
+
+    def logsize(self, i):
+        return len(self.log(f"systemctl{i}.log"))
+
+    def flap(self, stall=60, observe=120):
+        self.start_relay("new")
+        # node1 first: node2 drained until node1 holds them
+        self.drain(2, True)
+        for i in self.boxes:
+            self.start_box(i, "new")
+
+        def leases():
+            got = self.state(1).get("leases") or {}
+            return {w: got.get(f"svc/{w}") or {} for w in WRITERS}
+
+        def on(box, mark=0, only=WRITERS):
+            return all(
+                lease.get("holder") == box
+                and self.runs(int(box[-1]), w, lease["epoch"], mark)
+                for w, lease in leases().items()
+                if w in only
+            )
+
+        wait(f"{self.name}: the writers run on node1", lambda: on("node1"), timeout=150)
+        self.drain(2, False)
+        t = threading.Thread(target=self.watch)
+        t.start()
+        time.sleep(15)  # sleep-ok: node2 back, and better by score
+        held = {w: l.get("epoch") for w, l in leases().items()}
+        ok(
+            on("node1"),
+            f"{self.name}: the holder keeps its writers though node2 suits them better",
+        )
+
+        # agreement stalls past the lease's time: the relay gone
+        self.stop_relay()
+        time.sleep(stall)  # sleep-ok: the stall lasts this long
+        mark2 = self.logsize(2)
+        self.start_relay("new")
+        t1 = time.time()
+        back = wait(
+            f"{self.name}: the writers back on node1 after a {stall}s stall",
+            lambda: (
+                on("node1")
+                and all(l.get("epoch", 0) > held[w] for w, l in leases().items())
+            ),
+            timeout=120,
+        )
+        if back:
+            ok(
+                True,
+                f"{self.name}: the writers back on node1 {time.time() - t1:.1f}s after agreement came back",
+            )
+        self.samples.clear()
+        time.sleep(observe)  # sleep-ok: watched this long for a move
+        seen = {
+            (w, (s.get("leases") or {}).get(f"svc/{w}", {}).get("holder"))
+            for _, _, _, s in self.samples
+            for w in WRITERS
+        }
+        ok(
+            all(h == "node1" for _, h in seen),
+            f"{self.name}: {observe}s after the stall, every lease with node1 (saw {sorted(seen, key=str)})",
+        )
+        log2 = self.log(f"systemctl2.log")[mark2:]
+        ok(
+            not any(line.startswith("start") for line in log2.splitlines()),
+            f"{self.name}: node2 started no writer after the stall",
+        )
+
+        # node1 drained: node2 takes them over, postgres restoring a minute
+        mark2 = self.logsize(2)
+        self.drain(1, True)
+        wait(
+            f"{self.name}: node2 takes the writers over",
+            lambda: on("node2", mark2),
+            timeout=120,
+        )
+        epochs = {w: l.get("epoch") for w, l in leases().items()}
+        self.samples.clear()
+        time.sleep(75)  # sleep-ok: the restore's minute, and a margin
+        log = self.log("n2.log")
+        ok(
+            "failed to start here" not in log,
+            f"{self.name}: node2 refused nothing while postgres restored",
+        )
+        seen = {
+            (
+                w,
+                (s.get("leases") or {}).get(f"svc/{w}", {}).get("holder"),
+                (s.get("leases") or {}).get(f"svc/{w}", {}).get("epoch"),
+            )
+            for _, _, _, s in self.samples
+            for w in WRITERS
+        }
+        ok(
+            seen == {(w, "node2", e) for w, e in epochs.items()},
+            f"{self.name}: the writers stayed on node2 through its restore (saw {sorted(seen, key=str)})",
+        )
+
+        # node2 drained, node1 back, and node1 unable to start postgres:
+        # it refuses it, and the plan, with no other box, gives it back
+        mark1 = self.logsize(1)
+        open(f"{self.dir}/failed1", "w").write("postgresql.service\n")
+        self.plans.clear()
+        self.drain(1, False)
+        self.drain(2, True)
+        wait(
+            f"{self.name}: node1 refuses postgres it cannot start, and tries it again",
+            lambda: "trying it again" in self.log("n1.log"),
+            timeout=150,
+        )
+        wait(
+            f"{self.name}: postgres held by node1 at last",
+            lambda: on("node1", mark1, only=("postgresql",)),
+            timeout=60,
+        )
+        nowhere = sorted(
+            {
+                why
+                for _, _, plan in self.plans
+                for svc, why in (plan.get("unplaced") or {}).items()
+                if svc in WRITERS
+            }
+        )
+        ok(
+            "failed to start here" in self.log("n1.log") and not nowhere,
+            f"{self.name}: refused where no other box could run it, the plan still placed it (unplaced: {nowhere})",
+        )
+        self.stop_watch = True
+        t.join()
+        for i in self.boxes:
+            self.stop_box(i)
+        self.stop_relay()
+
     def run(self, order):
         self.start_relay("old")
         for i in (1, 2, 3):
@@ -671,7 +876,18 @@ class Fleet:
             )
 
 
-if os.environ.get("SCENARIO") == "signfail":
+if os.environ.get("SCENARIO") == "flap":
+    fleets = ["e"]
+    e = Fleet("e", 8795, 4690, boxes=(1, 2), witness=False, kind="-flap")
+    try:
+        e.flap()
+    finally:
+        # a scenario that broke off leaves nothing running to hold the build
+        e.stop_watch = True
+        for proc in list(e.procs.values()) + [e.relay]:
+            if proc and proc.poll() is None:
+                proc.kill()
+elif os.environ.get("SCENARIO") == "signfail":
     fleets = ["d"]
     Fleet("d", 8794, 4590, boxes=(1, 2), witness=False, kind="-signfail").signfail()
 elif os.environ.get("SCENARIO") == "together":

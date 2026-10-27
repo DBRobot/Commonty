@@ -49,6 +49,7 @@ assert set(carries) == {
     "forgejo-runner",
     "members-runner",
     "thanos-store",
+    "postgresql",
 }, carries
 assert set(carries["dd-games"]) == {
     "dd-games.service",
@@ -58,6 +59,11 @@ assert set(carries["dd-games"]) == {
 }, carries["dd-games"]
 assert carries["forgejo-runner"] == ["gitea-runner-box.service"], carries
 assert carries["members-runner"] == ["gitea-runner-members-box.service"], carries
+# a writer's units, all of them stopped with it; what runs on its handover
+# alone is never started with it
+assert "dd-pg-handover.service" in carries["postgresql"], carries["postgresql"]
+assert starts["postgresql"][0] == "postgresql.service", starts["postgresql"]
+assert "dd-pg-handover.service" not in starts["postgresql"], starts["postgresql"]
 # a timer starts, not the run it starts; no template's instance
 assert set(starts["dd-games"]) == {"dd-games.service", "games-access.timer"}, starts[
     "dd-games"

@@ -171,7 +171,16 @@ let
         owned.${s} or [ ]
       )
     );
-  startsOf = s: lib.unique (map service carries.${s} ++ lib.filter atBoot (owned.${s} or [ ]));
+  # A unit run on a handover (dd.store.handover) never starts with its
+  # service: started beside a writer taking the lease, dd-pg-handover found
+  # the epoch moved on, failed, and the box refused its own writer
+  # (2026-10-25/26)
+  startsOf =
+    s:
+    lib.unique (
+      map service (lib.filter (u: !builtins.elem u handover) carries.${s})
+      ++ lib.filter atBoot (owned.${s} or [ ])
+    );
 in
 {
   options.dd.placed.services = lib.mkOption {

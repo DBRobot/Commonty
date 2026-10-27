@@ -40,6 +40,8 @@ func newPlacer(t *testing.T) (*placer, *[]string) {
 			calls = append(calls, strings.Join(args, " "))
 			return nil
 		},
+		// what it starts comes up, unless a test says otherwise
+		show: func(string) (unitState, error) { return unitState{Type: "simple", Active: "active"}, nil },
 	}
 	return p, &calls
 }
@@ -679,19 +681,12 @@ func TestWhatRunsWithoutItsFlagStopsOnce(t *testing.T) {
 // plan moves it
 func TestAWriterThatFailsToStartIsRefused(t *testing.T) {
 	p, calls, clock, s := leasedPlacer(t)
-	failed := false
-	p.run = func(args ...string) error {
-		switch args[0] {
-		case "is-active":
-			return errors.New("inactive")
-		case "is-failed":
-			if !failed {
-				return errors.New("not failed")
-			}
-			return nil
+	st := unitState{Type: "notify", Active: "activating", Job: "7 start"}
+	p.show = func(unit string) (unitState, error) {
+		if unit != "postgresql.service" {
+			t.Fatalf("judged %s", unit)
 		}
-		*calls = append(*calls, strings.Join(args, " "))
-		return nil
+		return st, nil
 	}
 	s.Leases["svc/db"] = &state.Lease{Holder: "node2", Epoch: 3, Expires: s.Time - 1}
 	p.reconcile(wantDB, s)
@@ -705,7 +700,7 @@ func TestAWriterThatFailsToStartIsRefused(t *testing.T) {
 	if p.facts()["refused/db"] != 0 {
 		t.Fatal("refused before it failed")
 	}
-	failed = true
+	st = unitState{Type: "notify", Active: "failed"}
 	*clock += 2000
 	grant(p, s, 4)
 	p.reconcile(wantDB, s)
@@ -725,7 +720,7 @@ func TestAWriterThatFailsToStartIsRefused(t *testing.T) {
 	}
 	// taking back its own lapsed lease, it has the writer's data: never refused
 	p2, _, clock2, s2 := leasedPlacer(t)
-	p2.run = p.run
+	p2.show = p.show
 	s2.Leases["svc/db"] = &state.Lease{Holder: "node1", Epoch: 4, Expires: s2.Time - 1}
 	p2.reconcile(wantDB, s2)
 	grant(p2, s2, 5)
@@ -737,5 +732,230 @@ func TestAWriterThatFailsToStartIsRefused(t *testing.T) {
 	p2.reconcile(wantDB, s2)
 	if !p2.up("db") || p2.facts()["refused/db"] != 0 {
 		t.Fatal("refused a writer whose lapsed lease was its own")
+	}
+}
+
+// a writer taken over and started: rounds of it until judged
+func takenOver(t *testing.T) (*placer, *[]string, *int64, *state.State, *unitState) {
+	p, calls, clock, s := leasedPlacer(t)
+	st := &unitState{Type: "notify", Active: "activating", Job: "7 start"}
+	// its own unit first, then a helper (box/placed.nix starts.json)
+	p.carries["db"] = []string{"postgresql.service", "dd-pg-base.service", "dd-pg-base.timer"}
+	p.starts = map[string][]string{"db": {"postgresql.service", "dd-pg-base.service", "dd-pg-base.timer"}}
+	p.show = func(unit string) (unitState, error) {
+		if unit != "postgresql.service" {
+			t.Fatalf("judged %s, not the writer's own unit", unit)
+		}
+		return *st, nil
+	}
+	s.Leases["svc/db"] = &state.Lease{Holder: "node2", Epoch: 3, Expires: s.Time - 1}
+	p.reconcile(wantDB, s)
+	grant(p, s, 4)
+	p.reconcile(wantDB, s)
+	*clock += leaseMargin.Milliseconds()
+	p.reconcile(wantDB, s)
+	if !p.up("db") {
+		t.Fatal("not started")
+	}
+	return p, calls, clock, s, st
+}
+
+// 2026-10-26 21:38: node1 started postgres restoring a base backup, and
+// refused it 5 s later for a helper that failed beside it. A restore that
+// takes minutes, restarts on the way, and helpers failing meanwhile, refuse
+// nothing; once it is up, nothing later is a failure to start
+func TestASlowRestoreIsNotRefused(t *testing.T) {
+	p, _, clock, s, st := takenOver(t)
+	for i := 0; i < 120; i++ { // ten minutes of rounds
+		*clock += 5000
+		grant(p, s, 4)
+		switch i % 3 {
+		case 0:
+			*st = unitState{Type: "notify", Active: "activating", Job: "7 start"}
+		case 1:
+			// between two tries (Restart=): activating (auto-restart)
+			*st = unitState{Type: "notify", Active: "activating"}
+		case 2:
+			// failed, and started again: its job is queued
+			*st = unitState{Type: "notify", Active: "failed", Job: "8 start"}
+		}
+		p.reconcile(wantDB, s)
+		if p.facts()["refused/db"] != 0 {
+			t.Fatalf("refused while it was still coming up (round %d, %+v)", i, *st)
+		}
+	}
+	*st = unitState{Type: "notify", Active: "active"}
+	*clock += 5000
+	grant(p, s, 4)
+	p.reconcile(wantDB, s)
+	if _, judging := p.started["db"]; judging {
+		t.Fatal("still judged once up")
+	}
+	*st = unitState{Type: "notify", Active: "failed"}
+	*clock += 5000
+	grant(p, s, 4)
+	p.reconcile(wantDB, s)
+	if p.facts()["refused/db"] != 0 {
+		t.Fatal("a writer that came up and failed later was refused as one that never started")
+	}
+}
+
+// node2, 2026-10-25: the forge's dirs could not be made, and forgejo never
+// started: stopped, with nothing queued, it failed to start
+func TestAWriterWhoseDependencyFailedIsRefused(t *testing.T) {
+	p, _, clock, s, st := takenOver(t)
+	*st = unitState{Type: "notify", Active: "inactive"}
+	*clock += 5000
+	grant(p, s, 4)
+	p.reconcile(wantDB, s)
+	if p.facts()["refused/db"] != 1 {
+		t.Fatal("not refused")
+	}
+}
+
+// a refusal outlives the dd-control that made it (dd-control exits on its
+// own when agreement stalls), and lasts no longer than it would have
+func TestARefusalIsKeptAcrossARestart(t *testing.T) {
+	p, _, clock, s, st := takenOver(t)
+	*st = unitState{Type: "notify", Active: "failed"}
+	*clock += 5000
+	grant(p, s, 4)
+	p.reconcile(wantDB, s)
+	if p.facts()["refused/db"] != 1 {
+		t.Fatal("not refused")
+	}
+	q, _, clock2, _ := leasedPlacer(t)
+	q.dir = p.dir
+	*clock2 = *clock + 60_000
+	q.loadRefusals()
+	if q.facts()["refused/db"] != 1 {
+		t.Fatal("the refusal was forgotten by the next dd-control")
+	}
+	r, _, clock3, _ := leasedPlacer(t)
+	r.dir = p.dir
+	*clock3 = *clock + refuseFor.Milliseconds()
+	r.loadRefusals()
+	if r.facts()["refused/db"] != 0 {
+		t.Fatal("a refusal lasted past its time")
+	}
+	if _, err := os.Stat(filepath.Join(p.dir, ".refused-db")); !os.IsNotExist(err) {
+		t.Fatal("a refusal past its time was kept")
+	}
+}
+
+// 2026-10-26 21:35: node2 drained, node1 refusing postgres: the plan gives
+// it to node1 all the same (place.Decide), and node1 tries again rather
+// than leaving it nowhere
+func TestARefusedWriterGivenBackAnywayIsTriedAgain(t *testing.T) {
+	p, calls, clock, s, st := takenOver(t)
+	*st = unitState{Type: "notify", Active: "failed"}
+	*clock += 5000
+	grant(p, s, 4)
+	p.reconcile(wantDB, s)
+	p.reconcile(place.Plan{Boxes: map[string][]place.Decision{"node1": {}}}, s)
+	delete(s.Leases, "svc/db")
+	n := len(*calls)
+	// the plan, from a state that does not show the refusal yet: nothing
+	p.reconcile(wantDB, s)
+	if len(*calls) != n {
+		t.Fatalf("asked again before the plan knew of its refusal: %v", (*calls)[n:])
+	}
+	// from one that does: no other box, so here
+	s.Boxes["node1"] = &state.BoxState{Facts: map[string]float64{"refused/db": 1}}
+	p.reconcile(wantDB, s)
+	if (*calls)[len(*calls)-1] != "lease acquire" || p.failedLately("db") {
+		t.Fatalf("not tried again: %v", (*calls)[n:])
+	}
+	if _, err := os.Stat(filepath.Join(p.dir, ".refused-db")); !os.IsNotExist(err) {
+		t.Fatal("the refusal is still kept")
+	}
+}
+
+// 2026-10-25/26: agreement stalled past the lease's time, both boxes'
+// writers stopped, and the lapsed leases were gone from the agreed state;
+// the plan, with no holder to keep, chose node2 by its score. The box that
+// held them last asks again at once, given them or not; another box the
+// plan gives them to waits first
+func TestALapsedWriterGoesBackToItsHolderFirst(t *testing.T) {
+	p, calls, clock, s := leasedPlacer(t)
+	p.reconcile(wantDB, s)
+	grant(p, s, 7)
+	s.Epochs["svc/db"] = 7
+	p.reconcile(wantDB, s)
+	*clock += leaseMargin.Milliseconds()
+	p.reconcile(wantDB, s)
+	if !p.up("db") {
+		t.Fatal("not started")
+	}
+	// agreement stalls: fenced, then the lease gone at the next block
+	*clock += 60_000
+	p.fence()
+	delete(s.Leases, "svc/db")
+	s.Time += 60_000
+	toNode2 := place.Plan{Boxes: map[string][]place.Decision{"node1": {}, "node2": {{Service: "db"}}}}
+	n := len(*calls)
+	p.reconcile(toNode2, s)
+	if !reflect.DeepEqual((*calls)[n:], []string{"lease acquire"}) {
+		t.Fatalf("its last holder did not ask for it back: %v", (*calls)[n:])
+	}
+	if p.before["db"] != "node1" {
+		t.Fatalf("taking back its own counted as a takeover: %q", p.before["db"])
+	}
+	// node2, given it by the plan, did not hold it last: it waits
+	q, qcalls, qclock := otherBox(t)
+	q.reconcile(toNode2, s)
+	*qclock += takeBack.Milliseconds() - 1
+	q.reconcile(toNode2, s)
+	if len(*qcalls) != 0 {
+		t.Fatalf("node2 asked before its last holder could take it back: %v", *qcalls)
+	}
+	*qclock += 1
+	q.reconcile(toNode2, s)
+	if !reflect.DeepEqual(*qcalls, []string{"lease acquire"}) {
+		t.Fatalf("node2 never asks: %v", *qcalls)
+	}
+	// a box being emptied takes nothing back
+	s.Boxes["node1"] = &state.BoxState{Facts: map[string]float64{"draining": 1}}
+	n = len(*calls)
+	p.reconcile(toNode2, s)
+	if len(*calls) != n {
+		t.Fatalf("a draining box took a writer back: %v", (*calls)[n:])
+	}
+	// nor one whose epoch is not the newest: another held it since
+	delete(s.Boxes, "node1")
+	s.Epochs["svc/db"] = 8
+	p.reconcile(toNode2, s)
+	if len(*calls) != n {
+		t.Fatalf("took back a writer another box held since: %v", (*calls)[n:])
+	}
+}
+
+// node2's side of it: a placer for a box that never held db
+func otherBox(t *testing.T) (*placer, *[]string, *int64) {
+	q, calls, clock, _ := leasedPlacer(t)
+	q.box = "node2"
+	return q, calls, clock
+}
+
+// handed over on purpose, the lease given back: the box gives it up, and
+// does not take it back as a lapsed one
+func TestAWriterGivenBackIsNotTakenBack(t *testing.T) {
+	p, calls, clock, s := leasedPlacer(t)
+	p.reconcile(wantDB, s)
+	grant(p, s, 7)
+	s.Epochs["svc/db"] = 7
+	p.reconcile(wantDB, s)
+	*clock += leaseMargin.Milliseconds()
+	p.reconcile(wantDB, s)
+	toNode2 := place.Plan{Boxes: map[string][]place.Decision{"node1": {}, "node2": {{Service: "db"}}}}
+	p.reconcile(toNode2, s)
+	if (*calls)[len(*calls)-1] != "lease release" {
+		t.Fatalf("not given back: %v", *calls)
+	}
+	delete(s.Leases, "svc/db")
+	n := len(*calls)
+	p.reconcile(toNode2, s)
+	if len(*calls) != n {
+		t.Fatalf("took back what it gave away: %v", (*calls)[n:])
 	}
 }

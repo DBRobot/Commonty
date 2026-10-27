@@ -13,6 +13,13 @@
 # first for 20 s, then for longer than a box counts as alive; the writers
 # go to node2, which lacks their data, only while node1 is gone, and back
 # to node1 once it signs again (checks.control-signfail).
+#
+# scenario "flap": the failover flapping of 2026-10-25/26. node1 holds the
+# writers, node2 suits them better by score: a stall of agreement past the
+# lease's time gives them back to node1 and nothing moves for minutes after;
+# node1 drained, node2 takes them over with postgres restoring for a minute
+# and does not refuse it; node2 drained and node1 refusing postgres, the
+# plan still places it (checks.control-flap).
 {
   pkgs,
   self,

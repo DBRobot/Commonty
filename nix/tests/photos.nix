@@ -24,12 +24,10 @@ let
     echo GK0123456789abcdef01234567 > $out/garage-key-id
     echo 1111111111111111111111111111111111111111111111111111111111111111 > $out/garage-key-secret
   '';
-  cert = pkgs.runCommand "test-cert" { nativeBuildInputs = [ pkgs.openssl ]; } ''
-    mkdir $out
-    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
-      -subj '/CN=test.invalid' -addext 'subjectAltName=DNS:*.test.invalid' \
-      -keyout $out/key.pem -out $out/cert.pem
-  '';
+  cert = import ../lib/test-cert.nix { inherit pkgs; } {
+    subject = "test.invalid";
+    names = [ "*.test.invalid" ];
+  };
 in
 {
   name = "photos";

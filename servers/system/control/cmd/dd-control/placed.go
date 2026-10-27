@@ -38,6 +38,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -103,18 +104,32 @@ type placer struct {
 	// since when (uptime). Its flag stays, and its lease is renewed
 	handing map[string]int64
 	// a writer taken over from another box (or from none): when (uptime)
-	// it was started here under its lease; and one that failed to start
-	// since, refused: a box that took a writer it cannot run (no base
-	// backup, a key it cannot open) says so, and the plan gives it to a
-	// box that can (2026-10-24, node2). One taking back its own lapsed
-	// lease has the writer's data, and is never refused
+	// it was started here under its lease, until it is up; and one that
+	// failed to start since, refused: a box that took a writer it cannot
+	// run (no base backup, a key it cannot open) says so, and the plan
+	// gives it to a box that can (2026-10-24, node2). One taking back its
+	// own lapsed lease has the writer's data, and is never refused. A
+	// refusal is kept beside the flags (.refused-<svc>), so a dd-control
+	// started again keeps it, and a boot forgets it
 	started, failed map[string]int64
 	// who held a writer's lease when this box asked for it
 	before map[string]string
+	// a writer's own unit as systemd has it now, or a test's stand-in
+	show func(unit string) (unitState, error)
+	// a writer whose lease is held by no one: since when (uptime) this box
+	// has seen it so
+	absent map[string]int64
 }
 
-// how long after a writer is started here a failure to start refuses it
-const failWithin = 3 * time.Minute
+// what systemd says of a unit
+type unitState struct {
+	Type, Active, Job string
+}
+
+// how long a box that did not hold a writer's lapsed lease waits before it
+// asks for it: the box that held it, which has its data, asks at once
+// (placed.go takeBack), and gets it back first
+const takeBack = 20 * time.Second
 
 // how long a handover asks again for its final copy before it gives the
 // lease back without it, its last writes kept here alone
@@ -493,11 +508,18 @@ func (p *placer) reconcile(plan place.Plan, s *state.State) {
 	}
 	ok := p.allowed(want, s)
 	for _, svc := range slices.Sorted(maps.Keys(cs)) {
-		p.reconcileLeased(svc, want[svc] && ok[svc], s)
+		p.reconcileLeased(svc, want[svc] && ok[svc], false, s)
+	}
+	// what the plan gives any box
+	anywhere := map[string]bool{}
+	for _, ds := range plan.Boxes {
+		for _, d := range ds {
+			anywhere[d.Service] = true
+		}
 	}
 	for _, svc := range p.names() {
 		if p.leased[svc] {
-			p.reconcileLeased(svc, want[svc], s)
+			p.reconcileLeased(svc, want[svc], anywhere[svc], s)
 			continue
 		}
 		switch {
@@ -535,6 +557,73 @@ func (p *placer) failedLately(svc string) bool {
 	return ok && p.uptime()-at < refuseFor.Milliseconds()
 }
 
+func (p *placer) refusedPath(svc string) string { return filepath.Join(p.dir, ".refused-"+svc) }
+
+// refuse remembers a writer this box failed to start, beside the flags
+func (p *placer) refuse(svc string, at int64) {
+	if p.failed == nil {
+		p.failed = map[string]int64{}
+	}
+	p.failed[svc] = at
+	if err := os.MkdirAll(p.dir, 0o755); err == nil {
+		_ = os.WriteFile(p.refusedPath(svc), []byte(strconv.FormatInt(at, 10)), 0o644)
+	}
+}
+
+func (p *placer) unrefuse(svc string) {
+	delete(p.failed, svc)
+	_ = os.Remove(p.refusedPath(svc))
+}
+
+// loadRefusals takes back the refusals a dd-control before this one made
+// since boot: kept by the same clock, they last as long as they would have
+func (p *placer) loadRefusals() {
+	es, _ := os.ReadDir(p.dir)
+	for _, e := range es {
+		svc, ok := strings.CutPrefix(e.Name(), ".refused-")
+		if !ok {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(p.dir, e.Name()))
+		at, perr := strconv.ParseInt(strings.TrimSpace(string(raw)), 10, 64)
+		if err != nil || perr != nil || p.uptime()-at >= refuseFor.Milliseconds() || at > p.uptime() {
+			_ = os.Remove(filepath.Join(p.dir, e.Name()))
+			continue
+		}
+		if p.failed == nil {
+			p.failed = map[string]int64{}
+		}
+		p.failed[svc] = at
+	}
+}
+
+func (p *placer) heldPath(svc string) string { return filepath.Join(p.dir, ".held-"+svc) }
+
+// lastHeld: the epoch of a writer's lease this box held last, kept beside
+// the flags while its lease lapses and a dd-control starts again, and
+// cleared when it gives the lease back; 0, none
+func (p *placer) lastHeld(svc string) uint64 {
+	raw, err := os.ReadFile(p.heldPath(svc))
+	if err != nil {
+		return 0
+	}
+	e, _ := strconv.ParseUint(strings.TrimSpace(string(raw)), 10, 64)
+	return e
+}
+
+func (p *placer) setHeld(svc string, epoch uint64) {
+	if epoch == 0 {
+		_ = os.Remove(p.heldPath(svc))
+		return
+	}
+	if p.lastHeld(svc) == epoch {
+		return
+	}
+	if err := os.MkdirAll(p.dir, 0o755); err == nil {
+		_ = os.WriteFile(p.heldPath(svc), []byte(strconv.FormatUint(epoch, 10)), 0o644)
+	}
+}
+
 // startUnits: what starts a service, of its units
 func (p *placer) startUnits(svc string) []string {
 	if us, ok := p.starts[svc]; ok && !computerFlag.MatchString(svc) {
@@ -543,27 +632,129 @@ func (p *placer) startUnits(svc string) []string {
 	return p.units(svc)
 }
 
-func (p *placer) reconcileLeased(svc string, want bool, s *state.State) {
-	l := s.Leases[leaseOf(svc)]
-	mine := l != nil && l.Holder == p.box && l.Expires > s.Time
+// judge: whether a writer started here has failed to start, or is up. Only
+// its own unit, the first service of what starts it, counts: a helper of
+// it failing while it comes up (a handover's archive at the wrong epoch,
+// museum's health check before museum answers; 2026-10-25/26, each of
+// which refused a holder's own writer 5 s after it started) says nothing
+// of whether this box can run it. Coming up, restarting, or waiting on a
+// job (a restore can take many minutes) is neither; failed, or stopped
+// with nothing queued (what it needs failed), is failed
+func (p *placer) judge(svc string) (failed, up bool) {
+	unit := ""
+	for _, u := range p.startUnits(svc) {
+		if strings.HasSuffix(u, ".service") {
+			unit = u
+			break
+		}
+	}
+	if unit == "" || p.show == nil {
+		return false, true
+	}
+	st, err := p.show(unit)
+	if err != nil {
+		return false, false
+	}
+	switch {
+	case st.Active == "active":
+		return false, true
+	case st.Job != "":
+		return false, false
+	case st.Active == "failed":
+		return true, false
+	case st.Active == "inactive":
+		// a oneshot that ran to its end is done
+		return st.Type != "oneshot", st.Type == "oneshot"
+	}
+	return false, false
+}
+
+// systemdShow: what systemd says of a unit now
+func systemdShow(unit string) (unitState, error) {
+	out, err := exec.Command("systemctl", "show", "-p", "Type,ActiveState,Job", unit).Output()
+	if err != nil {
+		return unitState{}, fmt.Errorf("systemctl show %s: %v", unit, err)
+	}
+	var st unitState
+	for _, line := range strings.Split(string(out), "\n") {
+		k, v, _ := strings.Cut(line, "=")
+		switch k {
+		case "Type":
+			st.Type = v
+		case "ActiveState":
+			st.Active = v
+		case "Job":
+			st.Job = v
+		}
+	}
+	return st, nil
+}
+
+// whether this box is being emptied (dd-drain, or switching release): it
+// takes no writer back
+func (p *placer) leaving(s *state.State) bool {
+	b := s.Boxes[p.box]
+	return b != nil && (b.Facts["draining"] > 0 || b.Facts["release_drain"] > 0)
+}
+
+// reconcileLeased: want, the plan gives it here; anywhere, it gives it to
+// some box
+func (p *placer) reconcileLeased(svc string, want, anywhere bool, s *state.State) {
+	role := leaseOf(svc)
+	l := s.Leases[role]
+	taken := l != nil && l.Expires > s.Time
+	mine := taken && l.Holder == p.box
 	now := p.uptime()
+	// given here though this box refused it: the plan does that only when
+	// every box able to run it refused it (place.Decide), so it is tried
+	// again rather than left nowhere
+	if want && p.failedLately(svc) && s.Boxes[p.box] != nil && s.Boxes[p.box].Facts["refused/"+svc] > 0 {
+		log.Printf("placed: %s: given here though this box refused it, as no box able to run it would; trying it again", svc)
+		p.unrefuse(svc)
+	}
 	if !mine {
 		delete(p.since, svc)
 		if p.up(svc) {
 			// agreed and fresh: someone else's, or nobody's
 			_ = p.stop(svc, "its lease is not this box's", false)
 		}
-		if want && p.fits(svc, s) && !p.failedLately(svc) {
-			if p.before == nil {
-				p.before = map[string]string{}
-			}
-			p.before[svc] = ""
-			if l != nil {
-				p.before[svc] = l.Holder
-			}
-			p.send(svc, state.LeaseOp{Role: leaseOf(svc), Op: "acquire"})
+		if p.absent == nil {
+			p.absent = map[string]int64{}
 		}
+		if _, seen := p.absent[svc]; taken {
+			delete(p.absent, svc)
+		} else if !seen {
+			p.absent[svc] = now
+		}
+		// its lease lapsed, and this box held it last (the agreed newest
+		// epoch was its own): it has the writer's data, and asks for it
+		// again at once, given here or not, unless it is being emptied.
+		// Holding it, the plan keeps it here
+		last := p.leased[svc] && !taken && p.lastHeld(svc) > 0 && p.lastHeld(svc) == s.Epochs[role] && !p.leaving(s)
+		if !(want || (last && anywhere)) || !p.fits(svc, s) || p.failedLately(svc) {
+			return
+		}
+		// held by no one, and by another box last: that box may still take
+		// it back, and goes first
+		if p.leased[svc] && !taken && !last && s.Epochs[role] > 0 && now-p.absent[svc] < takeBack.Milliseconds() {
+			return
+		}
+		if p.before == nil {
+			p.before = map[string]string{}
+		}
+		p.before[svc] = ""
+		if l != nil {
+			p.before[svc] = l.Holder
+		}
+		if last {
+			p.before[svc] = p.box
+		}
+		p.send(svc, state.LeaseOp{Role: role, Op: "acquire"})
 		return
+	}
+	delete(p.absent, svc)
+	if p.leased[svc] {
+		p.setHeld(svc, l.Epoch)
 	}
 	if !want {
 		if p.up(svc) {
@@ -578,7 +769,7 @@ func (p *placer) reconcileLeased(svc string, want bool, s *state.State) {
 			err := p.stop(svc, "the plan moved it", copyOut)
 			if errors.Is(err, errNotCopied) {
 				// stopped, the flag kept: renewed, and asked again next round
-				p.send(svc, state.LeaseOp{Role: leaseOf(svc), Op: "renew", Epoch: l.Epoch})
+				p.send(svc, state.LeaseOp{Role: role, Op: "renew", Epoch: l.Epoch})
 				// its flag still says it is handed over: nothing starts
 				if h := p.holding(svc); h.Epoch == l.Epoch {
 					if u := p.leaseUntil(svc, l); u > h.Until {
@@ -593,11 +784,14 @@ func (p *placer) reconcileLeased(svc string, want bool, s *state.State) {
 				return // still running: the lease stays, and lapses if it must
 			}
 		}
-		p.send(svc, state.LeaseOp{Role: leaseOf(svc), Op: "release", Epoch: l.Epoch})
+		// given back: the next holder has its data, and this box no
+		// longer asks for it first
+		p.setHeld(svc, 0)
+		p.send(svc, state.LeaseOp{Role: role, Op: "release", Epoch: l.Epoch})
 		return
 	}
 	until := p.leaseUntil(svc, l)
-	p.send(svc, state.LeaseOp{Role: leaseOf(svc), Op: "renew", Epoch: l.Epoch})
+	p.send(svc, state.LeaseOp{Role: role, Op: "renew", Epoch: l.Epoch})
 	if _, ok := p.since[svc]; !ok {
 		p.since[svc] = now
 	}
@@ -616,14 +810,15 @@ func (p *placer) reconcileLeased(svc string, want bool, s *state.State) {
 		}
 		p.start(svc)
 	}
-	if at, ok := p.started[svc]; ok && p.up(svc) && now-at < failWithin.Milliseconds() &&
-		p.run(append([]string{"is-failed", "--quiet"}, p.startUnits(svc)...)...) == nil {
-		log.Printf("placed: %s failed to start here under its lease; refusing it, so the plan gives it to a box that can run it", svc)
-		if p.failed == nil {
-			p.failed = map[string]int64{}
+	if _, ok := p.started[svc]; ok && p.up(svc) {
+		switch failed, up := p.judge(svc); {
+		case failed:
+			log.Printf("placed: %s failed to start here under its lease; refusing it, so the plan gives it to a box that can run it", svc)
+			p.refuse(svc, now)
+			delete(p.started, svc)
+		case up:
+			delete(p.started, svc)
 		}
-		p.failed[svc] = now
-		delete(p.started, svc)
 	}
 	if p.up(svc) {
 		// the newer of what the flag has and what is now known

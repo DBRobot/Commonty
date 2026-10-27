@@ -3,7 +3,7 @@
 import json
 import time
 
-from waits import journal_has, journal_of, start_fresh
+from waits import journal_cursor, journal_has, journal_of, journal_since, start_fresh
 
 start_all()
 for m in (a, b):
@@ -151,7 +151,33 @@ api(
 # forge's files go to its store, and both out to b
 hand_over(a, "forgejo", forge_units, "forgejo.service")
 hand_over(a, "postgresql", "postgresql.service", "postgresql.service")
-a.fail("zfs list -H -t snapshot tank/enc/forgejo@dd-copy")
+# each copy took a snapshot of its own, and none is left behind
+snaps = a.succeed("zfs list -H -t snapshot -o name tank/enc/forgejo")
+assert "@dd-copy" not in snaps, snaps
+
+
+def store_epoch(m):
+    return m.succeed(
+        "set -a; . /var/lib/dd-store/keys/forge.env; export AWS_DEFAULT_REGION=us-east-1; "
+        "aws --endpoint-url http://127.0.0.1:3910 s3 cp s3://forge/epoch -"
+    ).strip()
+
+
+# a given the lease again, its forge not started under it (a takeover still
+# restoring, or refused): its copy copies nothing, rather than put what a
+# had before over the newer copy in its store
+a.succeed('echo \'{"epoch": 3, "until": 1000000000000}\' > /run/dd-placed/forgejo')
+inv = start_fresh(a, "dd-forge-copy.service")
+assert journal_has(
+    a, "dd-forge-copy.service", inv, "has not started under this lease"
+), journal_of(a, "dd-forge-copy.service", inv)
+assert store_epoch(a) == "1"
+a.succeed("rm /run/dd-placed/forgejo")
+
+# what b set aside before, from takeovers long ago: of those and the one
+# this takeover makes, the two newest are kept
+for when in ("20200101000000", "20200102000000", "20200103000000"):
+    b.succeed(f"mkdir {dir}/.before-e0.{when}")
 
 # b takes epoch 2 from its own store
 hold(b, 2)
@@ -178,6 +204,8 @@ assert api(b, "GET", "/repos/tester/gone", ok=False) == 404
 b.fail(f"test -e {dir}/repositories/tester/gone.git")
 # b's own earlier files: set aside, never deleted
 b.succeed(f"cat {dir}/.before-e2.*/b-own-marker | grep -q b-was-here")
+asides = sorted(b.succeed(f"ls -d {dir}/.before-e*").split())
+assert len(asides) == 2 and asides[0] == f"{dir}/.before-e0.20200103000000", asides
 # its hooks made again: a commit on b goes through them
 b.wait_until_succeeds(
     f"test -x {dir}/repositories/tester/kept.git/hooks/pre-receive", timeout=120
@@ -196,3 +224,68 @@ b.wait_until_succeeds(
     'test "$(aws --endpoint-url http://127.0.0.1:3910 s3 cp s3://forge/epoch -)" = 2',
     timeout=180,
 )
+
+
+def forge_flag(m, epoch):
+    flag = json.dumps({"epoch": epoch, "until": 10**12})
+    m.succeed(f"echo '{flag}' > /run/dd-placed/forgejo")
+
+
+def healthy(m):
+    m.wait_until_succeeds(
+        f"curl -sf --unix-socket {sock} http://forgejo/api/healthz", timeout=180
+    )
+
+
+# a restore stopped part way (node2, 2026-10-25: its take killed by the
+# start's timeout every 90 s for an hour): what it copied is root's, and its
+# marker is left. The forge's dirs are made again all the same, and the next
+# take goes on where it was, setting nothing more aside
+b.succeed("systemctl stop forgejo.service")
+b.succeed(
+    f"mkdir -p {dir}/.ssh && touch {dir}/.ssh/stray && chown -R root:root {dir}/.ssh"
+)
+b.succeed("systemctl restart dd-forge-dirs.service")
+assert b.succeed(f"stat -c %U {dir}/.ssh {dir}/.ssh/stray").split() == [
+    "forgejo",
+    "forgejo",
+]
+b.succeed("echo 3 > /var/lib/dd-forge/restoring")
+asides = b.succeed(f"ls -d {dir}/.before-e*")
+forge_flag(b, 3)
+c = journal_cursor(b)
+b.succeed("systemctl start forgejo.service")
+healthy(b)
+took = journal_since(b, "forgejo.service", c)
+assert "going on with a restore stopped part way" in took, took
+assert b.succeed(f"ls -d {dir}/.before-e*") == asides
+b.fail("test -e /var/lib/dd-forge/restoring")
+assert api(b, "GET", "/repos/tester/kept/contents/again.txt") == 200
+
+# the records name copies newer than any b has: b does not take the forge.
+# Stopped rather than tried again, so dd-control refuses it; nothing is
+# set aside
+b.succeed("systemctl stop forgejo.service")
+b.succeed(
+    "runuser -u postgres -- psql -d dd_follow -c "
+    '"insert into forge_copies select extract(epoch from now())::bigint + n, 9 '
+    'from (values (1000), (2000)) v(n)"'
+)
+forge_flag(b, 4)
+c = journal_cursor(b)
+b.succeed("systemctl start --no-block forgejo.service")
+# stopped mid-start: failed or inactive, nothing queued, which dd-control
+# counts as failed to start
+b.wait_until_succeeds(
+    'case "$(systemctl show -P ActiveState forgejo.service)" in failed | inactive) ;; *) exit 1 ;; esac '
+    '&& [ -z "$(systemctl show -P Job forgejo.service)" ]',
+    timeout=120,
+)
+took = journal_since(b, "forgejo.service", c)
+assert "refusing it" in took, took
+assert b.succeed(f"ls -d {dir}/.before-e*") == asides
+# taken all the same when its owner says so
+b.succeed("touch /var/lib/dd-forge/take-older")
+b.succeed("systemctl start forgejo.service")
+healthy(b)
+b.fail("test -e /var/lib/dd-forge/take-older")

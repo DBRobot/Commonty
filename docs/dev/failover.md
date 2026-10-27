@@ -40,7 +40,13 @@ box the database is on:
   server key.
 
 A box taking over sets aside what it had before, named for when, and
-never deletes it.
+keeps the two newest of those (a take run again and again filled node2's
+disk with 141G of them on 2026-10-25). A forge restore stopped part way
+goes on where it was the next time, setting nothing more aside. A forge
+copy older than the one before the newest its records name is not taken:
+the box refuses the forge and one with the newer copy takes it, or, if
+the owner says so (`touch /var/lib/dd-forge/take-older`), it is taken all
+the same.
 
 The placement algorithm keeps these together: each depends on the box
 postgres is on, and headscale's box is the gateway's.
@@ -98,7 +104,11 @@ The plan then gives the service to another box.
 - **Postgres:** what was not yet archived, at most about 30 seconds
   (`archive_timeout`), plus a copy round.
 - **Photos and files:** what was not yet copied, at most about 30 seconds.
-- **Git:** at most 2 minutes of pushes.
+- **Git:** at most 2 minutes of pushes. A copy sends what changed since
+  the snapshot the last one was taken from, and the rest by size alone,
+  reading no other file (with `--checksum` every file was read, a copy of
+  node1's 18G took 3 minutes, and no handover's copy finished within the
+  lease's time).
 - **The network:** devices that joined in the last minute.
 
 The old box's own data is kept, so nothing is lost for good if it comes

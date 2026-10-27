@@ -33,12 +33,11 @@ let
   '';
   # an ACME server that takes the connection and the TLS handshake, and
   # then never answers (lego requires https, and waits on it for ever)
-  cert = pkgs.runCommand "forge-cert" { nativeBuildInputs = [ pkgs.openssl ]; } ''
-    mkdir $out
-    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
-      -subj '/CN=forge' -addext 'subjectAltName=DNS:forge' \
-      -keyout $out/key.pem -out $out/cert.pem
-  '';
+  cert = import ../lib/test-cert.nix { inherit pkgs; } {
+    subject = "forge";
+    names = [ "forge" ];
+    name = "forge-cert";
+  };
   blackhole = pkgs.writeText "blackhole.py" ''
     import socket, ssl, threading
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

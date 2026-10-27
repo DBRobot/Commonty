@@ -21,12 +21,13 @@ let
   system = pkgs.stdenv.hostPlatform.system;
   domain = "test.invalid";
   rpc = pkgs.writeText "garage.env" "GARAGE_RPC_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n";
-  cert = pkgs.runCommand "test-cert" { nativeBuildInputs = [ pkgs.openssl ]; } ''
-    mkdir $out
-    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
-      -subj '/CN=${domain}' -addext 'subjectAltName=DNS:*.${domain},DNS:${domain}' \
-      -keyout $out/key.pem -out $out/cert.pem
-  '';
+  cert = import ../lib/test-cert.nix { inherit pkgs; } {
+    subject = domain;
+    names = [
+      "*.${domain}"
+      domain
+    ];
+  };
   python = pkgs.python3.withPackages (ps: [ ps.playwright ]);
   # a real picture for the demo's gallery, which shows only what a browser can
   picture = pkgs.runCommand "otter.jpg" { nativeBuildInputs = [ pkgs.imagemagick ]; } ''

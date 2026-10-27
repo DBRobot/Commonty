@@ -148,6 +148,10 @@ const (
 // the box holding its lease (cmd/dd-control/placed.go reads it)
 const WhereItsDataIs = "where its data is: "
 
+// RefusedEverywhere starts the why of a service every box able to run it
+// refused, given to one of them all the same
+const RefusedEverywhere = "every box able to run it refused it; tried again: "
+
 // ComputerService is the placed service a remote computer is
 func ComputerService(id string) string { return "computer-" + id }
 
@@ -252,15 +256,40 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 	for _, name := range live {
 		drainTo = max(drainTo, s.Boxes[name].Facts["release_drain"])
 	}
+	// a service every live box able to run it refused, none draining: the
+	// refusals are set aside and it is tried again where it suits best.
+	// Otherwise two boxes refusing it at once leave it nowhere, and only a
+	// restart of dd-control (which forgets its refusals) brings it back
+	// (2026-10-26: postgres and museum, node2 drained, node1 refusing)
+	retry := map[string]bool{}
+	for svc, sv := range in.Services {
+		if !sv.Placed {
+			continue
+		}
+		refused, other := false, false
+		for _, name := range live {
+			f := s.Boxes[name].Facts
+			if _, ok := canOf[name][svc]; !ok || f["carries/"+svc] == 0 {
+				continue
+			}
+			switch {
+			case f["refused/"+svc] > 0:
+				refused = true
+			case !draining(name):
+				other = true
+			}
+		}
+		retry[svc] = refused && !other
+	}
 	// a placed service can run only on a box that carries it, and not
-	// where the box itself refused to start it for want of room
-	// (cmd/dd-control/placed.go)
+	// where the box itself refused it (cmd/dd-control/placed.go): for want
+	// of room, or a writer it failed to start; unless every box refused it
 	can := func(name, svc string) bool {
 		if _, ok := canOf[name][svc]; !ok {
 			return false
 		}
 		f := s.Boxes[name].Facts
-		return !in.Services[svc].Placed || (f["carries/"+svc] > 0 && f["refused/"+svc] == 0)
+		return !in.Services[svc].Placed || (f["carries/"+svc] > 0 && (f["refused/"+svc] == 0 || retry[svc]))
 	}
 
 	// what a service holds: the most any live box measured it holding
@@ -816,15 +845,18 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 			if n == 0 {
 				n = 1
 			}
-			// a writer stays with the box holding its lease, or comes back
-			// to it once its lease lapsed, while that box is alive and can
-			// run it: its data is there, the newest epoch's, and a box
-			// that only failed to renew (2026-10-24: node1's TPM stopped
-			// signing; node2, with no base backup, took postgres) gets it
-			// back. The agreed state says who holds it; no box's word on
-			// what it keeps steers a writer. A holder that cannot start it
-			// refuses it (cmd/dd-control/placed.go), and then, or with its
-			// holder gone, any box may have it
+			// a writer stays with the box holding its lease while that box
+			// is alive and can run it: its data is there, the newest
+			// epoch's. The agreed state says who holds it; no box's word on
+			// what it keeps steers a writer. A lease that lapsed is gone
+			// from the agreed state at the next block, so this cannot bring
+			// a writer back to its last holder: that box asks for the lease
+			// again at once, and every other box waits a while first
+			// (cmd/dd-control/placed.go, takeBack), and once it holds it
+			// again this keeps it there (2026-10-25/26: every lapse handed
+			// the group to whichever box suited it best). A holder that
+			// cannot start it refuses it, and then, or with its holder
+			// gone, any box may have it
 			first := []string{}
 			if l := s.Leases["svc/"+svc]; sv.Lease && l != nil && len(cands) > 1 {
 				for _, name := range cands {
@@ -833,11 +865,15 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 					}
 				}
 			}
+			why0 := ""
+			if retry[svc] {
+				why0 = RefusedEverywhere
+			}
 			for n -= count[svc]; n > 0; n-- { // less what came beside what needs it
-				if len(first) > 0 && choose(first, WhereItsDataIs) {
+				if len(first) > 0 && choose(first, why0+WhereItsDataIs) {
 					continue
 				}
-				if !choose(cands, "") {
+				if !choose(cands, why0) {
 					p.Unplaced[svc] = "no live box that can run it has room"
 					break
 				}

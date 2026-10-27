@@ -19,13 +19,13 @@ let
   };
   other = name: if name == "a" then "b" else "a";
   # where a real box has its wildcard from acme
-  cert = pkgs.runCommand "test-cert" { nativeBuildInputs = [ pkgs.openssl ]; } ''
-    mkdir $out
-    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
-      -subj '/CN=store.test.invalid' \
-      -addext 'subjectAltName=DNS:store.a.test.invalid,DNS:store.b.test.invalid' \
-      -keyout $out/key.pem -out $out/cert.pem
-  '';
+  cert = import ../lib/test-cert.nix { inherit pkgs; } {
+    subject = "store.test.invalid";
+    names = [
+      "store.a.test.invalid"
+      "store.b.test.invalid"
+    ];
+  };
   storeBox =
     name:
     { config, lib, ... }:

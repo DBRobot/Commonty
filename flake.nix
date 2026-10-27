@@ -1970,6 +1970,11 @@
           # nothing; longer, the writers go to node2 only once node1 is gone,
           # and come back to node1, which has their data, once it signs again
           control-signfail = import ./nix/tests/control-upgrade.nix (args // { scenario = "signfail"; });
+          # and the flapping of 2026-10-25/26: a stall past the lease's time
+          # gives the writers back to their holder and nothing moves after; a
+          # takeover restoring for a minute is not refused; a writer refused
+          # where no other box can run it is never left nowhere
+          control-flap = import ./nix/tests/control-upgrade.nix (args // { scenario = "flap"; });
           # the app carried the site's signed-in pages, their scripts, the
           # stylesheet and the fonts at the site's paths (app/carried
           # lists them, scripts/sync-app-web copies them); two copies, kept
