@@ -229,6 +229,29 @@ const WITNESS_RETRY_MS = 60000;
 // what the witness registers, and the relay calls
 const HOOKS = ['controlState', 'controlIdentity', 'controlPlaced', 'controlReceive', 'controlSend', 'controlPersist', 'controlReady', 'controlExit'];
 
+// what the running witness wrote (Go's stdout and stderr both come through
+// globalThis.fs.writeSync, which wasm_exec sets up), so a start that fails
+// without saying why through controlExit - a fatal error, a panic off the
+// main goroutine, a plain return - still says something in the health
+const OUT_MAX = 4096;
+let goOut = null;
+{
+  const write = globalThis.fs.writeSync;
+  const dec = new TextDecoder();
+  globalThis.fs.writeSync = function (fd, buf) {
+    if (goOut !== null) goOut.text = (goOut.text + dec.decode(buf)).slice(-OUT_MAX);
+    return write.call(this, fd, buf);
+  };
+}
+
+// a witness's last words: its runtime's panic or fatal error if it wrote
+// one, else its last lines
+function lastWords(text) {
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  const fatal = lines.find((l) => /^(panic|fatal error):/.test(l));
+  return (fatal ?? lines.slice(-3).join(' / ')).slice(0, 500);
+}
+
 function unhook() {
   for (const h of HOOKS) delete globalThis[h];
   // a witness that hung may still call out: nothing it says goes anywhere
@@ -323,11 +346,21 @@ export class Relay {
     let why = null;
     globalThis.controlExit = (m) => { why = String(m); };
     const go = new Go();
+    let code = null;
+    go.exit = (c) => { code = c; };
+    const out = { text: '' };
+    goOut = out;
+    // why, else what it wrote, and how it exited
+    const reason = (e) => {
+      const said = why ?? (lastWords(out.text) || (e && e.message) || '');
+      const parts = [said, code !== null && code !== 0 ? `exit code ${code}` : ''].filter(Boolean);
+      return parts.length ? `: ${parts.join('; ')}` : '';
+    };
     const inst = await WebAssembly.instantiate(witnessWasm, go.importObject);
     let up = false;
     const exited = go.run(inst).then(
-      () => { throw new Error(`the witness exited before it was ready${why ? `: ${why}` : ''}`); },
-      (e) => { throw new Error(`the witness failed: ${why ?? (e && e.message)}`); },
+      () => { throw new Error(`the witness exited before it was ready${reason()}`); },
+      (e) => { throw new Error(`the witness failed${reason(e)}`); },
     );
     // and once it ran: gone, it is no witness, and the next request starts
     // one again (from what it saved since)

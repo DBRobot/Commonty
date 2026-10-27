@@ -48,9 +48,11 @@ fn bundle(flake: &str) -> Result<std::path::PathBuf> {
     Ok(String::from_utf8(out.stdout)?.trim().into())
 }
 
+// every .js is a module: placement.js went up as text/plain, so its import
+// was the file's text and the witness could not start (2026-10-27)
 fn kind(name: &str) -> &'static str {
     match name {
-        "worker.js" | "wasm_exec.js" | "config.js" => "application/javascript+module",
+        n if n.ends_with(".js") => "application/javascript+module",
         n if n.ends_with(".wasm") => "application/wasm",
         _ => "text/plain",
     }
@@ -218,4 +220,17 @@ pub async fn setup(
     eprintln!("== the relay answers at wss://control.{domain}/relay");
     eprintln!("Left: commit fleet/control.json and fleet/control-worker.json, and release.");
     Ok(())
+}
+
+#[cfg(test)]
+mod kind_tests {
+    use super::kind;
+
+    #[test]
+    fn every_module_the_relay_imports_goes_up_as_one() {
+        for n in ["worker.js", "wasm_exec.js", "config.js", "placement.js"] {
+            assert_eq!(kind(n), "application/javascript+module", "{n}");
+        }
+        assert_eq!(kind("witness.wasm"), "application/wasm");
+    }
 }
