@@ -1,18 +1,29 @@
 {
   "payload": {
     "flake": "git+https://git.commonty.org/david/commonty",
-    "id": "check-1-1792913131",
-    "issued": 1792913133,
+    "id": "check-1-1793063257",
+    "issued": 1793063257,
     "jobs": [
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
         "builders": [
-          "node2",
-          "node1"
+          "node1",
+          "node2"
         ],
         "name": "android",
         "part": "android",
-        "path": "/nix/store/fnva459cqm31x9lfb5imf6vdwwzs30k2-commonty-android-0.0.1",
+        "path": "/nix/store/flwwvw4l4nl75wrkxnp87n085i68adp1-commonty-android-0.0.1",
+        "version": "0.0.1"
+      },
+      {
+        "attr": "legacyPackages.x86_64-linux.appRelease",
+        "builders": [
+          "node1",
+          "node2"
+        ],
+        "name": "dd-windows",
+        "part": "dd-windows",
+        "path": "/nix/store/0axpxz2abcr9r586z5bqf6zj5sdxnvis-dd-windows-0.0.1",
         "version": "0.0.1"
       },
       {
@@ -21,37 +32,26 @@
           "node2",
           "node1"
         ],
-        "name": "dd-windows",
-        "part": "dd-windows",
-        "path": "/nix/store/ismi71jz40vbx5p6h39b7zaqjqf15syi-dd-windows-0.0.1",
-        "version": "0.0.1"
-      },
-      {
-        "attr": "legacyPackages.x86_64-linux.appRelease",
-        "builders": [
-          "node1",
-          "node2"
-        ],
         "name": "linux",
         "part": "linux",
-        "path": "/nix/store/bk349haf4ic278vqr4lhwsfcgcv7k7cn-commonty-linux-0.0.1",
+        "path": "/nix/store/shwkkfa4fnxpm4b3fb73h6kn99d2bk50-commonty-linux-0.0.1",
         "version": "0.0.1"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
         "builders": [
-          "node1",
-          "node2"
+          "node2",
+          "node1"
         ],
         "name": "windows",
         "part": "windows",
-        "path": "/nix/store/3fk3vsf0zmjs2a1plpjvmxzq05ikpb4y-commonty-windows-0.0.1",
+        "path": "/nix/store/yj5wg1sf2cdw4k7n8388xwbdiqswrf8q-commonty-windows-0.0.1",
         "version": "0.0.1"
       }
     ],
     "kind": "build-order",
-    "rev": "1a66ed25effc4f9d358a7c099b6c0efc2eb27583"
+    "rev": "780b74e25a3d3fa0b88c2b4294f1b7c21ed76c58"
   },
   "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
-  "signature": "d+AL9UfuCHLemQmfy9bs3nMX786E4kp75BgcVNMdVlzffepLZpIwPWvqTasP8YNP2qjlOOLMRheEKdgiZlPPDA=="
+  "signature": "GPRwNTqRm+KcwHJBMv7/Z3l0xGjZfMWL4CyCh5GJKEQIlRW5YrNKHXXdaW2hdK7pCbylM3INmJh9NBwB39tOAw=="
 }
