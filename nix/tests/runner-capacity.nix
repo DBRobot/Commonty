@@ -1,8 +1,9 @@
 # The runner's capacity (forge/runner-capacity.sh) on the boxes as they
-# were measured on 2026-10-22, and on others: node1 two jobs (its threads
-# hold it there), node2 two (its work slice holds two 4G jobs, counted
-# once), a fresh box by its needs until it has measured, a box with no work
-# slice by its memory alone, and never none.
+# were measured on 2026-10-22, at two threads a job (forgejo-runner.nix
+# jobThreads): node1 four jobs (its threads hold it there; its memory holds
+# seven with the model server's 22G loaded), node2 two (its work slice
+# holds two 4G jobs, counted once), a fresh box by its needs until it has
+# measured, a box with no work slice by its memory alone, and never none.
 { pkgs, ... }:
 pkgs.runCommand "runner-capacity"
   {
@@ -20,23 +21,23 @@ pkgs.runCommand "runner-capacity"
     run() { # threads memKiB facts fallback workSliceMax expected
       printf 'MemTotal: %s kB\n' "$2" > meminfo
       echo "$5" > work.max
-      THREADS=$1 MEMINFO=meminfo FACTS=$3 FALLBACK_GIB=$4 WORK_MAX=work.max JOB_THREADS=4 JOB_GIB=4 \
+      THREADS=$1 MEMINFO=meminfo FACTS=$3 FALLBACK_GIB=$4 WORK_MAX=work.max JOB_THREADS=2 JOB_GIB=4 \
         IN=in.yaml OUT=$PWD/out/config.yaml bash ${../modules/forge/runner-capacity.sh}
       grep -qx "  capacity: $6" out/config.yaml || { echo "expected $6"; cat out/config.yaml; exit 1; }
     }
-    # node1: 30G of room past its services, but 8 threads
-    run 8 65488000 node1.prom 37 53646052557 2
+    # node1: 30G of room past its services (7 jobs), but 8 threads
+    run 8 65488000 node1.prom 37 53646052557 4
     # node2: min(11.9G slice, 14.9G - 1.2G - 2G) = 11.7G
     run 8 15588000 node2.prom 2 12741173248 2
     # node2's memory with twice the threads: still two
     run 16 15588000 node2.prom 2 12741173248 2
-    # a fresh 62G box on the needs' sizes
-    run 8 65488000 none 37 53646052557 2
+    # a fresh 62G box on the needs' sizes: 19.2G of room
+    run 8 65488000 none 37 53646052557 4
     # no work slice: the memory alone
     run 8 15588000 node2.prom 2 max 2
     # services that leave less than a job: never none
     run 8 15588000 none 11 12741173248 1
     run 2 4000000 none 1 max 1
-    run 32 131072000 none 4 107374182400 8
+    run 32 131072000 none 4 107374182400 16
     touch $out
   ''

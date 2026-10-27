@@ -577,10 +577,11 @@ runs             the fleet's CI (runs-on: nix,      a member's workflow (runs-on
                  or a box's name for build_systems)
 where            on the box, as forgejo-runner,     in a container under gVisor (runsc)
                  nix on the path, the box's store
-capacity         at each start, min(threads/4,      min(2, threads/4, memory GiB/4)
+capacity         at each start, min(threads/2,      min(2, threads/4, memory GiB/4)
                  min(work slice, memory - services' 4 cpus, 4 GiB, 1024 pids, 1 h per job
                  measured peak - a tenth) / 4G),
-                 at least 1 (runner-capacity.sh)
+                 at least 1 (runner-capacity.sh):
+                 node1 4, node2 2 (2026-10-27)
 token            made by the forge's box, sealed    the same, global
                  to the runner box; scoped to the
                  repo's owner (runner-keys.nix)

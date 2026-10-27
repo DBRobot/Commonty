@@ -66,11 +66,15 @@ in
     ./runner-restart.nix
   ];
 
-  # builds use what threads they are given (8 threads were 85% busy at the
-  # 90th percentile with two jobs on each box, 2026-10-20)
+  # the threads a typical job keeps busy, its own processes and the builds
+  # it sends the nix daemon together: about one on node1 (2026-10-26, the
+  # work slice's CPU time over the jobs' hours: 3.4 CPU-hours in 3.7 job
+  # hours), so two leaves room for its bursts. The daemon's max-jobs
+  # (roles/core.nix) caps the builds of all of them together, and the
+  # busy cores at node1's 90th percentile are its model server's, not CI's
   options.dd.runner.jobThreads = lib.mkOption {
     type = lib.types.ints.positive;
-    default = 4;
+    default = 2;
   };
   # what a typical job holds in the work slice, its own processes and the
   # builds it sends the nix daemon together (node2 at one job, 2026-10-22,
