@@ -12,8 +12,9 @@
 #   reads past the one after it.
 # - The box that held the newest epoch keeps its own data when it takes
 #   the lease again: it has everything that epoch wrote, archived or not.
-# - Nothing is deleted: a data directory set aside for a restore is kept
-#   beside it, named for when.
+# - A data directory set aside for a restore is kept beside it, named for
+#   when: the two newest of them, so a take run again and again does not
+#   fill the disk.
 # - The archive's key is made by the first holder ever, and sealed to each
 #   box able to run postgres (their TPM-held secrets keys,
 #   fleet/boxes/<box>/hardware.json). Each holder seals it again for every
@@ -130,6 +131,12 @@ let
         aside="${data}.before-e$E.$(date +%Y%m%d%H%M%S)"
         mv ${data} "$aside"
         echo "this box's own data kept at $aside"
+        # the two newest kept: a take stopped part way and run again sets
+        # aside the restore it stopped in
+        for old in $(for d in ${data}.before-e*; do [ -d "$d" ] || continue; echo "''${d##*.} $d"; done | sort -n | head -n -2 | cut -d' ' -f2-); do
+          echo "removing $old: two newer are kept"
+          rm -rf --one-file-system "$old"
+        done
       fi
       mkdir -p ${data}
       chown postgres:postgres ${data}
@@ -270,6 +277,20 @@ let
     set -uo pipefail
     [ ! -e ${data}/postmaster.pid ] || { echo "postgres runs: its own archiver sees to it"; exit 0; }
     ctl=$(pg_controldata ${data}) || { echo "no cluster here: nothing to archive"; exit 0; }
+    # postgres never got out of its restore at the flag's epoch here (the
+    # plan moved it on while it replayed): it wrote nothing under that
+    # epoch, and what is in pg_wal is the epoch it restored from, which the
+    # archive has
+    E=$(cat ${state}/epoch 2>/dev/null || echo 0)
+    held=$(jq -r .epoch ${flag} 2>/dev/null || echo 0)
+    if [ "$E" != "$held" ]; then
+      case "$(echo "$ctl" | awk -F': +' '/Database cluster state/ { print $2 }')" in
+      "shut down in recovery" | "in archive recovery" | "in crash recovery" | "starting up")
+        echo "postgres never came up at epoch $held here (this box's last is $E): nothing written under it to archive"
+        exit 0
+        ;;
+      esac
+    fi
     cur=$(echo "$ctl" | awk -F': +' '/REDO WAL file/ { print $2 }')
     failed=0
     for r in ${data}/pg_wal/archive_status/*.ready; do

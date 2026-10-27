@@ -620,13 +620,39 @@ release gives to the boxes able to run it:
   not. dd-control does that, and so does `dd-placed-fence`, a 2-second
   timer that needs nothing but the flag, so a dd-control that crashed or
   hangs does not leave a writer running.
-- The plan keeps a writer with the box holding its lease, or gives it
-  back once its lease lapsed, while that box is alive and can run it,
-  whatever another scores: its data is there. On 2026-10-24 node1 only
-  failed to renew, and node2, with no base backup, took postgres.
-- A box that took a writer over and cannot start it within 3 minutes
-  refuses it (`refused/<service>`, for 10 minutes), and the plan gives it
-  to a box that can. One taking back its own lapsed lease never does.
+- The plan keeps a writer with the box holding its lease while that box
+  is alive and can run it, whatever another scores: its data is there.
+  On 2026-10-24 node1 only failed to renew, and node2, with no base
+  backup, took postgres.
+- A lapsed lease is gone from the agreed state at the next block, so the
+  plan cannot give a writer back to its last holder. That box does it
+  itself: it keeps the epoch it last held beside the flags
+  (`/run/dd-placed/.held-<service>`), and when that is still the agreed
+  newest epoch and no one holds the lease, it asks for it again at once,
+  given the writer by the plan or not, unless it is draining. Any other
+  box waits 20 seconds before asking for a lease no one holds that
+  someone held before. Holding it again, the plan keeps it there. A box
+  that gave a lease back on a move forgets the epoch. On 2026-10-25 and
+  26 every stall of agreement longer than the lease handed the group to
+  whichever box scored best, and back at the next.
+- A box that took a writer over and cannot start it refuses it
+  (`refused/<service>`, for 10 minutes), and the plan gives it to a box
+  that can. Only the writer's own unit is judged (the first of what
+  starts it), and only failed, or stopped with no job queued (what it
+  needs failed), is a failure: coming up, restarting, or waiting on a
+  restore however long is not, and once it is up nothing later counts.
+  A helper beside it failing (a handover's archive, museum's health
+  check) counted before, and refused the holder's own writer 5 s after
+  it started. One taking back its own lapsed lease never refuses it. A
+  refusal is kept beside the flags (`.refused-<service>`), so a
+  dd-control that starts again keeps it, and a boot forgets it.
+- A writer every live box able to run it refused, none of them draining,
+  is placed all the same ("every box able to run it refused it; tried
+  again"), and the box given it tries again. Before, two refusals at once
+  left it nowhere until a dd-control restart forgot them (2026-10-26).
+- What runs on a handover (`dd.store.handover`: `dd-pg-handover`,
+  `dd-forge-handover`, `dd-headscale-handover`) is never started with
+  its service.
 - Moved by the plan, it stops its units, waits for them, and only then
   gives the lease back. Another box is refused the lease until it is
   given back or has lapsed, by which time the old holder has stopped.

@@ -14,6 +14,10 @@ let
   boot = long // {
     wantedBy = [ "multi-user.target" ];
   };
+  oneshot = {
+    serviceConfig.Type = "oneshot";
+    serviceConfig.ExecStart = "${pkgs.coreutils}/bin/true";
+  };
 in
 {
   name = "placed";
@@ -26,6 +30,11 @@ in
         ../modules/box/placed.nix
       ];
       options.dd.control.enable = lib.mkEnableOption "placement";
+      # what storage/store.nix declares, which this test leaves out
+      options.dd.store.handover = lib.mkOption {
+        type = lib.types.attrsOf (lib.types.listOf lib.types.str);
+        default = { };
+      };
       config = {
         system.switch.enable = true;
         dd.verify.enable = false;
@@ -37,7 +46,12 @@ in
           "forgejo-runner"
           "members-runner"
           "thanos-store"
+          "postgresql"
         ];
+        # run on a handover only (storage/postgres-follow.nix): never
+        # started with postgres (2026-10-25/26, it failed at every takeover
+        # and the box refused its own writer)
+        dd.store.handover.postgresql = [ "dd-pg-handover.service" ];
         # units by the names the needs give them (nix/lib/needs.nix)
         systemd.services = {
           # dd-games: its own, a template's instances, a timer's run
@@ -57,6 +71,12 @@ in
           pihole-ftl = boot;
           # zfs-datasets runs on every box: never switched
           dd-snapshot-trim = boot;
+          # postgresql: a writer, its exact units written into them
+          postgresql = long;
+          postgresql-setup = oneshot;
+          dd-postgres-isolation = oneshot;
+          dd-pg-base = oneshot;
+          dd-pg-handover = oneshot;
         };
         systemd.timers.games-access = {
           wantedBy = [ "timers.target" ];

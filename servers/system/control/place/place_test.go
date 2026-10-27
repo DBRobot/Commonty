@@ -912,3 +912,34 @@ func TestTheHolderKeepsItsWriterWhicheverBoxSuitsBetter(t *testing.T) {
 		t.Fatalf("a draining holder kept its writer: %+v", p.Boxes)
 	}
 }
+
+// 2026-10-26 21:35: node2 drained, node1 refusing postgres and museum (a
+// refusal made 25 s into a restore). The plan said no live box can run
+// them, and only a restart of node1's dd-control, which forgot its
+// refusals, brought them back. A refusal every able box made is set aside
+func TestAWriterEveryBoxRefusedIsTriedAgain(t *testing.T) {
+	in, s := writers()
+	s.Leases["svc/postgresql"] = &state.Lease{Holder: "node1", Epoch: 14, Expires: s.Time + 40_000}
+	s.Boxes["node1"].Facts["refused/postgresql"] = 1
+	s.Boxes["node2"].Facts["draining"] = 1
+	p := Decide(in, s, 90_000, nil)
+	if !runs(p, "node1", "postgresql") || !runs(p, "node1", "forgejo") || p.Unplaced["postgresql"] != "" {
+		t.Fatalf("a writer refused by the one box able to run it was left nowhere: %+v %v", p.Boxes, p.Unplaced)
+	}
+	if !strings.HasPrefix(why(p, "node1", "postgresql"), RefusedEverywhere) {
+		t.Fatalf("why: %q", why(p, "node1", "postgresql"))
+	}
+	// both refusing, neither draining: still somewhere
+	s.Boxes["node2"].Facts["draining"] = 0
+	s.Boxes["node2"].Facts["refused/postgresql"] = 1
+	p = Decide(in, s, 90_000, nil)
+	if !runs(p, "node1", "postgresql") && !runs(p, "node2", "postgresql") {
+		t.Fatalf("refused by both, placed nowhere: %+v %v", p.Boxes, p.Unplaced)
+	}
+	// one box that has not refused it: it goes there, the refusal holds
+	s.Boxes["node2"].Facts["refused/postgresql"] = 0
+	p = Decide(in, s, 90_000, nil)
+	if !runs(p, "node2", "postgresql") || runs(p, "node1", "postgresql") {
+		t.Fatalf("a refusal not kept while another box could run it: %+v", p.Boxes)
+	}
+}

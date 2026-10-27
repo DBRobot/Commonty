@@ -348,7 +348,17 @@ in
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
-          ExecStart = "${pkgs.coreutils}/bin/install -d -o forgejo -g forgejo -m 0750 ${cfg.stateDir} ${cfg.stateDir}/custom ${cfg.stateDir}/custom/conf";
+          ExecStart = pkgs.writeShellScript "dd-forge-dirs" ''
+            set -eu
+            PATH=${pkgs.coreutils}/bin
+            install -d -o forgejo -g forgejo -m 0750 ${cfg.stateDir} ${cfg.stateDir}/custom ${cfg.stateDir}/custom/conf
+            # a restore stopped part way leaves what it copied root's, and
+            # tmpfiles then refuses the forge's .ssh under a directory of
+            # the forge's: every start failed (node2, 2026-10-25)
+            if [ -d ${cfg.stateDir}/.ssh ] && [ "$(stat -c %U ${cfg.stateDir}/.ssh)" != forgejo ]; then
+              chown -R forgejo:forgejo ${cfg.stateDir}/.ssh
+            fi
+          '';
           ExecStartPost = "${config.systemd.package}/bin/systemd-tmpfiles --create --prefix=${cfg.stateDir}";
         };
       };
