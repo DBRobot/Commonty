@@ -156,9 +156,13 @@ ci_ok             always. Every job above passed or was rightly skipped.
 - **A release never kills a job.** A switch leaves a runner alone, and
   it restarts into a new config only once it holds no job
   ([forge.md, The runners](forge.md#the-runners)).
-- **A run killed from outside** (the forge restarting under it, a runner
-  stopped by hand) is run again once, by
-  [`ci-resume.py`](../../nix/modules/forge/ci-resume.py) on the forge box.
+- **A job killed from outside** (the forge restarting or moving under it,
+  a runner stopped or its box gone) is run again by itself, with the jobs
+  that need it and `ci_ok` after it, by
+  [`ci-resume.py`](../../nix/modules/forge/ci-resume.py) on whichever box
+  runs the forge; the rest of the run keeps what it passed. A job that
+  failed of itself is never run again ([forge.md, Cancel and
+  resume](forge.md#cancel-and-resume)).
 
 ## Main's full run, and what publish signs
 
@@ -171,8 +175,9 @@ the forge's own record shows that run passed: a run of `entry_point.yml`,
 made by a push to `refs/heads/main`, on exactly that commit, the newest such
 run successful (`release_cmd.rs`, `full_run`). It never reads a commit
 status for this: any CI job's token can post a status of any name on any
-commit, a pull request's too. A full run killed from outside is run again
-once, as a pull request's is (ci-resume.py).
+commit, a pull request's too. A full run's job killed from outside is run
+again, as a pull request's is (ci-resume.py), and the run passes once it
+does.
 
 ## Making a change
 
@@ -599,7 +604,9 @@ restarting under the same switch). When a box stays on an old release, its
   app release would stop on it. It runs when the installer was chosen
   (above); [joining.md](joining.md#the-drive) says what
   made it differ before and how it is made now.
-- **"context canceled"** in a log means the run was killed from outside,
-  not that the code failed. ci-resume runs it again within a few minutes.
+- **"context canceled"** at the end of a job's log, or a log that stops in
+  the middle of a step with no end line, means the job was killed from
+  outside, not that the code failed. ci-resume runs that job again, and
+  `ci_ok` after it, within a few minutes.
 - **Never merge around a red run.** If a check is wrong, fix the check in
   its own pull request.

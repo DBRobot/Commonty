@@ -316,3 +316,87 @@ box.succeed("test -s /run/dd-runner-restart/docker.service.sandbox")
 inv = start_fresh(box, "dd-runner-restart.service")
 said = journal_of(box, "dd-runner-restart.service", inv)
 assert "restarting" not in said and "draining" not in said, said
+
+# A runner killed outright under a pull request's job, as a box that goes
+# away leaves it (the forge's move of 2026-10-25, run 900): the forge hears
+# nothing more and marks the job failed (its zombie timeout, 40 s here),
+# what needs it, ci_ok too, stays blocked, and ci-resume runs the killed
+# job again by itself,
+# with the jobs that need it after it; the run passes. The CI identity may
+# write to the repository once forgejo-admin has run since it was made.
+start_fresh(box, "forgejo-admin.service")
+lost_job = (
+    "on: pull_request\n"
+    "jobs:\n"
+    "  long:\n"
+    "    runs-on: nix\n"
+    "    steps:\n"
+    "      - run: |\n"
+    "          touch /run/job-gate/lost-started\n"
+    "          while [ ! -e /run/job-gate/lost-go ]; do sleep 1; done\n"
+    "  after:\n"
+    "    needs: long\n"
+    "    runs-on: nix\n"
+    "    steps:\n"
+    "      - run: touch /run/job-gate/lost-after\n"
+    "  ci_ok:\n"
+    "    needs: [long, after]\n"
+    "    if: ${{ always() }}\n"
+    "    runs-on: nix\n"
+    "    steps:\n"
+    "      - run: |\n"
+    '          echo "long: ${{ needs.long.result }}, after: ${{ needs.after.result }}"\n'
+    '          [ "${{ needs.long.result }}" = success ] && [ "${{ needs.after.result }}" = success ]\n'
+)
+push("lost", lost_job)
+box.succeed(
+    f'{as_owner} -X POST -d \'{{"head":"lost","base":"main","title":"lost"}}\' {api}/pulls >/dev/null'
+)
+box.wait_until_succeeds("test -e /run/job-gate/lost-started", timeout=300)
+lost = max(
+    r["index_in_repo"]
+    for r in json.loads(box.succeed(f"{as_owner} '{api}/actions/runs?limit=20'"))[
+        "workflow_runs"
+    ]
+)
+before = show("InvocationID")
+box.succeed("rm /run/job-gate/lost-started")
+box.succeed(f"systemctl kill -s KILL {runner}")
+restarted(runner, before, timeout=120)
+# the forge marks it failed, and what needs it stays blocked: the run
+# never ends by itself (runs 873, 880, 881, 884 waited so until cancelled)
+wait_run(lost, "failure")
+view = (
+    f"{as_owner} -X POST -d '{{\"logCursors\":[]}}' "
+    f"http://forgejo/{owner}/commonty/actions/runs/{lost}/jobs/0/attempt/1"
+)
+try:
+    box.wait_until_succeeds(
+        f"{view} | jq -e "
+        # by name: the forge lists a run's jobs in its own order, not the workflow's
+        "'[.state.run.jobs[] | {(.name): .status}] | add == "
+        '{"long": "failure", "after": "blocked", "ci_ok": "blocked"}\'',
+        timeout=120,
+    )
+except Exception:
+    print(box.succeed(f"{view} | jq -c '[.state.run.jobs[] | [.name, .status]]'"))
+    raise
+assert box.succeed("test -e /run/job-gate/lost-after || echo no").strip() == "no"
+inv = start_fresh(box, "dd-ci-resume.service")
+said = journal_of(box, "dd-ci-resume.service", inv)
+assert f"run #{lost} (#" in said and "long - the forge lost it" in said, said
+assert "-> 200" in said and said.count("run again") == 1, said
+# the killed job alone runs again; after and ci_ok follow it
+box.wait_until_succeeds("test -e /run/job-gate/lost-started", timeout=300)
+box.succeed("touch /run/job-gate/lost-go")
+wait_run(lost, "success")
+box.succeed("test -e /run/job-gate/lost-after")
+for i, want in ((0, 2), (1, 2), (2, 2)):
+    loc = box.succeed(
+        f"curl -s -o /dev/null -w '%{{redirect_url}}' --unix-socket {nix['sock']} "
+        f"-H 'X-WEBAUTH-USER: {owner}' http://forgejo/{owner}/commonty/actions/runs/{lost}/jobs/{i}"
+    )
+    assert loc.endswith(f"/attempt/{want}"), (i, loc)
+# and a pass after it has nothing to do
+inv = start_fresh(box, "dd-ci-resume.service")
+assert "run again" not in journal_of(box, "dd-ci-resume.service", inv)

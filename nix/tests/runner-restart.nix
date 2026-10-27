@@ -5,6 +5,10 @@
 # and a restarted gate; the job must finish and pass, and the runner must
 # come up on the new config once it holds no job. A stop that does come
 # (one the restart unit asks for in the instant a job is taken) drains.
+# A runner killed outright under a pull request's job (a box gone, as when
+# the forge moved on 2026-10-25): the forge marks the job failed, and
+# ci-resume runs it again by itself, the jobs that need it after it, and
+# the run passes.
 # The members' runner the same: a member's job, in its container, lives
 # through a switch that changes the members' runner and docker's config,
 # and both restart into theirs once no job's container runs. But not for
@@ -89,6 +93,13 @@ in
       system.switch.enable = true;
       dd.verify.role = lib.mkForce "full";
       dd.runner.capacity = 1;
+      # a task the forge hears nothing from is marked failed within a
+      # minute here, not ten (ci-resume.py's lost job, below)
+      services.forgejo.settings.actions.ZOMBIE_TASK_TIMEOUT = "40s";
+      services.forgejo.settings."cron.stop_zombie_tasks" = {
+        ENABLED = true;
+        SCHEDULE = "@every 15s";
+      };
       systemd.services.zfs-datasets = {
         wantedBy = [ "multi-user.target" ];
         serviceConfig = {

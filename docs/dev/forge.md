@@ -23,7 +23,7 @@ nix/modules/forge/
   forgejo-setup.sh                    main's rule, through the API
   live.nix                            the database trigger behind the pages' live updates
   ci-cancel.py                        a failing job stops its run
-  ci-resume.py                        a run a restart killed is run again
+  ci-resume.py                        a job a restart killed is run again, by itself
   forgejo-runner.nix                  the host runner: the fleet's own CI
   members-runner.nix                  the members' runner: Docker under gVisor
   runner-start.sh                     a runner waits for the forge, fetches its token as root, drops to its user, registers, and runs
@@ -425,20 +425,45 @@ identity (no admin), through the socket.
   takes no secret: all anyone can do with it is stop a run that already
   failed.
 - **ci-resume** ([`ci-resume.py`](../../nix/modules/forge/ci-resume.py)):
-  a run killed from outside (the forge restarting under it, or a runner
-  stopped by hand) has jobs that end "failed" with `context canceled` in
-  their logs. A release no longer stops a runner under a job (The
-  runners, below). Every 3 minutes (first 5 minutes after the timer starts,
-  never inside a switch) it looks at the last 50 runs and reruns a pull
-  request's run once when: it is that pull request's newest run, it
-  stopped within the last 3 hours, every job that failed has `context
-  canceled` in the last 4000 bytes of its log, and it has not been rerun
-  before (kept in `/var/lib/dd-ci-resume/retried.json`, the last 500; only
-  a rerun the forge accepted counts: it refuses one while any job of the
-  run is still going, and run 786's refusal was once taken for done). The
+  a job killed from outside is run again by itself, through the forge's
+  own per-job rerun (`/<owner>/<repo>/actions/runs/<n>/jobs/<i>/rerun`,
+  `RerunJob` in Forgejo's `services/actions/rerun.go`), which runs that
+  job at its next attempt and every job that needs it, transitively,
+  after it: `ci_ok` needs every job, so it is run again too, and reads
+  its needs' latest results. It does so while the rest of the run is
+  still going; the jobs that passed keep their result. Two ways a job is
+  killed, both seen on the fleet:
+  - its runner stopped under it: the job ends "failed" and its log's last
+    line is `context canceled` (runs 771, 786);
+  - the forge went away (restarted, or moved to another box): the runner
+    can no longer report, the log stops in the middle of a step with no
+    end line (`🏁 ...`), and the forge, back, marks the task failed once it
+    has heard nothing from it for `ZOMBIE_TASK_TIMEOUT` (10 minutes). The
+    jobs that need it, `ci_ok` too, are left blocked, so the run never ends
+    by itself. Runs
+    873, 880, 881 and 884 lost jobs so to the forge restarting under a
+    switch on 2026-10-24, and run 900 five across its move of 2026-10-25;
+    before this, none of them was run again, since no log said `context
+    canceled`.
+
+  A job that ended itself (its end line, then no `context canceled`) is
+  never run again, nor one the forge stopped after three hours (a hang),
+  nor one that failed in its first moments with its runner still there (a
+  full disk, run 850). A run with any such job is left red, and so is one
+  someone cancelled (a person, a newer push, a failure's stop-run). Every 3
+  minutes (first 5 minutes after the timer starts, never inside a switch)
+  it looks at the last 50 runs: a pull request's run, or main's full run,
+  of `entry_point.yml`, the newest for its ref, made within two days; a
+  job is run again until its third attempt. It keeps nothing on its box:
+  the attempt is the forge's own record, so when the forge moves the next
+  pass, wherever the forge now runs (it is one of the forge's units in
+  its needs, placed with it), carries on where the last left off. The
   forge not answering is "next time", exit 0. It has
   `restartIfChanged = false`: release 213 rolled back because it ran while
-  the forge restarted under the switch.
+  the forge restarted under the switch. `checks.ci-resume` holds its
+  choices to a made-up forge, and `runner-restart` to a real one: a
+  runner killed under a pull request's job, the job marked failed, run
+  again alone, the job after it and `ci_ok` then passing.
 
 ## The Git pages
 
@@ -730,7 +755,8 @@ order ([`forge.py`](../../nix/tests/forge.py)):
    `/api/v1/admin`, refuses a `sudo` query and drops the `Sudo` header is
    checked on every box's real nginx config: `checks.nginx`,
    [`nginx-door.py`](../../nix/tests/nginx-door.py).)
-5. ci-resume's timer is set, and a pass over no runs fails nothing.
+5. ci-resume's timer is set, and a pass over no runs fails nothing
+   (a killed job run again: `runner-restart`).
    The CI identity is no admin, may write to the fleet's repository once
    `forgejo-admin` has run again, and cancels a run there through the
    socket as ci-cancel does.

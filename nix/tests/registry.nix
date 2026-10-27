@@ -98,6 +98,8 @@
     "control"
     # the relay answers without a witness that cannot start
     "control-relay"
+    # a CI job a restart killed runs again by itself (ci-resume.py)
+    "ci-resume"
   ];
   # the evaluation-only checks flake_check builds: seconds each, no VM
   eval = [
@@ -128,5 +130,6 @@
     "wired-watch-logic"
     "garage-setup-pipe"
     "computer-facts-logic"
+    "ci-resume"
   ];
 }

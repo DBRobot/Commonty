@@ -553,10 +553,12 @@ in
         };
       };
 
-      # a run killed from outside (the forge or a runner restarting under it)
-      # is run again, once: ci-resume.py, every few minutes
+      # a job killed from outside (the forge or a runner restarting or moving
+      # under it) is run again by itself, with what needs it: ci-resume.py,
+      # every few minutes. It keeps nothing here: how often a job ran is the
+      # forge's own record, which moves with the forge
       systemd.services.dd-ci-resume = {
-        description = "Run again a ci run that a restart killed";
+        description = "Run again the ci jobs a restart killed";
         after = [ "forgejo.service" ];
         # never part of whether a switch came up: 213 rolled back on node1
         # because this ran while the forge was restarting under the switch
@@ -565,14 +567,14 @@ in
           Type = "oneshot";
           DynamicUser = true;
           SupplementaryGroups = [ "forgejo" ]; # to open forgejo's socket
-          StateDirectory = "dd-ci-resume";
           ExecStart = "${pkgs.python3}/bin/python3 ${./ci-resume.py}";
         };
         environment = {
           FORGE = sock;
           AS = cfg.ci;
           REPO = config.dd.repo;
-          STATE = "/var/lib/dd-ci-resume";
+          # how long the forge waits on a silent task before it marks it failed
+          ZOMBIE = config.services.forgejo.settings.actions.ZOMBIE_TASK_TIMEOUT or "10m";
         };
       };
       systemd.timers.dd-ci-resume = {
