@@ -1,8 +1,8 @@
 {
   "payload": {
     "flake": "git+https://git.commonty.org/david/commonty",
-    "id": "check-1-1793063257",
-    "issued": 1793063257,
+    "id": "check-1-1793086014",
+    "issued": 1793086015,
     "jobs": [
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
@@ -18,12 +18,12 @@
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
         "builders": [
-          "node1",
-          "node2"
+          "node2",
+          "node1"
         ],
         "name": "dd-windows",
         "part": "dd-windows",
-        "path": "/nix/store/0axpxz2abcr9r586z5bqf6zj5sdxnvis-dd-windows-0.0.1",
+        "path": "/nix/store/67s5y3yd8d5ddihk4bhvi5cjb5x95a1b-dd-windows-0.0.1",
         "version": "0.0.1"
       },
       {
@@ -50,8 +50,8 @@
       }
     ],
     "kind": "build-order",
-    "rev": "780b74e25a3d3fa0b88c2b4294f1b7c21ed76c58"
+    "rev": "5f9ca4d286be9d71aa762a06ed1ff133465cdc03"
   },
   "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
-  "signature": "GPRwNTqRm+KcwHJBMv7/Z3l0xGjZfMWL4CyCh5GJKEQIlRW5YrNKHXXdaW2hdK7pCbylM3INmJh9NBwB39tOAw=="
+  "signature": "L8rEdpSEKs6pPOLZMjcqDRm29wXSCmNqXp+imU5c4NCuxCCNINXnopAQV84TLP1SC2STp/HcbqN18E9AyQHlCw=="
 }
