@@ -60,7 +60,11 @@
   "work-memory",
   "site-journeys",
   "rollout",
-  "placed"
+  "placed",
+  "switch-remote",
+  "cache-front",
+  "wired-watch",
+  "net-detect"
  ],
  "acme": {
   "paths": [
@@ -268,20 +272,18 @@
   "paths": [
    "nix/tests/backup.nix",
    "nix/tests/backup.py",
-   "nix/modules/storage/garage.nix",
-   "nix/modules/storage/garage-setup.sh",
    "nix/modules/storage/backup.nix",
    "nix/modules/box/timer-watch.nix",
-   "nix/modules/box/timer-watch.sh"
+   "nix/modules/box/timer-watch.sh",
+   "nix/modules/storage/store.nix"
   ],
   "why": {
    "nix/tests/backup.nix": "test itself",
    "nix/tests/backup.py": "test itself",
-   "nix/modules/storage/garage.nix": "garage.service, port 3901, garage-setup.service (layout, buckets, keys via dd.garage.buckets)",
-   "nix/modules/storage/garage-setup.sh": "script garage-setup.service runs (layout apply, bucket/key import, bucket names)",
    "nix/modules/storage/backup.nix": "restic-backups-dd service/timer, backup-mark -> /var/lib/dd-facts/backup.prom, dd-backup-stale.service restarting the timer",
    "nix/modules/box/timer-watch.nix": "dd-timer-watch.service asserted",
-   "nix/modules/box/timer-watch.sh": "writes dd_timers_restarted to timers.prom (asserted)"
+   "nix/modules/box/timer-watch.sh": "writes dd_timers_restarted to timers.prom (asserted)",
+   "nix/modules/storage/store.nix": "store per box: backups-a bucket, keys env, dd-store-copy to b the test drives"
   },
   "notes": "No Rust/Go code exercised: garage and restic are nixpkgs. dd.verify disabled, so the gate is out.",
   "family": "vm"
@@ -446,7 +448,9 @@
    "client/directory/src/**",
    "client/cli/src/main.rs",
    "client/cli/src/member.rs",
-   "client/cli/src/consent.rs"
+   "client/cli/src/consent.rs",
+   "nix/modules/forge/runner-keys.nix",
+   "nix/modules/forge/runner-token.sh"
   ],
   "why": {
    "nix/modules/forge/forgejo.nix": "forgejo on a socket, forgejo-admin/forgejo-protection units (ci_ok rule), dd-forge-rules SQL (no private repos, runner owner trigger), dd-ci-cancel/dd-ci-resume units, nginx git.<domain> locations incl. cancelRun",
@@ -463,7 +467,9 @@
    "client/directory/src/**": "dd's directory client against /_dd/directory",
    "client/cli/src/main.rs": "dd identity new/show, dd token",
    "client/cli/src/member.rs": "dd member add writing fleet/members.json",
-   "client/cli/src/consent.rs": "--born / --agree-terms on identity new"
+   "client/cli/src/consent.rs": "--born / --agree-terms on identity new",
+   "nix/modules/forge/runner-keys.nix": "dd-runner-keys: tokens sealed to runnerBoxes.box1, asserted openable and not plaintext",
+   "nix/modules/forge/runner-token.sh": "the token format the sealed files carry"
   },
   "notes": "follow.nix, usage.nix, postgres-backup.nix are imported but failover is off and nothing about them is asserted, so left out. The dd subcommand files in client/cli are a best guess (main.rs/member.rs/consent.rs); widen to client/cli/src/** if identity/token live elsewhere. Gate kept crate-wide: signin, directory, demo, verify and events all exercised.",
   "family": "vm"
@@ -516,22 +522,26 @@
    "nix/modules/forge/runner-restart.sh",
    "nix/modules/forge/forgejo-runner.nix",
    "nix/modules/forge/members-runner.nix",
-   "nix/modules/forge/runner-address.sh",
    "nix/modules/box/work-memory.nix",
    "nix/modules/forge/forgejo.nix",
    "nix/modules/forge/forgejo-setup.sh",
-   "nix/tests/lib/waits.py"
+   "nix/tests/lib/waits.py",
+   "nix/modules/forge/runner-start.sh",
+   "nix/modules/forge/runner-keys.nix",
+   "nix/modules/forge/runner-token.sh"
   ],
   "why": {
    "nix/modules/forge/runner-restart.nix": "dd-runner-restart unit/timer, restartIfChanged=false, 'started' ExecStartPre, entry format",
    "nix/modules/forge/runner-restart.sh": "check/started logic: restart when idle, drain past limit, sandbox change, /run/dd-runner-restart/*.sandbox, runner-restart.prom facts",
    "nix/modules/forge/forgejo-runner.nix": "host runner gitea-runner-box: config capacity, KillMode/drain, registration",
    "nix/modules/forge/members-runner.nix": "members runner + docker config, sandboxKeys hash, label dd.runner=members-box, drainMinutes",
-   "nix/modules/forge/runner-address.sh": "ExecStartPre of both runners (waits on git.test.invalid)",
    "nix/modules/box/work-memory.nix": "work slice the host runner's jobs run in (dd.work.units)",
    "nix/modules/forge/forgejo.nix": "the forge the runners register with and run jobs from; /api/actions/ nginx location",
    "nix/modules/forge/forgejo-setup.sh": "forgejo-admin the test waits on",
-   "nix/tests/lib/waits.py": "start_fresh/journal_of/wait_unit_active drive the dd-runner-restart passes"
+   "nix/tests/lib/waits.py": "start_fresh/journal_of/wait_unit_active drive the dd-runner-restart passes",
+   "nix/modules/forge/runner-start.sh": "the runners' main process (replaced runner-address.sh): waits for the forge, fetches and opens its sealed token, registers, starts the runner",
+   "nix/modules/forge/runner-keys.nix": "dd-runner-keys seals each runner box's registration tokens to its secrets key; the test asserts box.host.age and the members token",
+   "nix/modules/forge/runner-token.sh": "opens the sealed token into /var/lib/dd-runner-token/{host,members}.env, which the test greps"
   },
   "notes": "runner-capacity.sh is skipped when capacity is fixed (it is, here). The gate is only stopped/started as part of the switch; its code is not asserted.",
   "family": "vm"
@@ -633,8 +643,6 @@
    "nix/tests/library.nix",
    "nix/tests/library.py",
    "nix/modules/library/libraries.nix",
-   "nix/modules/storage/garage.nix",
-   "nix/modules/storage/garage-setup.sh",
    "nix/modules/gate/verify.nix",
    "servers/library/**",
    "servers/gate/src/lib.rs",
@@ -653,12 +661,11 @@
    "client/account/src/**",
    "client/cli/src/main.rs",
    "client/cli/src/librarycmd.rs",
-   "client/cli/src/member.rs"
+   "client/cli/src/member.rs",
+   "nix/modules/storage/store.nix"
   ],
   "why": {
    "nix/modules/library/libraries.nix": "libraries bucket+key, dd.verify.library and demoLibrary wiring",
-   "nix/modules/storage/garage.nix": "garage.service, garage-setup.service (layout, buckets, keys)",
-   "nix/modules/storage/garage-setup.sh": "garage-setup script run twice by the test",
    "nix/modules/gate/verify.nix": "role=full, VERIFY_* env (library s3, demo, ledger), dd.home.services demo tile",
    "servers/library/**": "library-gate crate: WebDAV (dav.rs) PROPFIND/PUT/COPY/DELETE, trash, x-dd-upload multipart",
    "servers/gate/src/library.rs": "/_dd/dav and /_dd/images routes, trash expiry on restart, ledger 507s, cookie read-only",
@@ -674,7 +681,8 @@
    "client/library/src/**": "library key/crypt used by dd library and the gate",
    "client/auth/src/**": "device token for dd token",
    "client/directory/src/**": "directory client used by dd",
-   "client/account/src/**": "identity new / sign-up path in the cli"
+   "client/account/src/**": "identity new / sign-up path in the cli",
+   "nix/modules/storage/store.nix": "the box's store: libraries bucket and dd-store/keys/libraries.env the test lists objects with"
   },
   "notes": "Gate files chosen by the routes hit; if the gate's auth moves to another module (private.rs, member_boxes.rs) add it. client/account inclusion is a guess at where `identity new` lives.",
   "family": "vm"
@@ -701,7 +709,10 @@
    "client/directory/src/**",
    "client/account/src/**",
    "client/cli/src/main.rs",
-   "client/cli/src/member.rs"
+   "client/cli/src/member.rs",
+   "nix/modules/storage/ledger.nix",
+   "nix/modules/storage/view.nix",
+   "client/cli/src/storage_ledger.rs"
   ],
   "why": {
    "nix/tests/lib/waits.py": "start_fresh/journal_has imported for ente-health",
@@ -714,7 +725,10 @@
    "servers/gate/src/session.rs": "/_dd/app/signin cookie",
    "servers/gate/src/directory.rs": "/_dd/directory for dd identity/member",
    "nix/modules/gate/verify.nix": "dd.verify.photos -> VERIFY_PHOTOS_* env, hosts for nginx",
-   "client/ente/**": "ente-roundtrip binary (roundtrip ok, public-albums url)"
+   "client/ente/**": "ente-roundtrip binary (roundtrip ok, public-albums url)",
+   "nix/modules/storage/ledger.nix": "dd-photos-usage and dd-storage-ledger: usage.tsv and the limit the test reads",
+   "nix/modules/storage/view.nix": "imported: the ledger's view the test sets up",
+   "client/cli/src/storage_ledger.rs": "dd storage-ledger --photos-usage/--photos-limits the ledger unit runs"
   },
   "notes": "ente web patches (ente-web-*.patch) excluded: web apps disabled in this test. waits.py is also shared harness; listed here because the test imports it.",
   "family": "vm"
@@ -972,8 +986,6 @@
    "nix/tests/leaving.nix",
    "nix/tests/leaving.py",
    "nix/modules/gate/verify.nix",
-   "nix/modules/storage/garage.nix",
-   "nix/modules/storage/garage-setup.sh",
    "nix/modules/library/libraries.nix",
    "servers/gate/src/**",
    "servers/library/src/**",
@@ -981,30 +993,28 @@
    "client/cli/src/member.rs",
    "client/cli/src/who.rs",
    "client/cli/src/consent.rs",
-   "client/cli/src/leaving.rs",
    "client/cli/src/librarycmd.rs",
    "client/identity/src/**",
    "client/directory/src/**",
    "client/account/src/**",
    "client/auth/src/**",
-   "client/library/src/**"
+   "client/library/src/**",
+   "nix/modules/storage/store.nix"
   ],
   "why": {
    "nix/modules/gate/verify.nix": "dd-verify unit, leaveTickSeconds, library.s3, VERIFY_MEMBERS, state dir",
-   "nix/modules/storage/garage.nix": "garage + garage-setup (layout, libraries bucket)",
-   "nix/modules/storage/garage-setup.sh": "garage-setup script",
    "nix/modules/library/libraries.nix": "libraries bucket/key used by the gate",
    "servers/gate/src/**": "leaving.rs (/_dd/leaving, /internal/leaving[/done], window, deletes, log by id), session/app signin, /_dd/me roles suspended, library.rs dav read-only, directory.rs",
    "servers/library/src/**": "library_gate: /_dd/dav GET/PUT, suspended read-only, other's library 403",
    "client/cli/src/member.rs": "dd member add/suspend/unsuspend -> members.json removed/suspended",
-   "client/cli/src/leaving.rs": "dd leave",
    "client/cli/src/librarycmd.rs": "dd library new",
    "client/cli/src/main.rs": "dd leave --yes confirm, identity new/show, token",
    "client/account/src/**": "account::leave signed statement",
    "client/library/src/**": "library creation client",
    "client/identity/src/**": "root signatures on the statement",
    "client/directory/src/**": "directory client",
-   "client/auth/src/**": "device token for signin and bearer"
+   "client/auth/src/**": "device token for signin and bearer",
+   "nix/modules/storage/store.nix": "the box's store the libraries keep their files in (libraries.env keys the test reads)"
   },
   "notes": "garage-setup.sh path assumed from garage.nix ddScript ./garage-setup.sh.",
   "family": "vm"
@@ -1062,7 +1072,9 @@
    "client/cli/src/member.rs",
    "client/identity/src/**",
    "client/directory/src/**",
-   "client/auth/src/**"
+   "client/auth/src/**",
+   "nix/modules/member-mail.nix",
+   "nix/modules/mail-send.sh"
   ],
   "why": {
    "nix/tests/vault.nix": "test",
@@ -1090,7 +1102,9 @@
    "client/cli/src/member.rs": "dd member add -> fleet/members.json fed to VERIFY_MEMBERS",
    "client/identity/src/**": "identity/session tokens the gate checks at /_dd/app/signin",
    "client/directory/src/**": "dd ... --directory http://127.0.0.1:4181/_dd/directory",
-   "client/auth/src/**": "DD_KEYRING_FILE keystore dd reads/writes"
+   "client/auth/src/**": "DD_KEYRING_FILE keystore dd reads/writes",
+   "nix/modules/member-mail.nix": "dd-announce: a policy change mailed once it takes effect, never before (announcements the test writes)",
+   "nix/modules/mail-send.sh": "how dd-announce sends each member's mail"
   },
   "notes": "signins.rs inclusion is a guess (ended-name flow lives in directory.rs/main.rs). Vaultwarden itself is pinned from nixpkgs (flake.lock, shared).",
   "family": "vm"
@@ -1259,7 +1273,8 @@
    "client/cli/src/member.rs",
    "client/identity/src/**",
    "client/directory/src/**",
-   "client/auth/src/**"
+   "client/auth/src/**",
+   "nix/modules/storage/store.nix"
   ],
   "why": {
    "nix/tests/site-journeys.nix": "test",
@@ -1304,7 +1319,8 @@
    "client/cli/src/member.rs": "dd member add -> fleet/members.json fed to VERIFY_MEMBERS",
    "client/identity/src/**": "identity/session tokens the gate checks at /_dd/app/signin",
    "client/directory/src/**": "dd ... --directory http://127.0.0.1:4181/_dd/directory",
-   "client/auth/src/**": "DD_KEYRING_FILE keystore dd reads/writes"
+   "client/auth/src/**": "DD_KEYRING_FILE keystore dd reads/writes",
+   "nix/modules/storage/store.nix": "imported beside garage: the libraries and photos keep their files in the box's store"
   },
   "notes": "Widest of the set: an end-to-end browser walk across most services. app/src/local.rs is stood in for by site/app.py, so not included.",
   "family": "vm"
@@ -1496,7 +1512,9 @@
    "servers/gate/src/lib.rs",
    "servers/gate/src/main.rs",
    "servers/gate/Cargo.toml",
-   "client/identity/src/**"
+   "client/identity/src/**",
+   "client/cli/src/release_cmd.rs",
+   "client/auth/src/keystore.rs"
   ],
   "why": {
    "nix/tests/control.nix": "test derivation, go test ./..., relay front",
@@ -1507,7 +1525,9 @@
    "servers/gate/src/lib.rs": "VERIFY_CONTROL wiring",
    "servers/gate/src/main.rs": "VERIFY_ROLE=directory startup, control submit socket",
    "servers/gate/Cargo.toml": "verify crate",
-   "client/identity/src/**": "signed entries the directory checks"
+   "client/identity/src/**": "signed entries the directory checks",
+   "client/cli/src/release_cmd.rs": "dd release sign makes the release the relay keeps a copy of (run.py)",
+   "client/auth/src/keystore.rs": "DD_KEYRING_FILE key file dd signs from"
   },
   "notes": "control-worker package also embeds fleet/control.json config but the test writes its own config.js; only worker.js/wasm_exec.js/witness.wasm are used."
  },
@@ -1524,7 +1544,7 @@
    "servers/system/control/**": "this release's dd-control + witness, deciding with 359's",
    "fleet/control-before.json": "release 359's config every validator applies until a config is agreed (flake control.configFile before)"
   },
-  "notes": "Not in today's tree: existed only on branch train-1024 (commits 6860982a/06dab09a/0fa8e174, 2026-10-23), listed in GROUPS worker_tests there. Paths are as on that branch; fleet/control-before.json and the test files do not exist on HEAD."
+  "notes": "Fetches release 359's dd-control/witness from the forge's public door (fixed rev, fixed hash); this release's dd-control and control-worker are under test."
  },
  "mail-page": {
   "paths": [
@@ -2209,12 +2229,12 @@
    "nix/modules/box/box.nix",
    "nix/modules/box/host.nix",
    "nix/modules/box/ports.nix",
-   "nix/modules/storage/garage.nix",
-   "nix/roles/storage.nix",
    "nix/modules/observe/metrics.nix",
    "nix/modules/observe/thanos.nix",
    "nix/modules/observe/metrics-ui.nix",
-   "nix/modules/llm/llama-cpp.nix"
+   "nix/modules/llm/llama-cpp.nix",
+   "nix/modules/storage/store.nix",
+   "nix/lib/fleet-placement.nix"
   ],
   "why": {
    "nix/tests/boxes.nix": "the check",
@@ -2228,12 +2248,12 @@
    "nix/modules/box/box.nix": "dd.box.net, hostName",
    "nix/modules/box/host.nix": "hostName",
    "nix/modules/box/ports.nix": "two services on one port fail the build",
-   "nix/modules/storage/garage.nix": "garage publicAddr/peers/zone",
-   "nix/roles/storage.nix": "thanos sidecar grpc on garage boxes",
    "nix/modules/observe/metrics.nix": "prometheus listenAddress 127.0.0.1, grafana off",
    "nix/modules/observe/thanos.nix": "thanos sidecars/query http-address",
    "nix/modules/observe/metrics-ui.nix": "grafana gone",
-   "nix/modules/llm/llama-cpp.nix": "llama-swap PrivateNetwork, EnvironmentFile, llm-proxy socket"
+   "nix/modules/llm/llama-cpp.nix": "llama-swap PrivateNetwork, EnvironmentFile, llm-proxy socket",
+   "nix/modules/storage/store.nix": "asserted per store box: dd.store.enable, its peers never itself",
+   "nix/lib/fleet-placement.nix": "fp.built/carried/stores: what each box is built with, read directly"
   },
   "notes": "Also needs every box's config to evaluate, so any module can break it; listed only what it asserts."
  },
@@ -2281,7 +2301,6 @@
    "servers/library/src/dav.rs",
    "servers/gate/src/leaving.rs",
    "nix/modules/storage/snapshots.nix",
-   "nix/roles/storage.nix",
    "nix/modules/storage/backup.nix",
    "nix/modules/net/headscale.nix",
    "nix/modules/vault/vaultwarden.nix",
@@ -2299,7 +2318,6 @@
    "servers/library/src/dav.rs": "TRASH_SECS read by regex",
    "servers/gate/src/leaving.rs": "pub const WINDOW read by regex",
    "nix/modules/storage/snapshots.nix": "zfs autoSnapshot levels, snapshotMaxDays, timers",
-   "nix/roles/storage.nix": "autoSnapshot settings",
    "nix/modules/storage/backup.nix": "restic pruneOpts",
    "nix/modules/net/headscale.nix": "headscale restic backup",
    "nix/modules/vault/vaultwarden.nix": "TRASH_AUTO_DELETE_DAYS, EVENTS_DAYS_RETAIN",
@@ -2312,7 +2330,7 @@
    "servers/photos/museum-*.patch": "museum trash/queue/account delays read from the patched source",
    "fleet/boxes.json": "which boxes"
   },
-  "notes": ""
+  "notes": " nix/roles/storage.nix went with the old pool (its snapshots are core's now)."
  },
  "needs-units": {
   "paths": [
@@ -3475,7 +3493,6 @@
    "nix/tests/placement-fleet/**",
    "nix/tests/registry.nix",
    "nix/tests/security-txt.py",
-   "nix/tests/webauthn.mjs",
    "secrets/node1.yaml",
    "secrets/node2.yaml",
    "servers/*/*/Cargo.toml",
@@ -3523,7 +3540,6 @@
    "nix/tests/placement-fleet/**": "placement-fleet fleet.json",
    "nix/tests/calendar-js/**": "calendar-js test",
    "nix/tests/git-path/**": "git-path test",
-   "nix/tests/webauthn.mjs": "safe-rd",
    "servers/files/web/pdf-*.js": "pdf-editor: pdf-doc.js, pdf-sign.js",
    "servers/files/web/pdf.test.mjs": "pdf-editor",
    "client/web/**": "pdf-editor takes packages.web: the wasm bundle is BUILT by evalChecks",
@@ -3613,5 +3629,199 @@
    "nix/tests/box.nix",
    "flake.lock"
   ]
+ },
+ "control-together": {
+  "paths": [
+   "nix/tests/control-upgrade.nix",
+   "nix/tests/control-upgrade/**",
+   "servers/system/control/**",
+   "fleet/control-before.json"
+  ],
+  "why": {
+   "nix/tests/control-upgrade.nix": "test derivation, scenario \"together\": both boxes switched at once with the witness off; the leased writers must run again within the lease and a margin",
+   "nix/tests/control-upgrade/**": "run.py, placement.json",
+   "servers/system/control/**": "this release's dd-control + witness, deciding with 359's",
+   "fleet/control-before.json": "release 359's config every validator applies until a config is agreed (flake control.configFile before)"
+  },
+  "notes": "Same derivation as control-upgrade (nix/tests/control-upgrade.nix with scenario = \"together\"), so the same paths."
+ },
+ "control-signfail": {
+  "paths": [
+   "nix/tests/control-upgrade.nix",
+   "nix/tests/control-upgrade/**",
+   "servers/system/control/**",
+   "fleet/control-before.json"
+  ],
+  "why": {
+   "nix/tests/control-upgrade.nix": "test derivation, scenario \"signfail\": node1's signatures failing (dd-control -test-sign-fail): writers move to node2 only once node1 is gone, and back when it signs again",
+   "nix/tests/control-upgrade/**": "run.py, placement.json",
+   "servers/system/control/**": "this release's dd-control + witness, deciding with 359's",
+   "fleet/control-before.json": "release 359's config every validator applies until a config is agreed (flake control.configFile before)"
+  },
+  "notes": "Same derivation as control-upgrade (nix/tests/control-upgrade.nix with scenario = \"signfail\"), so the same paths."
+ },
+ "control-relay": {
+  "paths": [
+   "nix/tests/control-relay.nix",
+   "nix/tests/control-relay.py",
+   "nix/tests/control/placement.json",
+   "servers/system/control/worker/**",
+   "servers/system/control/cmd/witness/**",
+   "servers/system/control/state/**",
+   "servers/system/control/wire/**",
+   "servers/system/control/go.mod",
+   "servers/system/control/go.sum",
+   "servers/system/dns/worker.js",
+   "client/mail/worker/identity.js"
+  ],
+  "why": {
+   "nix/tests/control-relay.nix": "test derivation (wrangler front, saved-state hooks)",
+   "nix/tests/control-relay.py": "test itself",
+   "nix/tests/control/placement.json": "placement inputs the witness boots with",
+   "servers/system/control/worker/**": "the relay: /health, /relay, /leases, /identity refused without a witness, saved state dropped when it does not hold together",
+   "servers/system/control/cmd/witness/**": "the witness wasm whose boot and panic the relay survives",
+   "servers/system/control/state/**": "the agreed state the witness loads from a saved copy (a bad one is dropped)",
+   "servers/system/control/wire/**": "frames the witness and relay exchange",
+   "servers/system/control/go.mod": "the witness wasm's module",
+   "servers/system/control/go.sum": "the witness wasm's module",
+   "servers/system/dns/worker.js": "must bind the relay's object by its RELAY_NAME",
+   "client/mail/worker/identity.js": "must bind the relay's object by its RELAY_NAME"
+  },
+  "notes": "Uses the control-worker package (flake.nix): config.js/placement.js it embeds are replaced by the test's own. dd-control itself is not run."
+ },
+ "cache-front": {
+  "paths": [
+   "nix/tests/cache-front.nix",
+   "nix/tests/cache-front.py",
+   "nix/modules/storage/store.nix",
+   "nix/modules/storage/needs.nix",
+   "nix/lib/needs.nix",
+   "nix/lib/needs-type.nix"
+  ],
+  "why": {
+   "nix/tests/cache-front.nix": "test itself",
+   "nix/tests/cache-front.py": "test itself",
+   "nix/modules/storage/store.nix": "dd-store, dd-store-at (s3Url/envFile handed to the uploader, agent and substituter), the store's TLS door on :3443, a shared bucket homed on another box",
+   "nix/modules/storage/needs.nix": "store.nix reads needs for declared buckets",
+   "nix/lib/needs.nix": "imported by store.nix",
+   "nix/lib/needs-type.nix": "type of the needs store.nix reads"
+  },
+  "notes": "nix's own s3 client (nix copy / path-info) is the client under test: flake.lock (shared). nginx's vhost certificate is the test's.",
+  "family": "vm"
+ },
+ "switch-remote": {
+  "paths": [
+   "nix/tests/switch-remote.nix",
+   "nix/tests/switch-remote.py",
+   "nix/modules/box/agent.nix",
+   "nix/modules/box/remote-jobs.nix",
+   "nix/modules/gate/acme.nix",
+   "nix/modules/forge/forgejo-runner.nix",
+   "nix/modules/forge/runner-start.sh",
+   "nix/modules/forge/runner-restart.nix",
+   "servers/system/release/src/lib.rs",
+   "servers/system/release/src/bin/dd-agent.rs",
+   "servers/system/release/Cargo.toml",
+   "client/cli/src/release_cmd.rs",
+   "client/auth/src/keystore.rs",
+   "client/identity/src/**"
+  ],
+  "why": {
+   "nix/tests/switch-remote.nix": "test itself",
+   "nix/tests/switch-remote.py": "test itself",
+   "nix/modules/box/agent.nix": "dd-agent: mirrors (the relay), reach, probe, guard timer, counter, dd_agent.prom",
+   "nix/modules/box/remote-jobs.nix": "jobs on other machines never in a switch: /etc/dd/remote-jobs, the order unit not wanted, TimeoutStartUSec 15min",
+   "nix/modules/gate/acme.nix": "acme-order-renew-<domain> that hangs on an ACME server that never answers",
+   "nix/modules/forge/forgejo-runner.nix": "the host runner started by the next release, NRestarts 0 with its forge nowhere",
+   "nix/modules/forge/runner-start.sh": "waits out a forge that is down inside the main process, so the switch completes",
+   "nix/modules/forge/runner-restart.nix": "imported by forgejo-runner.nix: the switch leaves the runner alone",
+   "servers/system/release/src/lib.rs": "release payload, signature checks",
+   "servers/system/release/src/bin/dd-agent.rs": "the agent: forge then relay, hands the relay what it lacks, remote jobs left out of the probe",
+   "servers/system/release/Cargo.toml": "the agent package",
+   "client/cli/src/release_cmd.rs": "dd release init / sign the test runs",
+   "client/auth/src/keystore.rs": "the key file dd signs from",
+   "client/identity/src/**": "ed25519 keys the release is signed and checked with"
+  },
+  "notes": "The probe needs dd-verify (box.nix, shared). The relay and ACME server are the test's own stand-ins.",
+  "family": "vm"
+ },
+ "wired-watch": {
+  "paths": [
+   "nix/tests/wired-watch.nix",
+   "nix/tests/wired-watch.py",
+   "nix/modules/box/home-network.nix",
+   "nix/modules/box/wired-watch.sh"
+  ],
+  "why": {
+   "nix/tests/wired-watch.nix": "test itself",
+   "nix/tests/wired-watch.py": "test itself",
+   "nix/modules/box/home-network.nix": "house-wired/house-wifi profiles, dd.home options, dd-wired-watch unit",
+   "nix/modules/box/wired-watch.sh": "the watchdog: a cable silent with carrier up taken down, the wifi carries the route, the cable back once it answers"
+  },
+  "notes": "NetworkManager behaviour is nixpkgs' (flake.lock, shared).",
+  "family": "vm"
+ },
+ "net-detect": {
+  "paths": [
+   "nix/tests/net-detect.nix",
+   "nix/tests/net-detect.py",
+   "nix/modules/box/home-network.nix",
+   "nix/modules/box/report/nics.sh"
+  ],
+  "why": {
+   "nix/tests/net-detect.nix": "test itself",
+   "nix/tests/net-detect.py": "test itself",
+   "nix/modules/box/home-network.nix": "the house's two profiles the report reads (role, metric, DNS)",
+   "nix/modules/box/report/nics.sh": "the report under test: driver, bus, ids, slot, usb/wireless/initrd, carrier, the stack's primary and fallback"
+  },
+  "notes": "",
+  "family": "vm"
+ },
+ "wired-watch-logic": {
+  "paths": [
+   "nix/tests/wired-watch-logic.nix",
+   "nix/tests/wired-watch-logic/**",
+   "nix/modules/box/wired-watch.sh"
+  ],
+  "why": {
+   "nix/tests/wired-watch-logic.nix": "test derivation",
+   "nix/tests/wired-watch-logic/**": "run.sh: made-up sysfs, nmcli, ping, arping",
+   "nix/modules/box/wired-watch.sh": "every choice of the watchdog, run by run"
+  },
+  "notes": "No VM, seconds."
+ },
+ "net-report": {
+  "paths": [
+   "nix/tests/net-report.nix",
+   "nix/tests/net-report/**",
+   "nix/modules/box/report/nics.sh",
+   "nix/lib/net-hardware.nix"
+  ],
+  "why": {
+   "nix/tests/net-report.nix": "test derivation and the derive checks",
+   "nix/tests/net-report/**": "run.sh and node2.json: sysfs trees as node1 and node2 showed them",
+   "nix/modules/box/report/nics.sh": "the report, run on the made-up trees",
+   "nix/lib/net-hardware.nix": "what a box's config is derived from its report: initrd modules, the Wi-Fi fallback, flaky adapters, warnings"
+  },
+  "notes": "Evaluation asserts plus a build of seconds; no VM."
+ },
+ "app-release": {
+  "paths": [
+   "flake.nix",
+   "flake.lock",
+   "Cargo.lock",
+   "nix/app-release/**",
+   "app/net/**",
+   "app/Cargo.toml"
+  ],
+  "why": {
+   "flake.nix": "rust.appRelease is written there: each download's recipe, its sources and the windows cross build",
+   "flake.lock": "the nixpkgs, crane and rust overlay the recipes are made of",
+   "Cargo.lock": "cargoVendor: the vendored crates every download builds from",
+   "nix/app-release/**": "linux.nix, windows.nix, android.nix and their tests: imported by appRelease",
+   "app/net/**": "netSrc: the network engine's Go module, its vendorHash evaluated",
+   "app/Cargo.toml": "crane reads the app's manifest for its name and version at evaluation"
+  },
+  "notes": "legacyPackages.appReleaseEvaluates: the four downloads' recipes evaluated, never built (the boxes build them after a release). Cheap beside the app's lint and tests, so it stays on pull requests in flake_check while app_checks is main's alone."
  }
 }

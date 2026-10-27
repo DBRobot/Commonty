@@ -1,0 +1,1646 @@
+{
+ "117": {
+  "gate": []
+ },
+ "120": {
+  "gate": []
+ },
+ "122": {
+  "gate": []
+ },
+ "124": {
+  "gate": []
+ },
+ "125": {
+  "gate": []
+ },
+ "127": {
+  "gate": []
+ },
+ "128": {
+  "gate": []
+ },
+ "129": {
+  "gate": []
+ },
+ "131": {
+  "gate": []
+ },
+ "133": {
+  "gate": []
+ },
+ "134": {
+  "gate": []
+ },
+ "135": {
+  "gate": []
+ },
+ "136": {
+  "gate": []
+ },
+ "148": {
+  "gate": []
+ },
+ "149": {
+  "gate": []
+ },
+ "157": {
+  "gate": []
+ },
+ "161": {
+  "gate": []
+ },
+ "162": {
+  "gate": []
+ },
+ "167": {
+  "gate": []
+ },
+ "185": {
+  "gate": []
+ },
+ "193": {
+  "gate": []
+ },
+ "194": {
+  "gate": []
+ },
+ "199": {
+  "gate": []
+ },
+ "203": {
+  "gate": []
+ },
+ "204": {
+  "gate": []
+ },
+ "205": {
+  "gate": []
+ },
+ "206": {
+  "gate": []
+ },
+ "207": {
+  "gate": []
+ },
+ "218": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "219": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "249": {
+  "gate": []
+ },
+ "251": {
+  "gate": []
+ },
+ "252": {
+  "gate": []
+ },
+ "253": {
+  "gate": []
+ },
+ "255": {
+  "gate": []
+ },
+ "256": {
+  "gate": []
+ },
+ "257": {
+  "gate": []
+ },
+ "258": {
+  "gate": []
+ },
+ "260": {
+  "gate": []
+ },
+ "261": {
+  "gate": []
+ },
+ "262": {
+  "gate": []
+ },
+ "279": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "280": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "294": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "295": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "296": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "315": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "316": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "319": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "320": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "321": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "322": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "323": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "324": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "327": {
+  "gate": []
+ },
+ "328": {
+  "gate": []
+ },
+ "329": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "330": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "331": {
+  "gate": []
+ },
+ "332": {
+  "gate": []
+ },
+ "333": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "334": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "335": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "336": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "337": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "338": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "339": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "340": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "341": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "342": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "343": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "344": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "345": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "346": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "347": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "348": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "349": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "350": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "351": {
+  "gate": []
+ },
+ "352": {
+  "gate": []
+ },
+ "353": {
+  "gate": []
+ },
+ "354": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "362": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "363": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "364": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "365": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "369": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "370": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "371": {
+  "gate": []
+ },
+ "375": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "381": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "382": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "383": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "387": {
+  "gate": []
+ },
+ "391": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "393": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "396": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "397": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "398": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "399": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "400": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "401": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "402": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "403": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "404": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "405": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "406": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "407": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "408": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "409": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "411": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "412": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "413": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "414": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "415": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "419": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "420": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "424": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "426": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "428": {
+  "gate": []
+ },
+ "431": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "433": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "435": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "436": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "437": {
+  "gate": []
+ },
+ "438": {
+  "gate": []
+ },
+ "439": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "440": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "444": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "445": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "446": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "447": {
+  "gate": []
+ },
+ "448": {
+  "gate": []
+ },
+ "449": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "451": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "453": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "454": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "455": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "456": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "457": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "458": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "461": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "462": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "463": {
+  "gate": []
+ },
+ "464": {
+  "gate": []
+ },
+ "465": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "466": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "467": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "468": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "469": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "470": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "471": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "488": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff go.mod or go.sum is missing at one end"
+  ]
+ },
+ "489": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ]
+ },
+ "494": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ]
+ },
+ "498": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "500": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "533": {
+  "gate": []
+ },
+ "536": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state: Compatible changes:\n- BoxState.DirCount: added\n- BoxState.DirWindow: added\n- DirItem: added\n- DirPerMinute: added\n- MaxDirItem: added\n- State.Directory: added"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "537": {
+  "gate": []
+ },
+ "538": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "539": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "541": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "545": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "546": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "561": {
+  "gate": []
+ },
+ "562": {
+  "gate": []
+ },
+ "563": {
+  "gate": []
+ },
+ "564": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state: Compatible changes:\n- BoxState.BuiltCount: added\n- BoxState.BuiltWindow: added\n- BuiltItem: added\n- BuiltPerMinute: added\n- MaxBuilt: added\n- State.Built: added"
+  ],
+  "gate": []
+ },
+ "581": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "582": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "583": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "584": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "593": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "595": {
+  "control": [],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "596": {
+  "control": [],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "597": {
+  "control": [],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "598": {
+  "control": [],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "599": {
+  "control": [],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "600": {
+  "control": [],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "601": {
+  "control": [],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "602": {
+  "control": [],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "603": {
+  "control": [],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "604": {
+  "control": [],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "605": {
+  "control": [],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "606": {
+  "control": [],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "607": {
+  "control": [],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "608": {
+  "control": [],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "609": {
+  "control": [],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "610": {
+  "control": [],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "611": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "612": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "629": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "630": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "632": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "633": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "634": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "635": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "636": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "637": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "638": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "639": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "640": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "641": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "642": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "643": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ]
+ },
+ "647": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "648": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "649": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state: Compatible changes:\n- Lease.Seq: added"
+  ]
+ },
+ "652": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ]
+ },
+ "656": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ]
+ },
+ "658": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ]
+ },
+ "660": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "661": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "662": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "663": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "664": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "666": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ]
+ },
+ "667": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "668": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "673": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "674": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "675": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "679": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "680": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ]
+ },
+ "681": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "684": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "687": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state: Compatible changes:\n- Lease.Seq: added"
+  ]
+ },
+ "688": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ]
+ },
+ "689": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ]
+ },
+ "690": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ]
+ },
+ "691": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ]
+ },
+ "692": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ]
+ },
+ "693": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ]
+ },
+ "694": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ]
+ },
+ "695": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ]
+ },
+ "698": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ]
+ },
+ "699": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ]
+ },
+ "700": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ]
+ },
+ "710": {
+  "gate": []
+ },
+ "713": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state: Compatible changes:\n- (*Config).BoxVoters: added\n- Config.Identity: added",
+   "apidiff state/ident: the package came or went"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "714": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state: Compatible changes:\n- (*Config).BoxVoters: added\n- Config.Identity: added",
+   "apidiff state/ident: the package came or went"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "715": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state: Compatible changes:\n- (*Config).BoxVoters: added\n- Config.Identity: added",
+   "apidiff state/ident: the package came or went"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "716": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state: Compatible changes:\n- (*Config).BoxVoters: added\n- Config.Identity: added",
+   "apidiff state/ident: the package came or went"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "717": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state: Compatible changes:\n- (*Config).BoxVoters: added\n- Config.Identity: added",
+   "apidiff state/ident: the package came or went"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "718": {
+  "gate": []
+ },
+ "719": {
+  "gate": []
+ },
+ "722": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state: Compatible changes:\n- Config.Computers: added",
+   "apidiff state/computers: the package came or went",
+   "apidiff state/ident: Compatible changes:\n- (*State).BoxesOf: added\n- (*State).Entry: added\n- SameAs: added\n- Strict: added"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "726": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "727": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state/computers: Compatible changes:\n- (*Server).Computers: added"
+  ]
+ },
+ "728": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state/computers: Compatible changes:\n- (*Server).Computers: added"
+  ]
+ },
+ "729": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "737": {
+  "control": []
+ },
+ "741": {
+  "gate": []
+ },
+ "746": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state/computers: Compatible changes:\n- (*Server).Computers: added"
+  ]
+ },
+ "747": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state: Compatible changes:\n- Rules.ComputerHosts: added",
+   "apidiff state/computers: Incompatible changes:\n- Limits: old is comparable, new is not\nCompatible changes:\n- Computer.Keys: added\n- Config.Keys: added\n- Held.Keys: added\n- Limits.Owners: added\n- Listed.Keys: added\n- MaxKey: added\n- MaxKeys: added\n- ValidKey: added"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "748": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state: Compatible changes:\n- Rules.ComputerHosts: added",
+   "apidiff state/computers: Incompatible changes:\n- Limits: old is comparable, new is not\nCompatible changes:\n- Computer.Keys: added\n- Config.Keys: added\n- Held.Keys: added\n- Limits.Owners: added\n- Listed.Keys: added\n- MaxKey: added\n- MaxKeys: added\n- ValidKey: added"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "749": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state: Compatible changes:\n- Rules.ComputerHosts: added",
+   "apidiff state/computers: Incompatible changes:\n- Limits: old is comparable, new is not\nCompatible changes:\n- Computer.Keys: added\n- Config.Keys: added\n- Held.Keys: added\n- Limits.Owners: added\n- Listed.Keys: added\n- MaxKey: added\n- MaxKeys: added\n- ValidKey: added"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "750": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state: Compatible changes:\n- Rules.ComputerHosts: added",
+   "apidiff state/computers: Incompatible changes:\n- Limits: old is comparable, new is not\nCompatible changes:\n- Computer.Keys: added\n- Config.Keys: added\n- Held.Keys: added\n- Limits.Owners: added\n- Listed.Keys: added\n- MaxKey: added\n- MaxKeys: added\n- ValidKey: added"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "751": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state: Compatible changes:\n- Rules.ComputerHosts: added",
+   "apidiff state/computers: Incompatible changes:\n- Limits: old is comparable, new is not\nCompatible changes:\n- Computer.Keys: added\n- Config.Keys: added\n- Held.Keys: added\n- Limits.Owners: added\n- Listed.Keys: added\n- MaxKey: added\n- MaxKeys: added\n- ValidKey: added"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "755": {
+  "gate": []
+ },
+ "756": {
+  "gate": []
+ },
+ "758": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ]
+ },
+ "761": {
+  "gate": []
+ },
+ "762": {
+  "gate": []
+ },
+ "763": {
+  "gate": []
+ },
+ "764": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state/ident: Compatible changes:\n- Reader.Writes: added"
+  ],
+  "gate": []
+ },
+ "767": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state/ident: Compatible changes:\n- Reader.Writes: added"
+  ],
+  "gate": []
+ },
+ "773": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state: Compatible changes:\n- (*State).BoxKey: added\n- (*State).IdentBoxes: added\n- JoinName: added\n- JoinReq: added\n- Joined: added\n- JoinedGoneAfter: added\n- JoinedIDBase: added\n- JoinsPerHour: added\n- MaxJoined: added\n- MaxTicket: added\n- NetAddr: added\n- State.JoinCount: added\n- State.JoinWindow: added\n- State.Joined: added",
+   "apidiff state/ident: Incompatible changes:\n- (*Server).Answer: changed from func(int, func(int) Item, uint64, int64, string, uint64) (int, []byte) to func(int, func(int) Item, uint64, int64, Boxes, string, uint64) (int, []byte)\n- (*State).Status: changed from func(*Config, *Entry, uint64, func(box string) bool) (string, uint64, string) to func(*Config, *Entry, uint64, Boxes) (string, uint64, string)\n- (*State).View: changed from func(*Config, uint64, int64, func(string) bool) *View to func(*Config, uint64, int64, Boxes) *View\n- Enlisted.Agreed: removed\n- Enlisted.Expires: removed\nCompatible changes:\n- (*Server).View: added\n- (*State).Access: added\n- BoxInfo: added\n- BoxName: added\n- BoxView: added\n- Boxes: added\n- CheckClaim: added\n- Claim: added\n- ComputeMemTotal: added\n- ComputeThreads: added\n- Config.Admin: added\n- Enlisted.Since: added\n- Entry.RemovedBoxes: added\n- Extension: added\n- GPUVRAM: added\n- Grace: added\n- Join: added\n- MakeClaim: added\n- Member.Access: added\n- Member.Enlisted: added\n- Member.GraceUntil: added\n- MinMemTotal: added\n- MinSystemDisk: added\n- MinThreads: added\n- Minimum: added\n- OurFault: added\n- OurFaultFor: added\n- Owner: added\n- Qualify: added\n- ReadClaim: added\n- ReadTicket: added\n- State.Extended: added\n- State.Joins: added\n- State.Tickets: added\n- StorageBytes: added\n- Ticket: added\n- View.Enlisted: added\n- View.Waiting: added"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "774": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state: Compatible changes:\n- (*State).BoxKey: added\n- (*State).IdentBoxes: added\n- JoinName: added\n- JoinReq: added\n- Joined: added\n- JoinedGoneAfter: added\n- JoinedIDBase: added\n- JoinsPerHour: added\n- MaxJoined: added\n- MaxTicket: added\n- NetAddr: added\n- State.JoinCount: added\n- State.JoinWindow: added\n- State.Joined: added",
+   "apidiff state/ident: Incompatible changes:\n- (*Server).Answer: changed from func(int, func(int) Item, uint64, int64, string, uint64) (int, []byte) to func(int, func(int) Item, uint64, int64, Boxes, string, uint64) (int, []byte)\n- (*State).Status: changed from func(*Config, *Entry, uint64, func(box string) bool) (string, uint64, string) to func(*Config, *Entry, uint64, Boxes) (string, uint64, string)\n- (*State).View: changed from func(*Config, uint64, int64, func(string) bool) *View to func(*Config, uint64, int64, Boxes) *View\n- Enlisted.Agreed: removed\n- Enlisted.Expires: removed\nCompatible changes:\n- (*Server).View: added\n- (*State).Access: added\n- BoxInfo: added\n- BoxName: added\n- BoxView: added\n- Boxes: added\n- CheckClaim: added\n- Claim: added\n- ComputeMemTotal: added\n- ComputeThreads: added\n- Config.Admin: added\n- Enlisted.Since: added\n- Entry.RemovedBoxes: added\n- Extension: added\n- GPUVRAM: added\n- Grace: added\n- Join: added\n- MakeClaim: added\n- Member.Access: added\n- Member.Enlisted: added\n- Member.GraceUntil: added\n- MinMemTotal: added\n- MinSystemDisk: added\n- MinThreads: added\n- Minimum: added\n- OurFault: added\n- OurFaultFor: added\n- Owner: added\n- Qualify: added\n- ReadClaim: added\n- ReadTicket: added\n- State.Extended: added\n- State.Joins: added\n- State.Tickets: added\n- StorageBytes: added\n- Ticket: added\n- View.Enlisted: added\n- View.Waiting: added"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "775": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state/ident: Compatible changes:\n- Reader.Writes: added"
+  ],
+  "gate": []
+ },
+ "776": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "777": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state: Compatible changes:\n- (*State).BoxKey: added\n- (*State).IdentBoxes: added\n- JoinName: added\n- JoinReq: added\n- Joined: added\n- JoinedGoneAfter: added\n- JoinedIDBase: added\n- JoinsPerHour: added\n- MaxJoined: added\n- MaxTicket: added\n- NetAddr: added\n- State.JoinCount: added\n- State.JoinWindow: added\n- State.Joined: added",
+   "apidiff state/ident: Incompatible changes:\n- (*Server).Answer: changed from func(int, func(int) Item, uint64, int64, string, uint64) (int, []byte) to func(int, func(int) Item, uint64, int64, Boxes, string, uint64) (int, []byte)\n- (*State).Status: changed from func(*Config, *Entry, uint64, func(box string) bool) (string, uint64, string) to func(*Config, *Entry, uint64, Boxes) (string, uint64, string)\n- (*State).View: changed from func(*Config, uint64, int64, func(string) bool) *View to func(*Config, uint64, int64, Boxes) *View\n- Enlisted.Agreed: removed\n- Enlisted.Expires: removed\nCompatible changes:\n- (*Server).View: added\n- (*State).Access: added\n- BoxInfo: added\n- BoxName: added\n- BoxView: added\n- Boxes: added\n- CheckClaim: added\n- Claim: added\n- ComputeMemTotal: added\n- ComputeThreads: added\n- Config.Admin: added\n- Enlisted.Since: added\n- Entry.RemovedBoxes: added\n- Extension: added\n- GPUVRAM: added\n- Grace: added\n- Join: added\n- MakeClaim: added\n- Member.Access: added\n- Member.Enlisted: added\n- Member.GraceUntil: added\n- MinMemTotal: added\n- MinSystemDisk: added\n- MinThreads: added\n- Minimum: added\n- OurFault: added\n- OurFaultFor: added\n- Owner: added\n- Qualify: added\n- ReadClaim: added\n- ReadTicket: added\n- State.Extended: added\n- State.Joins: added\n- State.Tickets: added\n- StorageBytes: added\n- Ticket: added\n- View.Enlisted: added\n- View.Waiting: added"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "778": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "785": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state: Compatible changes:\n- (*State).BoxKey: added\n- (*State).IdentBoxes: added\n- JoinName: added\n- JoinReq: added\n- Joined: added\n- JoinedGoneAfter: added\n- JoinedIDBase: added\n- JoinsPerHour: added\n- MaxJoined: added\n- MaxTicket: added\n- NetAddr: added\n- State.JoinCount: added\n- State.JoinWindow: added\n- State.Joined: added",
+   "apidiff state/ident: Incompatible changes:\n- (*Server).Answer: changed from func(int, func(int) Item, uint64, int64, string, uint64) (int, []byte) to func(int, func(int) Item, uint64, int64, Boxes, string, uint64) (int, []byte)\n- (*State).Status: changed from func(*Config, *Entry, uint64, func(box string) bool) (string, uint64, string) to func(*Config, *Entry, uint64, Boxes) (string, uint64, string)\n- (*State).View: changed from func(*Config, uint64, int64, func(string) bool) *View to func(*Config, uint64, int64, Boxes) *View\n- Enlisted.Agreed: removed\n- Enlisted.Expires: removed\nCompatible changes:\n- (*Server).View: added\n- (*State).Access: added\n- BoxInfo: added\n- BoxName: added\n- BoxView: added\n- Boxes: added\n- CheckClaim: added\n- Claim: added\n- ComputeMemTotal: added\n- ComputeThreads: added\n- Config.Admin: added\n- Enlisted.Since: added\n- Entry.RemovedBoxes: added\n- Extension: added\n- GPUVRAM: added\n- Grace: added\n- Join: added\n- MakeClaim: added\n- Member.Access: added\n- Member.Enlisted: added\n- Member.GraceUntil: added\n- MinMemTotal: added\n- MinSystemDisk: added\n- MinThreads: added\n- Minimum: added\n- OurFault: added\n- OurFaultFor: added\n- Owner: added\n- Qualify: added\n- ReadClaim: added\n- ReadTicket: added\n- State.Extended: added\n- State.Joins: added\n- State.Tickets: added\n- StorageBytes: added\n- Ticket: added\n- View.Enlisted: added\n- View.Waiting: added"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "793": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "796": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "810": {
+  "gate": []
+ },
+ "811": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state: Compatible changes:\n- DirItem.Boxes: added",
+   "apidiff state/computers: Incompatible changes:\n- (*Server).Answer: changed from func(int, func(int) commonty/control/state/ident.Item, uint64, int64, string, bool, uint64) (int, []byte) to func(int, func(int) commonty/control/state/ident.Item, uint64, int64, commonty/control/state/ident.Boxes, string, bool, uint64) (int, []byte)\n- (*Server).Computers: changed from func(int, func(int) commonty/control/state/ident.Item, uint64, int64) []*Listed to func(int, func(int) commonty/control/state/ident.Item, uint64, int64, commonty/control/state/ident.Boxes) []*Listed\n- (*State).Judge: changed from func(*commonty/control/state/ident.State, *commonty/control/state/ident.Config, *Limits, encoding/json.RawMessage, uint64) to func(*commonty/control/state/ident.State, *commonty/control/state/ident.Config, *Limits, encoding/json.RawMessage, uint64, commonty/control/state/ident.Boxes)\n- (*State).View: changed from func(*commonty/control/state/ident.State, *commonty/control/state/ident.Config, uint64, int64) *View to func(*commonty/control/state/ident.State, *commonty/control/state/ident.Config, uint64, int64, commonty/control/state/ident.Boxes) *View",
+   "apidiff state/ident: Compatible changes:\n- AccessFacts: added\n- BoxesAt: added\n- ForAccess: added\n- Item.Boxes: added"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "814": {
+  "gate": []
+ },
+ "817": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "818": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "822": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "823": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "824": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state: Compatible changes:\n- Digest: added\n- MaxRollout: added\n- Report: added\n- Rollout: added\n- RolloutOp: added\n- RolloutRules: added\n- Rules.Rollout: added\n- State.Rollout: added"
+  ]
+ },
+ "828": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state: Incompatible changes:\n- Digest: changed from func(string) string to func([]byte, []byte) string",
+   "apidiff state/ident: Compatible changes:\n- NoDuplicates: added"
+  ]
+ },
+ "830": {
+  "gate": []
+ },
+ "831": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff the module's requirements changed (go.mod, go.sum)"
+  ]
+ },
+ "833": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff the module's requirements changed (go.mod, go.sum)"
+  ]
+ },
+ "834": {
+  "gate": []
+ },
+ "835": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ]
+ },
+ "836": {
+  "gate": []
+ },
+ "838": {
+  "gate": []
+ },
+ "839": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff the module's requirements changed (go.mod, go.sum)"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "840": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff the module's requirements changed (go.mod, go.sum)"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "841": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff the module's requirements changed (go.mod, go.sum)"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "842": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff the module's requirements changed (go.mod, go.sum)"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "847": {
+  "control": []
+ },
+ "849": {
+  "control": []
+ },
+ "850": {
+  "control": [
+   "apidiff state/ident: Compatible changes:\n- ReservedName: added\n- ReservedNames: added"
+  ],
+  "gate": []
+ },
+ "851": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff the module's requirements changed (go.mod, go.sum)"
+  ],
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "852": {
+  "control": []
+ },
+ "853": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state: Compatible changes:\n- (*Config).Canonical: added\n- (*State).Behind: added\n- (*State).ConfigDigest: added\n- (*State).In: added\n- (*State).SameKey: added\n- (*State).Version: added\n- Config.Before: added\n- Machine: added\n- MachineFact: added\n- State.Config: added\n- State.ConfigTime: added\n- State.Machine: added",
+   "apidiff wire: Compatible changes:\n- Stand: added"
+  ]
+ },
+ "855": {
+  "control": [
+   "apidiff state/ident: Compatible changes:\n- ReservedName: added\n- ReservedNames: added"
+  ],
+  "gate": []
+ },
+ "856": {
+  "gate": [
+   "rust-routes servers/gate/src: the face changed"
+  ]
+ },
+ "858": {
+  "control": []
+ },
+ "866": {
+  "control": []
+ },
+ "871": {
+  "control": []
+ },
+ "872": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff state: Compatible changes:\n- (*Config).Canonical: added\n- (*State).Behind: added\n- (*State).ConfigDigest: added\n- (*State).In: added\n- (*State).SameKey: added\n- (*State).Version: added\n- Config.Before: added\n- Machine: added\n- MachineFact: added\n- State.Config: added\n- State.ConfigTime: added\n- State.Machine: added",
+   "apidiff wire: Compatible changes:\n- Stand: added"
+  ]
+ },
+ "875": {
+  "gate": []
+ },
+ "876": {
+  "gate": []
+ },
+ "879": {
+  "control": []
+ },
+ "880": {
+  "control": []
+ },
+ "885": {
+  "control": [
+   "goface servers/system/control: the face changed"
+  ]
+ },
+ "886": {
+  "control": [
+   "apidiff state/ident: Compatible changes:\n- ReservedName: added\n- ReservedNames: added"
+  ],
+  "gate": []
+ },
+ "889": {
+  "control": [
+   "apidiff state/ident: Compatible changes:\n- ReservedName: added\n- ReservedNames: added"
+  ],
+  "gate": []
+ },
+ "895": {
+  "gate": []
+ },
+ "902": {
+  "control": [
+   "apidiff state/ident: Compatible changes:\n- ReservedName: added\n- ReservedNames: added"
+  ],
+  "gate": []
+ },
+ "907": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff the module's requirements changed (go.mod, go.sum)"
+  ]
+ },
+ "925": {
+  "control": [
+   "goface servers/system/control: the face changed",
+   "apidiff the module's requirements changed (go.mod, go.sum)"
+  ]
+ },
+ "936": {
+  "control": [
+   "apidiff state/ident: Compatible changes:\n- ReservedName: added\n- ReservedNames: added"
+  ],
+  "gate": []
+ },
+ "945": {
+  "control": [
+   "apidiff state/ident: Compatible changes:\n- ReservedName: added\n- ReservedNames: added"
+  ],
+  "gate": []
+ },
+ "946": {
+  "control": [
+   "apidiff state/ident: Compatible changes:\n- ReservedName: added\n- ReservedNames: added"
+  ],
+  "gate": []
+ },
+ "947": {
+  "gate": []
+ },
+ "949": {
+  "control": []
+ },
+ "952": {
+  "control": []
+ },
+ "953": {
+  "control": []
+ },
+ "954": {
+  "control": []
+ },
+ "955": {
+  "control": []
+ },
+ "957": {
+  "control": []
+ }
+}

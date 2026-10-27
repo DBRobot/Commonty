@@ -64,6 +64,20 @@ pkgs.runCommand "ci-matches-the-flake"
       echo "installer_agrees must run in the full run when the installer was chosen, and only then" >&2
       exit 1
     fi
+    # every output a job reads is one files_modified writes
+    have=$(yq -o=json -I=0 '.jobs.files_modified.outputs | keys' ${workflow})
+    for o in $(grep -o 'needs\.files_modified\.outputs\.[a-z_]*' ${workflow} | sed 's/.*\.//' | sort -u); do
+      if ! echo "$have" | grep -q "\"$o\""; then
+        echo "a job reads files_modified's $o, which it does not write" >&2
+        exit 1
+      fi
+    done
+    # a pull request builds only the systems its change reaches: the steps
+    # skip the "none" that stands for no system (never the whole job)
+    if [ "$(yq '[.jobs.build_systems.steps[] | select(.if != "failure()") | .if] | .[0]' ${workflow})" != "\''${{ matrix.host != 'none' }}" ]; then
+      echo "build_systems' steps must skip the none host" >&2
+      exit 1
+    fi
     jobs=$(yq -o=json -I=0 '[.jobs | keys | .[] | select(. != "ci_ok")] | sort' ${workflow})
     gate=$(yq -o=json -I=0 '.jobs.ci_ok.needs | sort' ${workflow})
     if [ "$jobs" != "$gate" ]; then

@@ -2,15 +2,21 @@
 # The files each pull request run changed (merge-base of its base and its
 # commit, to its commit), each named by its path in today's tree: main's
 # renames (git's -M) followed forward, so a run from before the repo moved
-# things (PR 62, PR 269) is judged against today's paths.
+# things (PR 62, PR 269) is judged against today's paths. Content that moved
+# file is followed too: the VM tests' list was flake.nix's vmTests before
+# nix/tests/registry.nix held it, so a change to that list is a change to
+# the registry.
 #
 #   changes.py DIR > changes.json   (run from the repository)
 import csv
 import glob
 import json
 import os
+import re
 import subprocess
 import sys
+
+REGISTRY = "nix/tests/registry.nix"
 
 
 def git(*a):
@@ -59,6 +65,20 @@ def renames(tip="forge/main"):
     return out
 
 
+def vm_list(sha):
+    text = git("show", f"{sha}:flake.nix")
+    m = re.search(r"\n\s*vmTests = \[(.*?)\];", text, re.S)
+    return re.findall(r'"([^"]+)"', m.group(1)) if m else None
+
+
+def moved(mb, sha, files):
+    """the registry, when a run before it existed changed flake.nix's list"""
+    if "flake.nix" not in files or git("ls-tree", sha, REGISTRY).strip():
+        return []
+    a, b = vm_list(mb), vm_list(sha)
+    return [REGISTRY] if a is not None and b is not None and a != b else []
+
+
 def main():
     d = sys.argv[1]
     rows = [
@@ -83,7 +103,7 @@ def main():
         if not mb:
             continue
         files = [f for f in git("diff", "--name-only", mb, sha).split("\n") if f]
-        out[run] = sorted({ren.get(f, f) for f in files})
+        out[run] = sorted({ren.get(f, f) for f in files} | set(moved(mb, sha, files)))
     json.dump({"renames": len(ren), "rename_map": ren, "runs": out}, sys.stdout)
     print()
 

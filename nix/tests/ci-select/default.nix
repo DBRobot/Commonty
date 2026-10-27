@@ -1,8 +1,10 @@
-# The test chooser (ciselect.py) on made-up changes against covers.json:
-# docs alone run nothing, a test's own file runs that test, a lockfile
-# bump or a path nothing claims runs everything, a component's insides
-# with its face held run its own checks alone (edges.py); and the face
-# readers on small made-up trees (faces_test.py). Seconds.
+# The selector (plan.py) on made-up changes against tests-this.json: docs
+# alone run nothing, a test's own file runs that test, flake.lock runs
+# every job a pull request runs, a component's insides with its face held
+# run its own checks alone, main-only.json's jobs are main's (edges.py);
+# every registered check has a set and every path a set names is in the
+# tree; and the face readers on small made-up trees (faces_test.py).
+# Seconds.
 { pkgs, self, ... }:
 let
   sys = pkgs.stdenv.hostPlatform.system;

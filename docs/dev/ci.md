@@ -54,39 +54,43 @@ pull request opened, pushed, or edited
 
 ## The jobs, and when each runs
 
-"Chosen" means check by check from covers.json (Choosing the tests, below):
+"Chosen" means job by job, by what each tests (Choosing the tests, below):
 a job whose checks were all left out skips, and the skip still counts as a
-pass for `ci_ok`. A draft runs `style` and `lint` alone; an edit to a
+pass for `ci_ok`. "Main's alone" means main's full run runs it and a pull
+request never does. A draft runs `style` and `lint` alone; an edit to a
 commit that already passed runs `style` alone.
 
 ```
-files_modified    always. Says what changed: the nix, rust, app and installer
-                  switches, and the chosen VM tests, worker_tests, page_tests
-                  and site_checks (nix/tests/ci-select/ciselect.py).
+files_modified    always. Says what each job runs (nix/tests/ci-select/plan.py).
 style             always (a draft too). The title, body, commits, files touched.
 lint              unless the commit already passed. Real faults block.
-flake_check       nix changed, beyond a program's .rs and .go alone. Evaluates
-                  every check, package and system
-                  (nix-eval-jobs), then the evaluation-only checks.
-inputs_kept       nix changed. nix/tests/ci-keep.nix: each job's keep step
+flake_check       chosen. Evaluates every check and every box's system
+                  (nix-eval-jobs; in main's full run every package and dev
+                  shell too), then builds the chosen evaluation-only checks
+                  (registry eval, and the downloads' recipes, app-release).
+inputs_kept       chosen. nix/tests/ci-keep.nix: each job's keep step
                   (keep-inputs.sh) names the builds a box's GC made CI do
                   again (the cross rustc, crane's dependency builds, crates).
-worker_tests      its chosen checks: mail-worker, dns-worker, sso, control.
-page_tests        its chosen checks: mail-page, files-page, same-tab.
+worker_tests      its chosen checks: mail-worker, dns-worker, sso, control,
+                  control-relay, control-upgrade, control-together,
+                  control-signfail.
+page_tests        its chosen checks: mail-page, files-page, media-page, same-tab.
 site_checks       its chosen checks: site-headers, site-roles, site-a11y,
                   site-speed, site-links.
 build_programs    a VM test was chosen. dd and the pages (cli); verify, agent, games,
-                  computers, transcode (boxes): what the systems and VM tests
-                  carry, built once per box.
-build_systems     main's full run alone. Every box's system on every runner box,
-                  recorded as build/<box>@<runner>.
-systems_agree     main's full run alone. Both runners' paths for a system are one;
+                  computers, transcode (boxes): what the VM tests carry,
+                  built once per box.
+build_systems     a pull request: the systems its change reaches that are not
+                  main's alone (the home controller's), each once on any
+                  runner. Main's full run: every box's system on every runner
+                  box, recorded as build/<box>@<runner>.
+systems_agree     main's alone. Both runners' paths for a system are one;
                   records build/<box>, which dd release publish signs.
 vm_tests          the chosen VM tests, one job each.
-rust              rust changed (servers/, client/, Cargo.*). fmt, clippy, tests.
-app_checks        a crate the app builds on changed. clippy-app, tests-app,
-                  net-check, the app release evaluating.
-build_installer   main's full run, when the installer was chosen. The
+rust              chosen: fmt, and each chosen crate's clippy and tests
+                  (rustChecks.<crate>); every crate in main's full run.
+app_checks        main's alone (main-only.json). clippy-app, tests-app, net-check.
+build_installer   main's alone, when the installer was chosen. The
                   box installer's drive, built and --rebuilt on each runner,
                   recorded as installer@<runner>.
 installer_agrees  with build_installer. Every runner made the same bytes.
@@ -122,8 +126,11 @@ ci_ok             always. Every job above passed or was rightly skipped.
   named in the workflow.
 - **Everything is evaluated, a check at a time.** `flake_check` runs
   [nix-eval-jobs](https://github.com/nix-community/nix-eval-jobs) over
-  `legacyPackages.x86_64-linux.ciEval` (every check, package, dev shell
-  and box system), each in a worker that starts afresh past 1.5G, one
+  `legacyPackages.x86_64-linux.ciEval` in main's full run (every check,
+  package, dev shell and box system) and `ciEvalPR` in a pull request's
+  (every check and box system: a module change that breaks a test box's
+  evaluation is found there even when that test does not run), each in a
+  worker that starts afresh past 1.5G, one
   worker for every 16G the box has (one to four). A single `nix flake
   check` evaluator grew to 10.5G and took node2 out of memory beside a VM
   test; one worker peaks near 3G, two near 5G. An attribute that fails to
@@ -156,9 +163,9 @@ ci_ok             always. Every job above passed or was rightly skipped.
 ## Main's full run, and what publish signs
 
 A pull request's run checks what its change can reach. A push to `main`
-(each merge) runs everything on that very commit: every test, every box's
-system built on every box and compared (`systems_agree`), the installer
-built twice on each. A newer push cancels the run before it, so a batch of
+(each merge) runs everything on that very commit: every test, the jobs
+that run there alone (`main-only.json`), every box's system built on every
+box and compared (`systems_agree`), the installer built twice on each. A newer push cancels the run before it, so a batch of
 merges costs one full run. `dd release publish` signs a commit only once
 the forge's own record shows that run passed: a run of `entry_point.yml`,
 made by a push to `refs/heads/main`, on exactly that commit, the newest such
@@ -246,9 +253,11 @@ reruns `style` alone.
 Every check added has to earn its place on both counts: it catches
 something real, and it does not make the run slow. Before it merges:
 
-- **It runs only when it can matter.** Gate it on what `files_modified`
-  says changed. A check that runs on every pull request must be one that
-  every pull request can break.
+- **It runs only when it can matter.** Give it a set in
+  [`tests-this.json`](../../nix/tests/ci-select/tests-this.json): the code
+  it checks, read from the test (Choosing the tests). `checks.ci-select`
+  refuses a registered check without one. A check that runs on every pull
+  request must be one that every pull request can break.
 - **It is cached by content.** Prefer a nix derivation (a check in the
   flake) over a script: a run whose inputs did not change gets the last
   answer from the store instead of working it out again.
@@ -258,7 +267,9 @@ something real, and it does not make the run slow. Before it merges:
 - **It stops the run when it fails.** End the job with the stop-run step,
   like the others.
 - **A new crate's tests come along by themselves.** Every workspace
-  member's tests are in `checks.tests`. A test that needs a file outside
+  member's tests are in `checks.tests`, and its lint and tests on their own
+  in `rustChecks.<crate>`, which a pull request builds when the crate's set
+  (`rust:<its path>` in tests-this.json) is touched. A test that needs a file outside
   its crate, or a program from another crate, says so in `flake.nix`
   (`crateTest`, or the crate's override in `crateOverrides`), or it will
   not find it in the per-crate build. Today that is `HOME`,
@@ -286,73 +297,71 @@ now.
 ## Choosing the tests
 
 `files_modified` runs
-[`nix/tests/ci-select/ciselect.py`](../../nix/tests/ci-select/ciselect.py)
-on the files the pull request changes:
+[`nix/tests/ci-select/ciselect.py`](../../nix/tests/ci-select/ciselect.py),
+which reads the change from git and hands it to
+[`plan.py`](../../nix/tests/ci-select/plan.py): one answer per job. The
+replay of the history (below) calls the very same function.
 
+- **A job runs when the change touches what it tests.** Each job's set in
+  [`tests-this.json`](../../nix/tests/ci-select/tests-this.json) is the
+  code its assertions reach, read from its test script and the modules,
+  programs and pages those assertions drive, with why for each path; not
+  its closure, which is nearly the whole tree. Every VM test, every
+  browser and Worker check, every evaluation-only check, each workspace
+  crate (`rust:<its path>`), and the jobs that are not one check (`rust`
+  for fmt, `app`, `app-release`, `flake` for the evaluation, `keep`,
+  `systems`, `systems(home-controller)`, `installer`) has one. The VM tests
+  share `_shared_by_family.vm` (the test library, the test box,
+  flake.lock). A plain path covers everything under it; `*` stays in a
+  directory, `**` crosses them.
 - **Docs alone** (`docs/`, a `.md` at the top, `.claude/`, `.github/`) run
   style and lint, nothing else, and `ci_ok` passes. A docs file a `.nix` or
   `.rs` file names by path (the terms, for `checks.terms-version`) counts as
   code.
-- **A new test** is a name in [`nix/tests/registry.nix`](../../nix/tests/registry.nix)
-  (`vm`, `files`, `eval`) beside its files, not an edit to `flake.nix` or
-  the workflow. A change that only adds or removes names there runs the new
-  tests; any other change to it runs everything.
 - **A component's insides** (Interfaces, below) whose face held run that
   component's own checks and nothing that merely reads it.
-- **Under everything** (`flake.nix`, `flake.lock`, `nix/lib/`, `.forgejo/`,
-  `Cargo.*`, `crate-hashes.json`, `client/identity`, `client/auth`, the
-  chooser itself): every test runs.
-- **A path nothing claims** (no check reads it, and no job's path list has
-  it): every test runs.
-- **Otherwise each VM test, each check of `worker_tests`, `page_tests` and
-  `site_checks`, and the box installer run only if they read what
-  changed.** What a check reads is
-  [`covers.json`](../../nix/tests/ci-select/covers.json) (every file its
-  evaluation opened, every directory it listed, every path it asked after,
-  traced from a real `nix eval`) together with every file its `.nix` files
-  name, read from the tree at both ends of the change, so an import a pull
-  request adds counts at once. A change outside all of it leaves the
-  check's derivation as it was. In `nix/tests`, `nix/modules/box`,
-  `nix/roles`, `fleet` and the top a read covers that file; anywhere else
-  it covers the directory, so a new file beside the ones a check reads
-  already counts.
-- **The app** runs when a crate it builds on changes, by its manifests'
-  path dependencies (`app` and `client/hubwriter`, followed to the end).
-- **The box installer** (`build_installer`, `installer_agrees`) is traced
-  like a check, as the name `installer`: what evaluating
-  `installers.x86_64-linux.box` reads (ciselect.py `TARGETS`), which is
-  `nix/installer/`, the crates of the agent it carries, the shared pages
-  its screen uses, the fleet files it embeds, and `flake.nix` and
-  `flake.lock` (under everything anyway). A box module it does not import
-  leaves it out. Its version file is the commit's short hash, so its
-  derivation moves on every commit; that alone cannot change whether two
-  boxes make the same bytes, so it is not a reason to build it.
+- **A new test** is a name in [`nix/tests/registry.nix`](../../nix/tests/registry.nix)
+  (`vm`, `files`, `eval`) beside its files and its set, not an edit to
+  `flake.nix` or the workflow. A change that only adds or removes names
+  there runs the new tests; any other change to it runs what tests the
+  registry (`ci`, `ci-select`, the evaluation).
+- **flake.lock runs every job a pull request runs**: it pins nixpkgs (the
+  Rust and Go toolchains, every service), crane and the rust overlay.
+  Nothing else is under everything: flake.nix, the workflow or a shared
+  library reach the jobs whose sets name them, and main's full run checks
+  the rest.
+- **Main's alone.** A job that has run on at least 300 pull request runs
+  and 300 minutes and never caught a real failure is on
+  [`main-only.json`](../../nix/tests/ci-select/main-only.json): main's full
+  run runs it, a pull request never does. A failure of the box, the forge,
+  CI itself, or a test's own race is not a catch. 300 runs without one
+  bounds the job's catch rate under 1% at 95% confidence (the rule of
+  three). `history/replay.py --main-only` writes the file from the history;
+  a job main's full run then catches failing comes off it. So do every
+  box's system built on every box, `systems_agree`, and the installer pair.
+- **A path no job tests** runs nothing beyond style and lint, and
+  files_modified names it ("no job tests ..."): no check could say
+  anything about it. Give the job that should check it a path in its set.
+- **The app** (`app_checks`: its lint and tests, the network engine's) is
+  main's alone. Its downloads' recipes evaluating (`app-release`) stays on
+  pull requests, in flake_check: a minute beside the app's twenty.
 
-covers.json is traced again with
-`python3 nix/tests/ci-select/ciselect.py trace` (a few minutes a check
-under load: run it on a box; `--only <check>` for one, `--only installer`
-for the installer). Between traces a
-check can come to read a file covers.json does not have only through a path
-its `.nix` files build at evaluation, which the chooser covers by its
-whole directory. The other jobs keep their path lists (rust, and nix for
-the flake check and the systems). A new check runs on every change until
-it is traced (`--only <check>` in its own pull request or a later one);
-`checks.ci-select` names it and judges the made-up changes on the traced
-checks alone.
-[`edges.py`](../../nix/tests/ci-select/edges.py) (`checks.ci-select`) holds
-the chooser to the cases above, and
-[`sim.py`](../../nix/tests/ci-select/sim.py) replays it against main's
-history and every check's real drvPath at each commit
-([the replay](../../nix/tests/ci-select/replay.md)).
+`checks.ci-select` ([`edges.py`](../../nix/tests/ci-select/edges.py)) holds
+the selector to made-up changes, one per rule above, and holds the sets to
+the tree: every registered check, crate, system and component's own check
+has a set, every path a set names is in the tree, and `main-only.json`
+names only jobs that exist. A set that drifts from its test is caught in
+main's full run, which runs everything; give the set the path in the pull
+request that fixes it.
 
 ## Interfaces
 
 Every component has insides and a face. A pull request that changes a
 component's insides alone, and leaves its face as it was at the base, runs
-the component's own tests and its contract checks; the VM tests that only
+the component's own checks and its contract checks; the VM tests that only
 read it are left out, since nothing they see of it moved. A face that
-changed walks out to everything that reads the component, which
-covers.json knows. Main's full run runs everything either way.
+changed walks out to every job whose set names the component's files.
+Main's full run runs everything either way.
 [`interfaces.py`](../../nix/tests/ci-select/interfaces.py) holds the map:
 
 ```
@@ -361,15 +370,17 @@ gate     insides  servers/gate/src/*.rs (its pages are not insides)
                   takes and answers and their fields, JSON keys, statuses,
                   headers, redirects; the environment it reads, the box
                   paths and ports it names (faces/rust_routes.py)
-         checks   rust (its crate and the cli's end to end), site-headers,
-                  site-roles, sso
+         own      fmt, its crate's (verify) and the cli's (dd, whose end to
+                  end runs a gate) lint and tests, site-headers, site-roles,
+                  sso
 control  insides  servers/system/control/{cmd,place,state,validator,wire,
                   third_party}/*.go, testdata aside (the Rust signers read it)
          face     apidiff on state, state/computers, state/ident and wire;
                   goface: HTTP routes, flags, environment, files, ports and
                   every json-tagged struct (apidiff does not see a tag)
-         checks   control (every package's go test, and the relay, witness
-                  and validators under wrangler)
+         own      control (every package's go test, and the relay, witness
+                  and validators under wrangler), control-relay,
+                  control-upgrade, control-together, control-signfail
 ```
 
 Both ends are read in files_modified, from `git archive` of each: seconds,
@@ -379,7 +390,7 @@ handler does with the same shapes; that is what the contract checks are
 for, and main's full run is the backstop. `faces_test.py` holds the readers
 to small made-up changes in the ci-select check.
 
-## The history: what a chooser is scored against
+## The history: what the selector is scored against
 
 [`history/`](../../nix/tests/ci-select/history) holds every CI run the
 forge recorded, job by job (`data/history-jobs-*.csv`): its minutes, box,
@@ -389,26 +400,38 @@ another job failed, failed for its box (killed, out of memory, out of
 disk, the network), a flake (the very derivation it failed on passed
 elsewhere), a no-op (it built nothing), determined (it built a
 derivation that had already passed), overhead, or needed. A failure that is
-none of those is real. `score.py` runs a chooser over every pull request's
-run and counts the check minutes it would have saved and the real
-failures it would have missed. `levers.py` replays each proposed change
-over the finished runs on the boxes' slots. To bring it up to date:
-`export.sh DIR`, `logfacts.py DIR/L DIR/tasks.csv > DIR/logfacts.json`,
-`history.py DIR`, then `score.py` and `levers.py`. All of it reads the forge;
-none of it writes.
+none of those, and that a code change then fixed, is real
+(`realfail.py`), with the files the breaking change touched.
 
-A new derivation is not a job that could fail. `realfail.py` keeps only the
-failures a code change then fixed (the same change passed later on another
-commit, a commit that changed nothing counting as a rerun), with the files
-the breaking change touched. [`tests-this.json`](../../nix/tests/ci-select/tests-this.json)
-is each job's set of the code it specifically checks, read from its script
-and the modules, programs and pages those assertions reach, not its closure.
-`changes.py` names each run's changed files by today's paths, `phases.py`
-splits a VM job's minutes into its shared prefix and its test, and
-`relevance.py DIR nix/tests/ci-select/tests-this.json` replays a chooser that
-runs a job only when its set changed: minutes saved, the real failures it
-leaves to main's full run, and each run's jobs and wall minutes
-(`data/replay-runs.csv`, `data/replay-prs.csv`).
+[`replay.py`](../../nix/tests/ci-select/history/replay.py) chooses every
+pull request run of the history again, in the order they were made, with
+`plan.py` itself, and reports each run's and each pull request's wall
+time on the runner slots and every real failure the choice leaves to
+main's full run. Nothing in it is fitted to the failures: the sets were
+read from the tests, the faces are read from each run's own two commits
+(`faces.py`, the code read where it lived then), and `main-only.json`'s
+rule is applied at each run from the runs before it alone. Each job counts
+the minutes it took in that run, or its usual minutes (the median of its
+last 30 good runs) when the run did not have it or it was cancelled,
+killed or flaked; a test that did not exist yet is not added. The
+simulated wall time matches the measured one (the median of actual over
+simulated is 1.01 over 443 runs). [`catches.json`](../../nix/tests/ci-select/history/catches.json)
+says, from each log, which of today's jobs would catch a failure whose job
+was not one check (a flake_check, rust, programs or systems failure), and
+which failures were not the change's code (the box, the forge, CI itself,
+a test's own race). [`relevance.py`](../../nix/tests/ci-select/history/relevance.py)
+is the job-by-job table: minutes spent and real failures caught.
+
+To bring it up to date: `export.sh DIR` (copy only the logs not already in
+DIR/L: the whole log directory is slow over the fleet's network),
+`logfacts.py DIR/L DIR/tasks.csv > DIR/logfacts.json`, `history.py DIR`,
+`realfail.py DIR > DIR/realfail.json`, `changes.py DIR > DIR/changes.json`,
+`phases.py DIR > DIR/phases.json`, `faces.py DIR > DIR/faces.json` (with
+apidiff, goface and go on PATH, `FACES_GO_MODULES=mod`), then
+`replay.py DIR > DIR/replay.json` and `replay.py DIR --main-only >
+nix/tests/ci-select/main-only.json`. A new failure whose job is not one
+check gets a line in catches.json, read from its log. All of it reads the
+forge; none of it writes.
 
 ## The site checks
 

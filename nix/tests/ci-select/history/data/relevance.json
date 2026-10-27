@@ -1,51 +1,91 @@
 {
  "totals": {
-  "runs": 860,
-  "jobs": 17327,
-  "job_minutes": 28224,
-  "pr_job_minutes": 27888,
-  "real_failures": 92,
-  "real_failure_incidents": 74
+  "runs": 905,
+  "jobs": 19502,
+  "job_minutes": 39250,
+  "pr_job_minutes": 38913,
+  "real_failures": 101,
+  "real_failure_incidents": 82
  },
  "per_job": [
   {
-   "job": "rust",
-   "tasks": 1129,
-   "minutes": 3651,
-   "real_failures": 10,
-   "failing_runs": 13,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 3599,
-   "minutes_per_real_failure": 365
-  },
-  {
    "job": "flake",
-   "tasks": 759,
-   "minutes": 2242,
-   "real_failures": 18,
-   "failing_runs": 25,
+   "tasks": 803,
+   "minutes": 3987,
+   "real_failures": 19,
+   "failing_runs": 26,
    "of_them_fixed_by_rebase": 2,
-   "wasted_minutes": 2110,
-   "minutes_per_real_failure": 125
+   "wasted_minutes": 3849,
+   "minutes_per_real_failure": 210
   },
   {
-   "job": "vm(games)",
-   "tasks": 464,
-   "minutes": 1876,
-   "real_failures": 1,
-   "failing_runs": 1,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 1874,
-   "minutes_per_real_failure": 1876
+   "job": "rust",
+   "tasks": 1170,
+   "minutes": 3822,
+   "real_failures": 11,
+   "failing_runs": 14,
+   "of_them_fixed_by_rebase": 1,
+   "wasted_minutes": 3770,
+   "minutes_per_real_failure": 347
   },
   {
-   "job": "app",
-   "tasks": 335,
-   "minutes": 1758,
+   "job": "systems(node1,node2)",
+   "tasks": 386,
+   "minutes": 2409,
    "real_failures": 0,
    "failing_runs": 0,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 1758,
+   "wasted_minutes": 2409,
+   "minutes_per_real_failure": null
+  },
+  {
+   "job": "vm(games)",
+   "tasks": 487,
+   "minutes": 1995,
+   "real_failures": 1,
+   "failing_runs": 1,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 1993,
+   "minutes_per_real_failure": 1995
+  },
+  {
+   "job": "browser(control)",
+   "tasks": 106,
+   "minutes": 1900,
+   "real_failures": 1,
+   "failing_runs": 1,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 1891,
+   "minutes_per_real_failure": 1900
+  },
+  {
+   "job": "systems(home-controller,node2)",
+   "tasks": 178,
+   "minutes": 1871,
+   "real_failures": 0,
+   "failing_runs": 0,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 1871,
+   "minutes_per_real_failure": null
+  },
+  {
+   "job": "app",
+   "tasks": 366,
+   "minutes": 1814,
+   "real_failures": 0,
+   "failing_runs": 0,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 1814,
+   "minutes_per_real_failure": null
+  },
+  {
+   "job": "keep",
+   "tasks": 103,
+   "minutes": 1570,
+   "real_failures": 0,
+   "failing_runs": 0,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 1570,
    "minutes_per_real_failure": null
   },
   {
@@ -59,194 +99,224 @@
    "minutes_per_real_failure": 614
   },
   {
-   "job": "systems(node1,node2)",
-   "tasks": 348,
-   "minutes": 901,
-   "real_failures": 0,
-   "failing_runs": 0,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 901,
-   "minutes_per_real_failure": null
-  },
-  {
    "job": "vm(thanos)",
-   "tasks": 477,
-   "minutes": 917,
+   "tasks": 497,
+   "minutes": 963,
    "real_failures": 2,
    "failing_runs": 2,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 900,
-   "minutes_per_real_failure": 459
-  },
-  {
-   "job": "browser(mail-worker)",
-   "tasks": 363,
-   "minutes": 791,
-   "real_failures": 2,
-   "failing_runs": 2,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 781,
-   "minutes_per_real_failure": 395
+   "wasted_minutes": 946,
+   "minutes_per_real_failure": 481
   },
   {
    "job": "vm(forge)",
-   "tasks": 450,
-   "minutes": 825,
+   "tasks": 477,
+   "minutes": 880,
    "real_failures": 3,
    "failing_runs": 4,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 779,
-   "minutes_per_real_failure": 275
+   "wasted_minutes": 834,
+   "minutes_per_real_failure": 293
   },
   {
-   "job": "vm(backup)",
-   "tasks": 539,
-   "minutes": 757,
-   "real_failures": 3,
-   "failing_runs": 5,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 714,
-   "minutes_per_real_failure": 252
-  },
-  {
-   "job": "vm(network)",
-   "tasks": 386,
-   "minutes": 714,
-   "real_failures": 0,
-   "failing_runs": 0,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 714,
-   "minutes_per_real_failure": null
-  },
-  {
-   "job": "vm(leaving)",
-   "tasks": 190,
-   "minutes": 735,
+   "job": "browser(mail-worker)",
+   "tasks": 391,
+   "minutes": 805,
    "real_failures": 2,
    "failing_runs": 2,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 706,
-   "minutes_per_real_failure": 367
+   "wasted_minutes": 795,
+   "minutes_per_real_failure": 402
+  },
+  {
+   "job": "vm(network)",
+   "tasks": 413,
+   "minutes": 778,
+   "real_failures": 1,
+   "failing_runs": 2,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 771,
+   "minutes_per_real_failure": 778
+  },
+  {
+   "job": "vm(leaving)",
+   "tasks": 216,
+   "minutes": 771,
+   "real_failures": 2,
+   "failing_runs": 2,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 743,
+   "minutes_per_real_failure": 386
+  },
+  {
+   "job": "vm(backup)",
+   "tasks": 561,
+   "minutes": 766,
+   "real_failures": 3,
+   "failing_runs": 5,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 724,
+   "minutes_per_real_failure": 255
   },
   {
    "job": "vm(release)",
-   "tasks": 485,
-   "minutes": 675,
+   "tasks": 512,
+   "minutes": 719,
    "real_failures": 4,
    "failing_runs": 5,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 656,
-   "minutes_per_real_failure": 169
+   "wasted_minutes": 700,
+   "minutes_per_real_failure": 180
   },
   {
    "job": "vm(library)",
-   "tasks": 387,
-   "minutes": 624,
+   "tasks": 414,
+   "minutes": 655,
    "real_failures": 0,
    "failing_runs": 0,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 624,
-   "minutes_per_real_failure": null
-  },
-  {
-   "job": "vm(unlock)",
-   "tasks": 233,
-   "minutes": 569,
-   "real_failures": 0,
-   "failing_runs": 0,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 569,
+   "wasted_minutes": 655,
    "minutes_per_real_failure": null
   },
   {
    "job": "systems(node1,node1)",
-   "tasks": 362,
-   "minutes": 553,
+   "tasks": 398,
+   "minutes": 607,
    "real_failures": 0,
    "failing_runs": 0,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 553,
+   "wasted_minutes": 607,
+   "minutes_per_real_failure": null
+  },
+  {
+   "job": "vm(runner-restart)",
+   "tasks": 69,
+   "minutes": 607,
+   "real_failures": 1,
+   "failing_runs": 1,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 605,
+   "minutes_per_real_failure": 607
+  },
+  {
+   "job": "vm(unlock)",
+   "tasks": 246,
+   "minutes": 604,
+   "real_failures": 0,
+   "failing_runs": 0,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 604,
    "minutes_per_real_failure": null
   },
   {
    "job": "vm(adblock)",
-   "tasks": 351,
-   "minutes": 528,
+   "tasks": 375,
+   "minutes": 593,
    "real_failures": 1,
    "failing_runs": 1,
    "of_them_fixed_by_rebase": 1,
-   "wasted_minutes": 526,
-   "minutes_per_real_failure": 528
+   "wasted_minutes": 591,
+   "minutes_per_real_failure": 593
   },
   {
-   "job": "programs(boxes)",
-   "tasks": 416,
-   "minutes": 486,
-   "real_failures": 1,
-   "failing_runs": 1,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 486,
-   "minutes_per_real_failure": 486
-  },
-  {
-   "job": "programs(cli)",
-   "tasks": 412,
-   "minutes": 479,
+   "job": "vm(rollout)",
+   "tasks": 58,
+   "minutes": 554,
    "real_failures": 0,
    "failing_runs": 0,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 479,
+   "wasted_minutes": 554,
+   "minutes_per_real_failure": null
+  },
+  {
+   "job": "programs(boxes)",
+   "tasks": 461,
+   "minutes": 509,
+   "real_failures": 1,
+   "failing_runs": 1,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 509,
+   "minutes_per_real_failure": 509
+  },
+  {
+   "job": "programs(cli)",
+   "tasks": 457,
+   "minutes": 494,
+   "real_failures": 0,
+   "failing_runs": 0,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 494,
    "minutes_per_real_failure": null
   },
   {
    "job": "vm(directory)",
-   "tasks": 523,
-   "minutes": 434,
+   "tasks": 547,
+   "minutes": 455,
    "real_failures": 0,
    "failing_runs": 0,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 434,
+   "wasted_minutes": 455,
+   "minutes_per_real_failure": null
+  },
+  {
+   "job": "vm(joined-box)",
+   "tasks": 96,
+   "minutes": 446,
+   "real_failures": 0,
+   "failing_runs": 0,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 446,
    "minutes_per_real_failure": null
   },
   {
    "job": "vm(vault)",
-   "tasks": 297,
-   "minutes": 415,
+   "tasks": 317,
+   "minutes": 432,
    "real_failures": 3,
    "failing_runs": 3,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 408,
-   "minutes_per_real_failure": 138
-  },
-  {
-   "job": "systems(home-controller,node2)",
-   "tasks": 139,
-   "minutes": 375,
-   "real_failures": 0,
-   "failing_runs": 0,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 375,
-   "minutes_per_real_failure": null
+   "wasted_minutes": 425,
+   "minutes_per_real_failure": 144
   },
   {
    "job": "vm(home-controller)",
-   "tasks": 129,
-   "minutes": 374,
+   "tasks": 148,
+   "minutes": 425,
    "real_failures": 0,
    "failing_runs": 0,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 374,
+   "wasted_minutes": 425,
    "minutes_per_real_failure": null
   },
   {
    "job": "vm(computers)",
-   "tasks": 95,
-   "minutes": 394,
+   "tasks": 121,
+   "minutes": 448,
    "real_failures": 1,
    "failing_runs": 1,
    "of_them_fixed_by_rebase": 1,
-   "wasted_minutes": 333,
-   "minutes_per_real_failure": 394
+   "wasted_minutes": 387,
+   "minutes_per_real_failure": 448
+  },
+  {
+   "job": "installer(node2)",
+   "tasks": 56,
+   "minutes": 387,
+   "real_failures": 0,
+   "failing_runs": 0,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 387,
+   "minutes_per_real_failure": null
+  },
+  {
+   "job": "vm(forge-follow)",
+   "tasks": 164,
+   "minutes": 339,
+   "real_failures": 3,
+   "failing_runs": 3,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 329,
+   "minutes_per_real_failure": 113
   },
   {
    "job": "systems(node1,?)",
@@ -259,133 +329,103 @@
    "minutes_per_real_failure": 323
   },
   {
-   "job": "vm(joined-box)",
-   "tasks": 62,
-   "minutes": 321,
-   "real_failures": 0,
-   "failing_runs": 0,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 321,
-   "minutes_per_real_failure": null
-  },
-  {
-   "job": "vm(runner-restart)",
-   "tasks": 42,
-   "minutes": 315,
-   "real_failures": 0,
-   "failing_runs": 0,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 315,
-   "minutes_per_real_failure": null
-  },
-  {
-   "job": "vm(forge-follow)",
-   "tasks": 137,
-   "minutes": 302,
-   "real_failures": 3,
-   "failing_runs": 3,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 291,
-   "minutes_per_real_failure": 101
-  },
-  {
    "job": "systems(home-controller,node1)",
-   "tasks": 143,
-   "minutes": 268,
+   "tasks": 182,
+   "minutes": 309,
    "real_failures": 1,
    "failing_runs": 1,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 266,
-   "minutes_per_real_failure": 268
+   "wasted_minutes": 307,
+   "minutes_per_real_failure": 309
   },
   {
-   "job": "vm(rollout)",
-   "tasks": 24,
-   "minutes": 243,
+   "job": "systems(node2,node2)",
+   "tasks": 377,
+   "minutes": 275,
+   "real_failures": 1,
+   "failing_runs": 1,
+   "of_them_fixed_by_rebase": 1,
+   "wasted_minutes": 274,
+   "minutes_per_real_failure": 275
+  },
+  {
+   "job": "systems(node2,node1)",
+   "tasks": 389,
+   "minutes": 263,
    "real_failures": 0,
    "failing_runs": 0,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 243,
+   "wasted_minutes": 263,
    "minutes_per_real_failure": null
   },
   {
    "job": "vm(acme)",
-   "tasks": 207,
-   "minutes": 240,
+   "tasks": 237,
+   "minutes": 263,
    "real_failures": 2,
    "failing_runs": 2,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 235,
-   "minutes_per_real_failure": 120
+   "wasted_minutes": 258,
+   "minutes_per_real_failure": 132
   },
   {
-   "job": "systems(node2,node2)",
-   "tasks": 339,
-   "minutes": 235,
-   "real_failures": 1,
-   "failing_runs": 1,
-   "of_them_fixed_by_rebase": 1,
-   "wasted_minutes": 234,
-   "minutes_per_real_failure": 235
-  },
-  {
-   "job": "systems(node2,node1)",
-   "tasks": 353,
-   "minutes": 227,
+   "job": "installer(node1)",
+   "tasks": 54,
+   "minutes": 253,
    "real_failures": 0,
    "failing_runs": 0,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 227,
-   "minutes_per_real_failure": null
-  },
-  {
-   "job": "browser(control)",
-   "tasks": 66,
-   "minutes": 219,
-   "real_failures": 0,
-   "failing_runs": 0,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 219,
+   "wasted_minutes": 253,
    "minutes_per_real_failure": null
   },
   {
    "job": "vm(photos)",
-   "tasks": 183,
-   "minutes": 210,
+   "tasks": 211,
+   "minutes": 245,
+   "real_failures": 2,
+   "failing_runs": 2,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 241,
+   "minutes_per_real_failure": 123
+  },
+  {
+   "job": "vm(join-install)",
+   "tasks": 70,
+   "minutes": 225,
    "real_failures": 1,
    "failing_runs": 1,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 207,
-   "minutes_per_real_failure": 210
+   "wasted_minutes": 223,
+   "minutes_per_real_failure": 225
   },
   {
-   "job": "vm(metrics)",
-   "tasks": 495,
-   "minutes": 202,
+   "job": "vm(joined-serves)",
+   "tasks": 63,
+   "minutes": 208,
    "real_failures": 0,
    "failing_runs": 0,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 202,
+   "wasted_minutes": 208,
+   "minutes_per_real_failure": null
+  },
+  {
+   "job": "vm(metrics)",
+   "tasks": 513,
+   "minutes": 205,
+   "real_failures": 0,
+   "failing_runs": 0,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 205,
    "minutes_per_real_failure": null
   },
   {
    "job": "vm(members-runner)",
-   "tasks": 462,
-   "minutes": 197,
+   "tasks": 481,
+   "minutes": 203,
    "real_failures": 0,
    "failing_runs": 0,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 197,
-   "minutes_per_real_failure": null
-  },
-  {
-   "job": "installer(node2)",
-   "tasks": 25,
-   "minutes": 196,
-   "real_failures": 0,
-   "failing_runs": 0,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 196,
+   "wasted_minutes": 203,
    "minutes_per_real_failure": null
   },
   {
@@ -399,28 +439,38 @@
    "minutes_per_real_failure": 97
   },
   {
-   "job": "vm(join-install)",
-   "tasks": 50,
-   "minutes": 176,
-   "real_failures": 1,
-   "failing_runs": 1,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 174,
-   "minutes_per_real_failure": 176
-  },
-  {
    "job": "vm(metrics-ui)",
-   "tasks": 188,
-   "minutes": 162,
+   "tasks": 212,
+   "minutes": 181,
    "real_failures": 2,
    "failing_runs": 3,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 160,
-   "minutes_per_real_failure": 81
+   "wasted_minutes": 179,
+   "minutes_per_real_failure": 90
   },
   {
    "job": "vm(net-follow)",
-   "tasks": 124,
+   "tasks": 154,
+   "minutes": 176,
+   "real_failures": 0,
+   "failing_runs": 0,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 176,
+   "minutes_per_real_failure": null
+  },
+  {
+   "job": "vm(transcode)",
+   "tasks": 375,
+   "minutes": 152,
+   "real_failures": 1,
+   "failing_runs": 2,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 150,
+   "minutes_per_real_failure": 152
+  },
+  {
+   "job": "vm(pg-follow)",
+   "tasks": 139,
    "minutes": 147,
    "real_failures": 0,
    "failing_runs": 0,
@@ -429,14 +479,24 @@
    "minutes_per_real_failure": null
   },
   {
-   "job": "vm(transcode)",
-   "tasks": 364,
-   "minutes": 145,
+   "job": "vm(takeover)",
+   "tasks": 130,
+   "minutes": 139,
    "real_failures": 1,
-   "failing_runs": 2,
+   "failing_runs": 1,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 143,
-   "minutes_per_real_failure": 145
+   "wasted_minutes": 137,
+   "minutes_per_real_failure": 139
+  },
+  {
+   "job": "vm(site-journeys)",
+   "tasks": 53,
+   "minutes": 135,
+   "real_failures": 2,
+   "failing_runs": 2,
+   "of_them_fixed_by_rebase": 2,
+   "wasted_minutes": 132,
+   "minutes_per_real_failure": 68
   },
   {
    "job": "systems(node2,?)",
@@ -449,148 +509,168 @@
    "minutes_per_real_failure": null
   },
   {
-   "job": "vm(takeover)",
-   "tasks": 112,
-   "minutes": 118,
+   "job": "vm(store)",
+   "tasks": 133,
+   "minutes": 108,
    "real_failures": 1,
    "failing_runs": 1,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 116,
-   "minutes_per_real_failure": 118
-  },
-  {
-   "job": "vm(pg-follow)",
-   "tasks": 117,
-   "minutes": 106,
-   "real_failures": 0,
-   "failing_runs": 0,
    "of_them_fixed_by_rebase": 0,
    "wasted_minutes": 106,
-   "minutes_per_real_failure": null
+   "minutes_per_real_failure": 108
   },
   {
-   "job": "vm(joined-serves)",
-   "tasks": 27,
-   "minutes": 98,
-   "real_failures": 0,
-   "failing_runs": 0,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 98,
-   "minutes_per_real_failure": null
-  },
-  {
-   "job": "installer(node1)",
-   "tasks": 26,
-   "minutes": 97,
-   "real_failures": 0,
-   "failing_runs": 0,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 97,
-   "minutes_per_real_failure": null
-  },
-  {
-   "job": "vm(store)",
-   "tasks": 113,
-   "minutes": 90,
+   "job": "browser(site-links)",
+   "tasks": 80,
+   "minutes": 117,
    "real_failures": 1,
    "failing_runs": 1,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 88,
-   "minutes_per_real_failure": 90
-  },
-  {
-   "job": "vm(site-journeys)",
-   "tasks": 28,
-   "minutes": 84,
-   "real_failures": 2,
-   "failing_runs": 2,
-   "of_them_fixed_by_rebase": 2,
-   "wasted_minutes": 81,
-   "minutes_per_real_failure": 42
+   "of_them_fixed_by_rebase": 1,
+   "wasted_minutes": 101,
+   "minutes_per_real_failure": 117
   },
   {
    "job": "vm(llm)",
-   "tasks": 333,
-   "minutes": 78,
+   "tasks": 351,
+   "minutes": 82,
    "real_failures": 0,
    "failing_runs": 0,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 78,
+   "wasted_minutes": 82,
    "minutes_per_real_failure": null
   },
   {
    "job": "vm(console)",
-   "tasks": 383,
-   "minutes": 74,
+   "tasks": 402,
+   "minutes": 79,
    "real_failures": 0,
    "failing_runs": 0,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 74,
-   "minutes_per_real_failure": null
-  },
-  {
-   "job": "keep",
-   "tasks": 59,
-   "minutes": 69,
-   "real_failures": 0,
-   "failing_runs": 0,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 69,
-   "minutes_per_real_failure": null
-  },
-  {
-   "job": "vm(pgrestore)",
-   "tasks": 343,
-   "minutes": 59,
-   "real_failures": 0,
-   "failing_runs": 0,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 59,
-   "minutes_per_real_failure": null
-  },
-  {
-   "job": "browser(site-links)",
-   "tasks": 46,
-   "minutes": 56,
-   "real_failures": 0,
-   "failing_runs": 0,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 56,
-   "minutes_per_real_failure": null
-  },
-  {
-   "job": "vm(switch-race)",
-   "tasks": 50,
-   "minutes": 38,
-   "real_failures": 0,
-   "failing_runs": 0,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 38,
-   "minutes_per_real_failure": null
-  },
-  {
-   "job": "browser(site-a11y)",
-   "tasks": 46,
-   "minutes": 32,
-   "real_failures": 0,
-   "failing_runs": 0,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 32,
-   "minutes_per_real_failure": null
-  },
-  {
-   "job": "browser(dns-worker)",
-   "tasks": 67,
-   "minutes": 31,
-   "real_failures": 0,
-   "failing_runs": 0,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 31,
+   "wasted_minutes": 79,
    "minutes_per_real_failure": null
   },
   {
    "job": "browser(site-speed)",
-   "tasks": 45,
+   "tasks": 78,
+   "minutes": 75,
+   "real_failures": 0,
+   "failing_runs": 0,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 75,
+   "minutes_per_real_failure": null
+  },
+  {
+   "job": "vm(pgrestore)",
+   "tasks": 364,
+   "minutes": 64,
+   "real_failures": 0,
+   "failing_runs": 0,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 64,
+   "minutes_per_real_failure": null
+  },
+  {
+   "job": "vm(switch-remote)",
+   "tasks": 25,
+   "minutes": 61,
+   "real_failures": 0,
+   "failing_runs": 0,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 61,
+   "minutes_per_real_failure": null
+  },
+  {
+   "job": "browser(control-upgrade)",
+   "tasks": 36,
+   "minutes": 71,
+   "real_failures": 1,
+   "failing_runs": 1,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 57,
+   "minutes_per_real_failure": 71
+  },
+  {
+   "job": "browser(site-a11y)",
+   "tasks": 80,
+   "minutes": 53,
+   "real_failures": 0,
+   "failing_runs": 0,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 53,
+   "minutes_per_real_failure": null
+  },
+  {
+   "job": "browser(dns-worker)",
+   "tasks": 102,
+   "minutes": 45,
+   "real_failures": 0,
+   "failing_runs": 0,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 45,
+   "minutes_per_real_failure": null
+  },
+  {
+   "job": "vm(switch-race)",
+   "tasks": 66,
+   "minutes": 44,
+   "real_failures": 0,
+   "failing_runs": 0,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 44,
+   "minutes_per_real_failure": null
+  },
+  {
+   "job": "browser(site-headers)",
+   "tasks": 79,
+   "minutes": 44,
+   "real_failures": 0,
+   "failing_runs": 0,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 44,
+   "minutes_per_real_failure": null
+  },
+  {
+   "job": "browser(mail-page)",
+   "tasks": 84,
+   "minutes": 42,
+   "real_failures": 0,
+   "failing_runs": 0,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 42,
+   "minutes_per_real_failure": null
+  },
+  {
+   "job": "browser(site-roles)",
+   "tasks": 77,
+   "minutes": 42,
+   "real_failures": 1,
+   "failing_runs": 1,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 42,
+   "minutes_per_real_failure": 42
+  },
+  {
+   "job": "vm(wired-watch)",
+   "tasks": 28,
+   "minutes": 42,
+   "real_failures": 0,
+   "failing_runs": 0,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 42,
+   "minutes_per_real_failure": null
+  },
+  {
+   "job": "vm(cache-upload)",
+   "tasks": 70,
+   "minutes": 37,
+   "real_failures": 0,
+   "failing_runs": 0,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 37,
+   "minutes_per_real_failure": null
+  },
+  {
+   "job": "browser(sso)",
+   "tasks": 82,
    "minutes": 31,
    "real_failures": 0,
    "failing_runs": 0,
@@ -599,48 +679,38 @@
    "minutes_per_real_failure": null
   },
   {
-   "job": "browser(site-roles)",
-   "tasks": 44,
-   "minutes": 28,
-   "real_failures": 1,
-   "failing_runs": 1,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 27,
-   "minutes_per_real_failure": 28
-  },
-  {
-   "job": "browser(site-headers)",
-   "tasks": 45,
-   "minutes": 26,
-   "real_failures": 0,
-   "failing_runs": 0,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 26,
-   "minutes_per_real_failure": null
-  },
-  {
    "job": "vm(waits)",
-   "tasks": 65,
-   "minutes": 26,
+   "tasks": 77,
+   "minutes": 30,
    "real_failures": 1,
    "failing_runs": 1,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 25,
-   "minutes_per_real_failure": 26
+   "wasted_minutes": 29,
+   "minutes_per_real_failure": 30
   },
   {
-   "job": "vm(cache-upload)",
-   "tasks": 34,
-   "minutes": 22,
+   "job": "browser(files-page)",
+   "tasks": 84,
+   "minutes": 24,
    "real_failures": 0,
    "failing_runs": 0,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 22,
+   "wasted_minutes": 24,
    "minutes_per_real_failure": null
   },
   {
-   "job": "browser(sso)",
-   "tasks": 55,
+   "job": "browser(same-tab)",
+   "tasks": 70,
+   "minutes": 20,
+   "real_failures": 0,
+   "failing_runs": 0,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 20,
+   "minutes_per_real_failure": null
+  },
+  {
+   "job": "vm(placed)",
+   "tasks": 59,
    "minutes": 19,
    "real_failures": 0,
    "failing_runs": 0,
@@ -649,83 +719,33 @@
    "minutes_per_real_failure": null
   },
   {
-   "job": "browser(files-page)",
-   "tasks": 56,
-   "minutes": 17,
-   "real_failures": 0,
-   "failing_runs": 0,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 17,
-   "minutes_per_real_failure": null
-  },
-  {
-   "job": "browser(mail-page)",
-   "tasks": 56,
-   "minutes": 17,
-   "real_failures": 0,
-   "failing_runs": 0,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 17,
-   "minutes_per_real_failure": null
-  },
-  {
-   "job": "browser(same-tab)",
-   "tasks": 47,
-   "minutes": 16,
-   "real_failures": 0,
-   "failing_runs": 0,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 16,
-   "minutes_per_real_failure": null
-  },
-  {
    "job": "vm(work-memory)",
-   "tasks": 36,
-   "minutes": 14,
+   "tasks": 48,
+   "minutes": 17,
    "real_failures": 0,
    "failing_runs": 0,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 14,
+   "wasted_minutes": 17,
    "minutes_per_real_failure": null
   },
   {
-   "job": "browser(control-upgrade)",
-   "tasks": 1,
-   "minutes": 14,
+   "job": "vm(net-detect)",
+   "tasks": 37,
+   "minutes": 12,
    "real_failures": 0,
    "failing_runs": 0,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 14,
+   "wasted_minutes": 12,
    "minutes_per_real_failure": null
   },
   {
-   "job": "vm(placed)",
-   "tasks": 25,
-   "minutes": 10,
+   "job": "browser(media-page)",
+   "tasks": 32,
+   "minutes": 9,
    "real_failures": 0,
    "failing_runs": 0,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 10,
-   "minutes_per_real_failure": null
-  },
-  {
-   "job": "vm(switch-remote)",
-   "tasks": 2,
-   "minutes": 7,
-   "real_failures": 0,
-   "failing_runs": 0,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 7,
-   "minutes_per_real_failure": null
-  },
-  {
-   "job": "vm(wired-watch)",
-   "tasks": 1,
-   "minutes": 4,
-   "real_failures": 0,
-   "failing_runs": 0,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 4,
+   "wasted_minutes": 9,
    "minutes_per_real_failure": null
   },
   {
@@ -749,6 +769,16 @@
    "minutes_per_real_failure": null
   },
   {
+   "job": "vm(cache-front)",
+   "tasks": 7,
+   "minutes": 3,
+   "real_failures": 0,
+   "failing_runs": 0,
+   "of_them_fixed_by_rebase": 0,
+   "wasted_minutes": 3,
+   "minutes_per_real_failure": null
+  },
+  {
    "job": "vm(attest)",
    "tasks": 1,
    "minutes": 1,
@@ -759,79 +789,69 @@
    "minutes_per_real_failure": null
   },
   {
-   "job": "browser(media-page)",
-   "tasks": 4,
-   "minutes": 1,
+   "job": "browser(none)",
+   "tasks": 6,
+   "minutes": 0,
    "real_failures": 0,
    "failing_runs": 0,
    "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 1,
-   "minutes_per_real_failure": null
-  },
-  {
-   "job": "vm(net-detect)",
-   "tasks": 1,
-   "minutes": 1,
-   "real_failures": 0,
-   "failing_runs": 0,
-   "of_them_fixed_by_rebase": 0,
-   "wasted_minutes": 1,
+   "wasted_minutes": 0,
    "minutes_per_real_failure": null
   }
  ],
  "true_needed": {
   "relevant: change touched what it tests, passed": {
-   "minutes": 15189,
-   "share": 0.538
+   "minutes": 17451,
+   "share": 0.445
   },
   "could not have caught anything: change touched nothing it tests": {
-   "minutes": 9045,
-   "share": 0.32
+   "minutes": 10111,
+   "share": 0.258
+  },
+  "waste: flake": {
+   "minutes": 4597,
+   "share": 0.117
+  },
+  "waste: infra": {
+   "minutes": 3099,
+   "share": 0.079
   },
   "waste: stopped": {
-   "minutes": 1786,
-   "share": 0.063
+   "minutes": 2028,
+   "share": 0.052
   },
   "waste: superseded": {
    "minutes": 887,
-   "share": 0.031
+   "share": 0.023
   },
   "caught a real failure in that run": {
-   "minutes": 483,
-   "share": 0.017
+   "minutes": 539,
+   "share": 0.014
   },
   "main's full run (the backstop)": {
    "minutes": 337,
-   "share": 0.012
-  },
-  "waste: infra": {
-   "minutes": 192,
-   "share": 0.007
+   "share": 0.009
   },
   "overhead (files_modified, style, lint, ci_ok, agree)": {
-   "minutes": 178,
-   "share": 0.006
-  },
-  "waste: flake": {
-   "minutes": 129,
+   "minutes": 202,
    "share": 0.005
   }
  },
  "true_needed_empirical": {
   "relevant by the empirical measure, passed": {
-   "minutes": 14852,
-   "share": 0.526
+   "minutes": 17094,
+   "share": 0.436
   },
   "could not have caught anything by the empirical measure": {
-   "minutes": 9382,
-   "share": 0.332
+   "minutes": 10468,
+   "share": 0.267
   }
  },
  "selectors_all_jobs": {
   "tests-this (as read)": {
-   "pr_job_minutes": 27888,
-   "minutes_saved": 9704,
-   "share_saved": 0.348,
+   "pr_job_minutes": 38913,
+   "minutes_saved": 13793,
+   "share_saved": 0.354,
    "failing_runs_deferred": 4,
    "real_failures_deferred": 4,
    "deferred": [
@@ -842,9 +862,9 @@
    ]
   },
   "tests-this (widened by the failures)": {
-   "pr_job_minutes": 27888,
-   "minutes_saved": 9704,
-   "share_saved": 0.348,
+   "pr_job_minutes": 38913,
+   "minutes_saved": 13793,
+   "share_saved": 0.354,
    "failing_runs_deferred": 4,
    "real_failures_deferred": 4,
    "deferred": [
@@ -855,9 +875,9 @@
    ]
   },
   "tests-this, hub files (flake.nix, Cargo.*) left to main's run": {
-   "pr_job_minutes": 27888,
-   "minutes_saved": 10258,
-   "share_saved": 0.368,
+   "pr_job_minutes": 38913,
+   "minutes_saved": 14468,
+   "share_saved": 0.372,
    "failing_runs_deferred": 4,
    "real_failures_deferred": 4,
    "deferred": [
@@ -868,11 +888,11 @@
    ]
   },
   "learned, time-ordered (components of earlier real breaks + own files)": {
-   "pr_job_minutes": 27888,
-   "minutes_saved": 12668,
-   "share_saved": 0.454,
-   "failing_runs_deferred": 19,
-   "real_failures_deferred": 18,
+   "pr_job_minutes": 38913,
+   "minutes_saved": 19242,
+   "share_saved": 0.494,
+   "failing_runs_deferred": 21,
+   "real_failures_deferred": 20,
    "deferred": [
     "run 127 programs pr 33",
     "run 201 programs pr 56",
@@ -891,31 +911,33 @@
     "run 820 browser(site-roles) pr 419",
     "run 829 vm(site-journeys) pr 426 (fixed by rebase)",
     "run 844 vm(waits) pr 436",
-    "run 852 vm(join-install) pr 442"
+    "run 852 vm(join-install) pr 442",
+    "run 884 browser(site-links) pr 471 (fixed by rebase)",
+    "run 890 browser(control) pr 476"
    ]
   }
  },
  "selectors_vm_and_browser": {
   "today's chooser (covers.json)": {
-   "pr_job_minutes": 14705,
-   "minutes_saved": 1406,
-   "share_saved": 0.096,
+   "pr_job_minutes": 18671,
+   "minutes_saved": 0,
+   "share_saved": 0.0,
    "failing_runs_deferred": 0,
    "real_failures_deferred": 0,
    "deferred": []
   },
   "interface chooser": {
-   "pr_job_minutes": 14705,
-   "minutes_saved": 1658,
-   "share_saved": 0.113,
+   "pr_job_minutes": 18671,
+   "minutes_saved": 0,
+   "share_saved": 0.0,
    "failing_runs_deferred": 0,
    "real_failures_deferred": 0,
    "deferred": []
   },
   "tests-this (as read)": {
-   "pr_job_minutes": 14705,
-   "minutes_saved": 8887,
-   "share_saved": 0.604,
+   "pr_job_minutes": 18671,
+   "minutes_saved": 9903,
+   "share_saved": 0.53,
    "failing_runs_deferred": 4,
    "real_failures_deferred": 4,
    "deferred": [
@@ -926,9 +948,9 @@
    ]
   },
   "tests-this (widened by the failures)": {
-   "pr_job_minutes": 14705,
-   "minutes_saved": 8887,
-   "share_saved": 0.604,
+   "pr_job_minutes": 18671,
+   "minutes_saved": 9903,
+   "share_saved": 0.53,
    "failing_runs_deferred": 4,
    "real_failures_deferred": 4,
    "deferred": [
@@ -939,9 +961,9 @@
    ]
   },
   "tests-this, hub files left to main's run": {
-   "pr_job_minutes": 14705,
-   "minutes_saved": 8887,
-   "share_saved": 0.604,
+   "pr_job_minutes": 18671,
+   "minutes_saved": 9903,
+   "share_saved": 0.53,
    "failing_runs_deferred": 4,
    "real_failures_deferred": 4,
    "deferred": [
@@ -952,11 +974,11 @@
    ]
   },
   "learned, time-ordered": {
-   "pr_job_minutes": 14705,
-   "minutes_saved": 9300,
-   "share_saved": 0.632,
-   "failing_runs_deferred": 13,
-   "real_failures_deferred": 13,
+   "pr_job_minutes": 18671,
+   "minutes_saved": 10945,
+   "share_saved": 0.586,
+   "failing_runs_deferred": 15,
+   "real_failures_deferred": 15,
    "deferred": [
     "run 437 vm(games) pr 166",
     "run 537 vm(vault) pr 240",
@@ -970,7 +992,9 @@
     "run 820 browser(site-roles) pr 419",
     "run 829 vm(site-journeys) pr 426 (fixed by rebase)",
     "run 844 vm(waits) pr 436",
-    "run 852 vm(join-install) pr 442"
+    "run 852 vm(join-install) pr 442",
+    "run 884 browser(site-links) pr 471 (fixed by rebase)",
+    "run 890 browser(control) pr 476"
    ]
   }
  },
@@ -1303,7 +1327,7 @@
    "touched_widened": true,
    "fixed_by_rebase": false,
    "main_moved_its_set": false,
-   "files": 27,
+   "files": 28,
    "fix_changed": [
     ".forgejo/workflows/nix_checks.yml"
    ]
@@ -1420,7 +1444,7 @@
    "touched_widened": true,
    "fixed_by_rebase": false,
    "main_moved_its_set": false,
-   "files": 294,
+   "files": 295,
    "fix_changed": [
     "servers/games/src/lib.rs"
    ]
@@ -1434,7 +1458,7 @@
    "touched_widened": true,
    "fixed_by_rebase": false,
    "main_moved_its_set": false,
-   "files": 294,
+   "files": 295,
    "fix_changed": [
     "nix/tests/metrics-ui.py",
     "nix/tests/transcode.py"
@@ -1449,7 +1473,7 @@
    "touched_widened": true,
    "fixed_by_rebase": false,
    "main_moved_its_set": false,
-   "files": 294,
+   "files": 295,
    "fix_changed": [
     "nix/tests/photos.nix"
    ]
@@ -1463,7 +1487,7 @@
    "touched_widened": true,
    "fixed_by_rebase": false,
    "main_moved_its_set": false,
-   "files": 294,
+   "files": 295,
    "fix_changed": [
     ".forgejo/workflows/entry_point.yml",
     "nix/tests/release.nix",
@@ -1479,7 +1503,7 @@
    "touched_widened": true,
    "fixed_by_rebase": false,
    "main_moved_its_set": false,
-   "files": 294,
+   "files": 295,
    "fix_changed": [
     "nix/tests/photos.nix",
     "nix/tests/transcode.py"
@@ -1585,7 +1609,7 @@
    "touched_widened": true,
    "fixed_by_rebase": false,
    "main_moved_its_set": false,
-   "files": 132,
+   "files": 133,
    "fix_changed": [
     "flake.nix",
     "nix/tests/acme.nix"
@@ -1600,7 +1624,7 @@
    "touched_widened": true,
    "fixed_by_rebase": false,
    "main_moved_its_set": false,
-   "files": 133,
+   "files": 134,
    "fix_changed": [
     "docs/dev/home-controller.md",
     "flake.nix",
@@ -1617,7 +1641,7 @@
    "touched_widened": true,
    "fixed_by_rebase": false,
    "main_moved_its_set": false,
-   "files": 60,
+   "files": 61,
    "fix_changed": [
     "fleet/roles.json"
    ]
@@ -1631,7 +1655,7 @@
    "touched_widened": true,
    "fixed_by_rebase": false,
    "main_moved_its_set": false,
-   "files": 62,
+   "files": 63,
    "fix_changed": [
     "nix/tests/forge-follow.py",
     "nix/tests/takeover.py"
@@ -1646,7 +1670,7 @@
    "touched_widened": true,
    "fixed_by_rebase": false,
    "main_moved_its_set": false,
-   "files": 61,
+   "files": 62,
    "fix_changed": [
     "nix/tests/forge-follow.py",
     "nix/tests/release.py"
@@ -1661,7 +1685,7 @@
    "touched_widened": true,
    "fixed_by_rebase": false,
    "main_moved_its_set": false,
-   "files": 62,
+   "files": 63,
    "fix_changed": [
     "nix/tests/forge-follow.py",
     "nix/tests/net-follow.py",
@@ -1678,7 +1702,7 @@
    "touched_widened": true,
    "fixed_by_rebase": false,
    "main_moved_its_set": false,
-   "files": 62,
+   "files": 63,
    "fix_changed": [
     "nix/tests/vault.py"
    ]
@@ -1850,7 +1874,7 @@
    "touched_widened": true,
    "fixed_by_rebase": false,
    "main_moved_its_set": true,
-   "files": 136,
+   "files": 137,
    "fix_changed": [
     "client/cli/tests/e2e.rs",
     "client/identity/src/lib.rs",
@@ -1872,7 +1896,7 @@
    "touched_widened": true,
    "fixed_by_rebase": false,
    "main_moved_its_set": false,
-   "files": 138,
+   "files": 139,
    "fix_changed": [
     ".forgejo/workflows/entry_point.yml",
     "Cargo.lock",
@@ -1925,7 +1949,7 @@
    "touched_widened": true,
    "fixed_by_rebase": false,
    "main_moved_its_set": true,
-   "files": 10,
+   "files": 11,
    "fix_changed": [
     "docs/dev/ci.md",
     "nix/tests/ci-select/covers.json"
@@ -1940,7 +1964,7 @@
    "touched_widened": false,
    "fixed_by_rebase": false,
    "main_moved_its_set": true,
-   "files": 11,
+   "files": 12,
    "fix_changed": [
     ".forgejo/workflows/entry_point.yml",
     "docs/dev/ci.md",
@@ -2002,7 +2026,7 @@
    "touched_widened": true,
    "fixed_by_rebase": false,
    "main_moved_its_set": true,
-   "files": 26,
+   "files": 27,
    "fix_changed": [
     "app/web/_dd/pages/settings.html"
    ]
@@ -2058,7 +2082,7 @@
    "touched_widened": true,
    "fixed_by_rebase": false,
    "main_moved_its_set": false,
-   "files": 111,
+   "files": 112,
    "fix_changed": [
     "app/web/_dd/static/devices.js",
     "nix/modules/box/needs.nix"
@@ -2087,7 +2111,7 @@
    "touched_widened": false,
    "fixed_by_rebase": true,
    "main_moved_its_set": true,
-   "files": 39,
+   "files": 40,
    "fix_changed": [
     "docs/dev/forge.md",
     "docs/dev/releases.md",
@@ -2109,6 +2133,40 @@
    ]
   },
   {
+   "run_no": 884,
+   "job": "browser(site-links)",
+   "set": "site-links",
+   "pr": 471,
+   "touched_as_read": true,
+   "touched_widened": true,
+   "fixed_by_rebase": true,
+   "main_moved_its_set": false,
+   "files": 67,
+   "fix_changed": []
+  },
+  {
+   "run_no": 851,
+   "job": "browser(control-upgrade)",
+   "set": "control-upgrade",
+   "pr": 441,
+   "touched_as_read": true,
+   "touched_widened": true,
+   "fixed_by_rebase": false,
+   "main_moved_its_set": true,
+   "files": 56,
+   "fix_changed": [
+    "docs/dev/control-plane.md",
+    "docs/dev/forge.md",
+    "docs/dev/nix.md",
+    "flake.nix",
+    "nix/modules/box/needs.nix",
+    "nix/roles/core.nix",
+    "nix/tests/ci-select/ciselect.py",
+    "servers/system/control/validator/catchup_test.go",
+    "servers/system/control/validator/validator.go"
+   ]
+  },
+  {
    "run_no": 852,
    "job": "vm(join-install)",
    "set": "join-install",
@@ -2117,26 +2175,133 @@
    "touched_widened": true,
    "fixed_by_rebase": false,
    "main_moved_its_set": false,
-   "files": 34,
+   "files": 35,
    "fix_changed": [
     "flake.nix",
     "nix/installer/iso.nix",
     "nix/installer/join-install.sh",
     "nix/tests/join-install.nix"
    ]
+  },
+  {
+   "run_no": 887,
+   "job": "vm(network)",
+   "set": "network",
+   "pr": 474,
+   "touched_as_read": true,
+   "touched_widened": true,
+   "fixed_by_rebase": false,
+   "main_moved_its_set": true,
+   "files": 67,
+   "fix_changed": [
+    "docs/dev/gate.md",
+    "flake.nix",
+    "nix/modules/box/box.nix",
+    "nix/modules/box/host.nix",
+    "nix/modules/forge/needs.nix",
+    "nix/modules/net/headscale.nix",
+    "nix/modules/net/owner.nix",
+    "nix/modules/photos/ente.nix",
+    "nix/modules/photos/needs.nix",
+    "nix/modules/storage/needs.nix",
+    "nix/modules/vault/needs.nix",
+    "nix/roles/bundles.json"
+   ]
+  },
+  {
+   "run_no": 853,
+   "job": "vm(photos)",
+   "set": "photos",
+   "pr": 443,
+   "touched_as_read": true,
+   "touched_widened": true,
+   "fixed_by_rebase": false,
+   "main_moved_its_set": true,
+   "files": 66,
+   "fix_changed": [
+    "docs/dev/fleet.md",
+    "docs/dev/forge.md",
+    "docs/dev/gate.md",
+    "docs/dev/leaving.md",
+    "docs/dev/nix.md",
+    "docs/dev/packaged.md",
+    "docs/dev/secrets.md",
+    "docs/dev/servers.md",
+    "flake.nix",
+    "nix/modules/adblock/pihole.nix",
+    "nix/modules/box/host.nix",
+    "nix/modules/forge/forgejo-runner.nix"
+   ]
+  },
+  {
+   "run_no": 871,
+   "job": "rust",
+   "set": "rust",
+   "pr": 458,
+   "touched_as_read": true,
+   "touched_widened": true,
+   "fixed_by_rebase": true,
+   "main_moved_its_set": true,
+   "files": 18,
+   "fix_changed": []
+  },
+  {
+   "run_no": 875,
+   "job": "flake",
+   "set": "flake",
+   "pr": 462,
+   "touched_as_read": true,
+   "touched_widened": true,
+   "fixed_by_rebase": false,
+   "main_moved_its_set": false,
+   "files": 18,
+   "fix_changed": [
+    "nix/modules/library/libraries.nix"
+   ]
+  },
+  {
+   "run_no": 893,
+   "job": "vm(runner-restart)",
+   "set": "runner-restart",
+   "pr": 479,
+   "touched_as_read": true,
+   "touched_widened": true,
+   "fixed_by_rebase": false,
+   "main_moved_its_set": false,
+   "files": 67,
+   "fix_changed": [
+    "nix/tests/runner-restart.py"
+   ]
+  },
+  {
+   "run_no": 890,
+   "job": "browser(control)",
+   "set": "control",
+   "pr": 476,
+   "touched_as_read": true,
+   "touched_widened": true,
+   "fixed_by_rebase": false,
+   "main_moved_its_set": true,
+   "files": 23,
+   "fix_changed": [
+    "flake.nix",
+    "nix/modules/library/mail.nix",
+    "nix/modules/storage/postgres-follow.nix",
+    "nix/tests/control/run.py"
+   ]
   }
  ],
  "kept_by_family": {
   "vm": {
-   "minutes_kept": 5085,
+   "minutes_kept": 6135,
    "top_triggers": [
     [
      "servers/gate/src/lib.rs",
-     862
+     954
     ],
     [
      "client/cli/src/main.rs",
-     620
+     667
     ],
     [
      "nix/modules/gate/verify.nix",
@@ -2144,15 +2309,15 @@
     ],
     [
      "client/identity/src/lib.rs",
-     396
+     459
+    ],
+    [
+     "servers/gate/src/directory.rs",
+     394
     ],
     [
      "servers/gate/src/pages.rs",
      368
-    ],
-    [
-     "servers/gate/src/directory.rs",
-     345
     ],
     [
      "servers/gate/src/main.rs",
@@ -2164,16 +2329,53 @@
     ]
    ]
   },
-  "rust": {
-   "minutes_kept": 3485,
+  "systems": {
+   "minutes_kept": 4442,
    "top_triggers": [
     [
      "flake.nix",
-     469
+     870
     ],
     [
      "servers/gate/src/lib.rs",
-     369
+     438
+    ],
+    [
+     ".forgejo/workflows/entry_point.yml",
+     324
+    ],
+    [
+     "servers/gate/src/pages.rs",
+     319
+    ],
+    [
+     "client/cli/src/main.rs",
+     253
+    ],
+    [
+     "nix/roles/core.nix",
+     249
+    ],
+    [
+     "nix/modules/gate/verify.nix",
+     243
+    ],
+    [
+     "client/cli/src/release_cmd.rs",
+     241
+    ]
+   ]
+  },
+  "rust": {
+   "minutes_kept": 3643,
+   "top_triggers": [
+    [
+     "flake.nix",
+     489
+    ],
+    [
+     "servers/gate/src/lib.rs",
+     379
     ],
     [
      "servers/gate/src/pages.rs",
@@ -2181,15 +2383,15 @@
     ],
     [
      "client/cli/src/main.rs",
-     267
+     273
+    ],
+    [
+     "client/cli/src/release_cmd.rs",
+     247
     ],
     [
      "Cargo.lock",
      242
-    ],
-    [
-     "client/cli/src/release_cmd.rs",
-     240
     ],
     [
      "client/cli/tests/e2e.rs",
@@ -2197,57 +2399,94 @@
     ],
     [
      "client/identity/src/lib.rs",
-     157
+     163
     ]
    ]
   },
-  "systems": {
-   "minutes_kept": 2744,
+  "flake": {
+   "minutes_kept": 3640,
    "top_triggers": [
     [
      "flake.nix",
-     767
-    ],
-    [
-     "servers/gate/src/lib.rs",
-     402
-    ],
-    [
-     "servers/gate/src/pages.rs",
-     319
+     300
     ],
     [
      ".forgejo/workflows/entry_point.yml",
-     312
-    ],
-    [
-     "nix/modules/gate/verify.nix",
-     243
-    ],
-    [
-     "client/cli/tests/e2e.rs",
-     239
+     135
     ],
     [
      "Cargo.lock",
-     235
+     118
     ],
     [
-     "client/cli/src/main.rs",
-     233
+     "nix/roles/core.nix",
+     117
+    ],
+    [
+     "nix/modules/gate/verify.nix",
+     116
+    ],
+    [
+     "nix/modules/forge/forgejo.nix",
+     116
+    ],
+    [
+     "nix/roles/gateway.nix",
+     88
+    ],
+    [
+     "nix/roles/photos.nix",
+     81
+    ]
+   ]
+  },
+  "browser": {
+   "minutes_kept": 2633,
+   "top_triggers": [
+    [
+     "servers/gate/src/lib.rs",
+     117
+    ],
+    [
+     "client/identity/src/lib.rs",
+     108
+    ],
+    [
+     "servers/gate/src/directory.rs",
+     80
+    ],
+    [
+     "nix/modules/adblock/pihole.nix",
+     73
+    ],
+    [
+     "nix/modules/gate/public.nix",
+     73
+    ],
+    [
+     "servers/gate/src/ident.rs",
+     69
+    ],
+    [
+     "nix/modules/gate/acme.nix",
+     68
+    ],
+    [
+     "nix/modules/storage/store.nix",
+     67
     ]
    ]
   },
   "programs": {
-   "minutes_kept": 2112,
+   "minutes_kept": 2147,
    "top_triggers": [
     [
      "flake.nix",
-     431
+     473
     ],
     [
      "servers/gate/src/lib.rs",
-     174
+     184
     ],
     [
      "Cargo.lock",
@@ -2258,66 +2497,29 @@
      136
     ],
     [
+     "client/identity/src/lib.rs",
+     130
+    ],
+    [
      "client/cli/src/main.rs",
-     123
+     129
     ],
     [
      "Cargo.nix",
      120
     ],
     [
-     "client/identity/src/lib.rs",
-     118
-    ],
-    [
-     "client/cli/tests/e2e.rs",
-     111
-    ]
-   ]
-  },
-  "flake": {
-   "minutes_kept": 1957,
-   "top_triggers": [
-    [
-     "flake.nix",
-     280
-    ],
-    [
-     ".forgejo/workflows/entry_point.yml",
-     132
-    ],
-    [
-     "Cargo.lock",
-     118
-    ],
-    [
-     "nix/modules/gate/verify.nix",
-     116
-    ],
-    [
-     "nix/roles/core.nix",
-     108
-    ],
-    [
-     "nix/modules/forge/forgejo.nix",
-     108
-    ],
-    [
-     "nix/roles/gateway.nix",
-     87
-    ],
-    [
-     "servers/web-shared/home.css",
-     76
+     "client/cli/src/release_cmd.rs",
+     113
     ]
    ]
   },
   "app": {
-   "minutes_kept": 1618,
+   "minutes_kept": 1671,
    "top_triggers": [
     [
      "flake.nix",
-     193
+     213
     ],
     [
      "Cargo.lock",
@@ -2329,19 +2531,19 @@
     ],
     [
      "nix/modules/vault/vaultwarden.nix",
-     52
+     53
+    ],
+    [
+     "nix/modules/photos/ente.nix",
+     51
+    ],
+    [
+     "client/identity/src/lib.rs",
+     51
     ],
     [
      "app/web/_dd/static/home.css",
      49
-    ],
-    [
-     "client/identity/src/lib.rs",
-     45
-    ],
-    [
-     "nix/modules/photos/ente.nix",
-     44
     ],
     [
      "app/src/lib.rs",
@@ -2349,49 +2551,28 @@
     ]
    ]
   },
-  "browser": {
-   "minutes_kept": 734,
-   "top_triggers": [
-    [
-     "servers/gate/src/ident.rs",
-     69
-    ],
-    [
-     "client/identity/src/lib.rs",
-     62
-    ],
-    [
-     "servers/gate/src/lib.rs",
-     53
-    ],
-    [
-     "nix/modules/gate/public.nix",
-     53
-    ],
-    [
-     "servers/gate/src/member_boxes.rs",
-     49
-    ],
-    [
-     "nix/modules/gate/acme.nix",
-     48
-    ],
-    [
-     "servers/gate/src/directory.rs",
-     44
-    ],
-    [
-     "servers/web-shared/home.css",
-     38
-    ]
-   ]
-  },
   "installer": {
-   "minutes_kept": 212,
+   "minutes_kept": 526,
    "top_triggers": [
     [
      "flake.nix",
-     31
+     66
+    ],
+    [
+     "fleet/policy.json",
+     17
+    ],
+    [
+     "client/identity/src/lib.rs",
+     14
+    ],
+    [
+     "servers/system/release/src/bin/dd-agent.rs",
+     13
+    ],
+    [
+     "client/identity/src/fleet.rs",
+     11
     ],
     [
      "Cargo.lock",
@@ -2404,35 +2585,19 @@
     [
      "nix/installer/setup.nix",
      10
-    ],
-    [
-     "nix/installer/web/setup.js",
-     10
-    ],
-    [
-     "servers/system/release/src/bin/dd-box-setup.rs",
-     10
-    ],
-    [
-     "servers/system/release/src/bin/dd-agent.rs",
-     9
-    ],
-    [
-     "fleet/policy.json",
-     7
     ]
    ]
   },
   "keep": {
-   "minutes_kept": 43,
+   "minutes_kept": 66,
    "top_triggers": [
     [
      "flake.nix",
-     28
+     48
     ],
     [
      ".forgejo/workflows/entry_point.yml",
-     14
+     17
     ],
     [
      "Cargo.nix",
@@ -2445,111 +2610,111 @@
    ]
   },
   "agree": {
-   "minutes_kept": 3,
+   "minutes_kept": 4,
    "top_triggers": [
     [
      "flake.nix",
-     49
+     64
     ],
     [
      ".forgejo/workflows/entry_point.yml",
-     40
-    ],
-    [
-     "docs/dev/ci.md",
-     22
+     46
     ],
     [
      "servers/gate/src/lib.rs",
-     22
-    ],
-    [
-     "nix/roles/core.nix",
-     19
+     31
     ],
     [
      "servers/system/control/cmd/dd-control/main.go",
-     19
+     29
+    ],
+    [
+     "nix/roles/core.nix",
+     26
+    ],
+    [
+     "docs/dev/ci.md",
+     24
     ],
     [
      "client/cli/src/release_cmd.rs",
-     18
+     23
     ],
     [
      "nix/modules/forge/forgejo-runner.nix",
-     16
+     22
     ]
    ]
   }
  },
  "replay": {
   "slots": "node1:2+node2:1",
-  "runs": 665,
-  "prs": 444,
+  "runs": 710,
+  "prs": 486,
   "per_run": {
    "jobs_today": {
-    "mean": 22.1,
-    "median": 22
+    "mean": 23.5,
+    "median": 23.0
    },
    "jobs_chosen": {
-    "mean": 10.6,
-    "median": 8
+    "mean": 11.4,
+    "median": 8.0
    },
    "job_minutes_today": {
-    "mean": 40.3,
-    "median": 27.0
+    "mean": 53.3,
+    "median": 28.2
    },
    "job_minutes_chosen": {
-    "mean": 26.0,
-    "median": 14.4
+    "mean": 34.0,
+    "median": 15.4
    },
    "wall_today": {
-    "mean": 17.5,
-    "median": 11.8
+    "mean": 24.6,
+    "median": 12.3
    },
    "wall_chosen": {
-    "mean": 12.7,
-    "median": 8.2
+    "mean": 15.4,
+    "median": 8.5
    }
   },
   "per_pr": {
    "jobs_today": {
-    "mean": 33.2,
-    "median": 27.0
+    "mean": 34.4,
+    "median": 28.0
    },
    "jobs_chosen": {
-    "mean": 15.8,
+    "mean": 16.7,
     "median": 11.0
    },
    "wall_today": {
-    "mean": 26.3,
-    "median": 17.3
+    "mean": 36.0,
+    "median": 18.5
    },
    "wall_chosen": {
-    "mean": 19.1,
-    "median": 9.8
+    "mean": 22.6,
+    "median": 10.5
    }
   },
-  "runs_skipping_half_or_more_of_job_minutes": 0.343,
-  "runs_running_no_heavy_job": 0.009,
-  "prs_skipping_half_or_more_of_job_minutes": 0.414,
-  "runs_with_vm_or_browser_checks": 599,
-  "of_them_skipping_half_or_more_of_vm_and_browser_minutes": 0.636,
-  "of_them_skipping_90pct_or_more_of_vm_and_browser_minutes": 0.374,
+  "runs_skipping_half_or_more_of_job_minutes": 0.344,
+  "runs_running_no_heavy_job": 0.008,
+  "prs_skipping_half_or_more_of_job_minutes": 0.412,
+  "runs_with_vm_or_browser_checks": 643,
+  "of_them_skipping_half_or_more_of_vm_and_browser_minutes": 0.617,
+  "of_them_skipping_90pct_or_more_of_vm_and_browser_minutes": 0.356,
   "distribution_share_of_minutes_kept": {
    "0": 9,
-   "0-10%": 14,
-   "10-25%": 44,
-   "25-50%": 155,
-   "50-75%": 159,
-   "75-100%": 284
+   "0-10%": 15,
+   "10-25%": 45,
+   "25-50%": 169,
+   "50-75%": 171,
+   "75-100%": 301
   }
  },
  "structural": [
   {
    "option": "jobs costing >= 300 min per real failure caught (or none) on main's full run only",
-   "minutes_saved": 19771,
-   "real_failures_deferred": 23,
+   "minutes_saved": 28689,
+   "real_failures_deferred": 28,
    "deferred": [
     "run 122 vm(thanos)",
     "run 127 programs",
@@ -2566,6 +2731,7 @@
     "run 536 rust",
     "run 596 rust",
     "run 630 browser(mail-worker)",
+    "run 679 systems(home-controller,node1)",
     "run 706 programs(boxes)",
     "run 753 vm(computers)",
     "run 765 vm(adblock)",
@@ -2573,12 +2739,16 @@
     "run 790 vm(leaving)",
     "run 808 vm(leaving)",
     "run 832 rust",
-    "run 848 rust"
+    "run 848 rust",
+    "run 887 vm(network)",
+    "run 871 rust",
+    "run 893 vm(runner-restart)",
+    "run 890 browser(control)"
    ]
   },
   {
    "option": "tests-this chooser, with systems, agree and installer on main only",
-   "minutes_saved": 12663,
+   "minutes_saved": 18765,
    "real_failures_deferred": 7,
    "deferred": [
     "run 258 systems(node1,?)",
@@ -2591,8 +2761,14 @@
    ]
   },
   {
+   "option": "jobs that never caught a real failure (>= 60 min) on main's full run only",
+   "minutes_saved": 14173,
+   "real_failures_deferred": 0,
+   "deferred": []
+  },
+  {
    "option": "tests-this chooser (all jobs)",
-   "minutes_saved": 9704,
+   "minutes_saved": 13792,
    "real_failures_deferred": 4,
    "deferred": [
     "run 753 vm(computers)",
@@ -2602,14 +2778,8 @@
    ]
   },
   {
-   "option": "jobs that never caught a real failure (>= 60 min) on main's full run only",
-   "minutes_saved": 9433,
-   "real_failures_deferred": 0,
-   "deferred": []
-  },
-  {
    "option": "build_systems and systems_agree on main's full run only",
-   "minutes_saved": 2934,
+   "minutes_saved": 6111,
    "real_failures_deferred": 3,
    "deferred": [
     "run 258 systems(node1,?)",
@@ -2618,33 +2788,33 @@
    ]
   },
   {
+   "option": "each box's system built once on a PR (on its own box), not on every runner",
+   "minutes_saved": 4280,
+   "real_failures_deferred": 0,
+   "deferred": []
+  },
+  {
    "option": "VM tests share one prefix (one evaluation and one build of the boxes, then each test's run)",
-   "minutes_saved": 2775,
+   "minutes_saved": 3067,
    "real_failures_deferred": 0,
    "deferred": [],
    "note": "upper bound: assumes the prefix (job start to the vm-test-run build) is fully shared"
   },
   {
-   "option": "each box's system built once on a PR (on its own box), not on every runner",
-   "minutes_saved": 1276,
-   "real_failures_deferred": 0,
-   "deferred": []
-  },
-  {
    "option": "installer jobs on main's full run only",
-   "minutes_saved": 293,
+   "minutes_saved": 640,
    "real_failures_deferred": 0,
    "deferred": []
   },
   {
    "option": "installer jobs only when nix/installer/ or what the drive embeds changed",
-   "minutes_saved": 80,
+   "minutes_saved": 114,
    "real_failures_deferred": 0,
    "deferred": []
   },
   {
    "option": "build_programs only when a chosen VM test needs it",
-   "minutes_saved": 61,
+   "minutes_saved": 66,
    "real_failures_deferred": 0,
    "deferred": []
   }

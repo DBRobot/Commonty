@@ -122,6 +122,11 @@
     "pdf-editor"
     "calendar-js"
     "git-path"
+    # no VM, seconds each: run by flake_check like the rest of this list
+    "work-memory-sizes"
+    "net-report"
+    "wired-watch-logic"
+    "garage-setup-pipe"
     "computer-facts-logic"
   ];
 }

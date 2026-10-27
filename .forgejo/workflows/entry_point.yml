@@ -34,26 +34,32 @@ jobs:
   files_modified:
     runs-on: nix
     outputs:
-      nix: ${{ steps.detect.outputs.nix }}
-      # the flake evaluated again (flake_check, inputs_kept) and every box's
-      # system built: not for a change to programs' source alone
-      eval: ${{ steps.detect.outputs.eval }}
-      # the programs the VM tests and systems carry (build_programs)
+      # flake_check: every check and every box's system evaluated
+      # (systems_eval), and the evaluation-only checks the change reaches
+      # (eval_checks, attributes for nix build)
+      flake: ${{ steps.detect.outputs.flake }}
+      systems_eval: ${{ steps.detect.outputs.systems_eval }}
+      eval_checks: ${{ steps.detect.outputs.eval_checks }}
+      keep: ${{ steps.detect.outputs.keep }}
+      # the programs the VM tests carry (build_programs)
       programs: ${{ steps.detect.outputs.programs }}
       # everything, as main's full run: every system on every box and the
       # two compared, the installer built twice on each
       full: ${{ steps.boxes.outputs.full }}
+      # fmt, and the crates the change reaches (attributes for nix build)
       rust: ${{ steps.detect.outputs.rust }}
+      rust_crates: ${{ steps.detect.outputs.rust_crates }}
       vm: ${{ steps.detect.outputs.vm }}
       app: ${{ steps.detect.outputs.app }}
       # the VM tests, the browser and Worker checks and the box installer
-      # the change can reach, by what each one's evaluation reads
-      # (nix/tests/ci-select)
+      # the change reaches, by what each one tests (nix/tests/ci-select)
       vm_tests: ${{ steps.detect.outputs.vm_tests }}
       worker_tests: ${{ steps.detect.outputs.worker_tests }}
       page_tests: ${{ steps.detect.outputs.page_tests }}
       site_checks: ${{ steps.detect.outputs.site_checks }}
       installer: ${{ steps.detect.outputs.installer }}
+      # the systems a pull request builds, each once ("none" for none)
+      pr_hosts: ${{ steps.detect.outputs.pr_hosts }}
       draft: ${{ steps.detect.outputs.draft }}
       proven: ${{ steps.detect.outputs.proven }}
       # every box's system is built (hosts), on every box that runs CI
@@ -104,17 +110,15 @@ jobs:
           echo "flake_check_on=$on" >> "$GITHUB_OUTPUT"
           echo "flake check on: $on (fits: $fits)"
 
-      # Allowlists, not denylists: a path nothing claims runs everything.
-      # Docs alone run style and lint. The VM tests, the worker_tests,
-      # page_tests and site_checks checks and the box installer's drive are
-      # chosen one by one, by what each one's evaluation reads (covers.json,
-      # traced) and what its .nix files name (read here); the other jobs by
-      # the path lists in ciselect.py. A wrong list is caught by
-      # the boxes, which build the whole system from main at every release
-      # and roll back what does not come up. A component whose insides alone
-      # changed and whose face held (its routes, wire types, flags; read
-      # from both ends, nix/tests/ci-select/interfaces.py) runs its own
-      # checks, not every test that reads it; main's full run runs them all.
+      # Each job runs when the change touches what it tests (its set in
+      # nix/tests/ci-select/tests-this.json, read from the test). Docs alone
+      # run style and lint. A component whose insides alone changed and
+      # whose face held (its routes, wire types, flags; read from both
+      # ends, nix/tests/ci-select/interfaces.py) runs its own checks, not
+      # every test that reads it. flake.lock runs every job. A job that has
+      # never caught a real failure (main-only.json) and every box's system
+      # on every box run in main's full run alone, which publish requires
+      # (nix/tests/ci-select/plan.py).
       - name: what changed?
         id: detect
         env:
@@ -148,7 +152,7 @@ jobs:
 
   flake_check:
     needs: files_modified
-    if: ${{ needs.files_modified.outputs.eval == 'true' }}
+    if: ${{ needs.files_modified.outputs.flake == 'true' }}
     runs-on: ${{ needs.files_modified.outputs.flake_check_on }}
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
@@ -160,18 +164,25 @@ jobs:
       # from the flake, so a new one cannot be left off, and the workspace
       # checks' own tree
       - name: instantiate the packages
+        if: ${{ needs.files_modified.outputs.systems_eval == 'true' }}
         run: |
           nix path-info --derivation $(nix eval --raw .#packages.x86_64-linux --apply 'ps: builtins.concatStringsSep " " (map (n: ".#" + n) (builtins.attrNames ps))') .#checks.x86_64-linux.fmt >/dev/null
-      # Every check, package, dev shell and box system evaluated, each in a
-      # worker of its own that starts afresh past 1.5G (nix-eval-jobs,
-      # legacyPackages ciEval): one evaluator for all of it grew to 10.5G
-      # and took node2 out of memory. A worker for every 16G the box has,
-      # one to four: about 3G at one worker, 5G at two.
-      - name: evaluate everything
+      # Every check and box system evaluated (and in main's full run every
+      # package and dev shell too), each in a worker of its own that starts
+      # afresh past 1.5G (nix-eval-jobs, legacyPackages ciEval and
+      # ciEvalPR): one evaluator for all of it grew to 10.5G and took node2
+      # out of memory. A worker for every 16G the box has, one to four:
+      # about 3G at one worker, 5G at two. A pull request evaluates every
+      # check, not only the ones it runs: a module change that breaks a
+      # test box's evaluation is found here (PR 13).
+      - name: evaluate every check and every box's system
+        if: ${{ needs.files_modified.outputs.systems_eval == 'true' }}
+        env:
+          WHAT: ${{ needs.files_modified.outputs.full == 'true' && 'ciEval' || 'ciEvalPR' }}
         run: |
           kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
           workers=$(( kb / 16777216 )); [ "$workers" -ge 1 ] || workers=1; [ "$workers" -le 4 ] || workers=4
-          nix shell .#ci-tools -c nix-eval-jobs --flake .#legacyPackages.x86_64-linux.ciEval --force-recurse \
+          nix shell .#ci-tools -c nix-eval-jobs --flake ".#legacyPackages.x86_64-linux.$WHAT" --force-recurse \
             --workers "$workers" --max-memory-size 1536 > "$RUNNER_TEMP/eval.jsonl"
           nix shell .#ci-tools -c python3 - "$RUNNER_TEMP/eval.jsonl" <<'PY'
           import json, sys
@@ -190,14 +201,23 @@ jobs:
       # a date can only be read at run time: a nix check is cached and
       # never looks at the clock again
       - name: security.txt has not lapsed
+        if: ${{ needs.files_modified.outputs.systems_eval == 'true' }}
         run: |
           expires=$(nix eval --raw .#nixosConfigurations.node1.config.dd.securityTxtExpires)
           left=$(( ( $(date -u -d "$expires" +%s) - $(date -u +%s) ) / 86400 ))
           echo "security.txt expires $expires, $left days from now"
           [ "$left" -ge 60 ] || { echo "move dd.securityTxtExpires on (nix/modules/gate/security-txt.nix), at most a year out"; exit 1; }
           [ "$left" -le 366 ] || { echo "RFC 9116 wants Expires under a year away"; exit 1; }
-      - name: plaintext labels, box list, and this file
-        run: nix build --no-link .#legacyPackages.x86_64-linux.evalChecks
+      # the evaluation-only checks the change reaches (plaintext labels, box
+      # list, this file, the downloads' recipes ...): all of them in main's
+      # full run
+      - name: the evaluation-only checks
+        if: ${{ needs.files_modified.outputs.eval_checks != '' }}
+        env:
+          CHECKS: ${{ needs.files_modified.outputs.eval_checks }}
+        run: |
+          # shellcheck disable=SC2086 # one attribute a word
+          nix build --no-link $CHECKS
       - uses: ./.forgejo/actions/stop-run
         if: failure()
 
@@ -208,7 +228,7 @@ jobs:
   # flake_check (4-9 min, 1.5-1.8G on node1), on a box with that room.
   inputs_kept:
     needs: files_modified
-    if: ${{ needs.files_modified.outputs.eval == 'true' }}
+    if: ${{ needs.files_modified.outputs.keep == 'true' }}
     runs-on: ${{ needs.files_modified.outputs.flake_check_on }}
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
@@ -224,7 +244,7 @@ jobs:
   # Seconds each, and a cache hit when nothing they read changed.
   worker_tests:
     needs: files_modified
-    if: ${{ needs.files_modified.outputs.nix == 'true' && needs.files_modified.outputs.worker_tests != '["none"]' }}
+    if: ${{ needs.files_modified.outputs.worker_tests != '["none"]' }}
     runs-on: nix
     strategy:
       fail-fast: false
@@ -246,7 +266,7 @@ jobs:
   # home tile staying in its tab (same-tab).
   page_tests:
     needs: files_modified
-    if: ${{ needs.files_modified.outputs.nix == 'true' && needs.files_modified.outputs.page_tests != '["none"]' }}
+    if: ${{ needs.files_modified.outputs.page_tests != '["none"]' }}
     runs-on: nix
     strategy:
       fail-fast: false
@@ -268,7 +288,7 @@ jobs:
   # accessibility, speed, links (docs/dev/ci.md, The site checks).
   site_checks:
     needs: files_modified
-    if: ${{ needs.files_modified.outputs.nix == 'true' && needs.files_modified.outputs.site_checks != '["none"]' }}
+    if: ${{ needs.files_modified.outputs.site_checks != '["none"]' }}
     runs-on: nix
     strategy:
       fail-fast: false
@@ -320,9 +340,11 @@ jobs:
   # this box's own daemon and the check takes seconds instead of
   # rebuilding after the merge. Each records what it built under its own
   # name; systems_agree holds the two builders of a system to one store
-  # path. A pull request's run builds none of them: main's full run does,
-  # before `dd release publish` will sign the commit (a pull request whose
-  # change breaks a system build is caught there, before any release).
+  # path. A pull request's run builds only the systems its change reaches
+  # and that have caught something before (the home controller's), each
+  # once on any runner; main's full run builds them all, before `dd release
+  # publish` will sign the commit (a pull request whose change breaks a
+  # box's system build is caught there, before any release).
   # Always started, its steps skipped when there is nothing to build: a
   # whole matrix job skipped with runs-on from its matrix left ci_ok
   # blocked forever on the forge (run 857, 2026-10-24).
@@ -333,18 +355,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        host: ${{ fromJSON(needs.files_modified.outputs.hosts) }}
+        host: ${{ fromJSON(needs.files_modified.outputs.full == 'true' && needs.files_modified.outputs.hosts || needs.files_modified.outputs.pr_hosts) }}
         on: ${{ fromJSON(needs.files_modified.outputs.build_on) }}
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
-        if: ${{ needs.files_modified.outputs.full == 'true' }}
+        if: ${{ matrix.host != 'none' }}
       # kept from garbage collection, the newest of each system, until the
       # next run replaces it: a box's weekly collection otherwise takes the
       # other box's system with it, and the next run builds it all again
       # (node2 compiled node1's Wine, which no public cache has, for half
       # an hour)
       - name: build ${{ matrix.host }} on ${{ matrix.on }}
-        if: ${{ needs.files_modified.outputs.full == 'true' }}
+        if: ${{ matrix.host != 'none' }}
         run: |
           mkdir -p "$HOME/ci-roots"
           nix build --print-out-paths --out-link "$HOME/ci-roots/${{ matrix.host }}" \
@@ -352,7 +374,7 @@ jobs:
       # what it was built from, kept through the box's GC (keep-inputs.sh):
       # the home controller's holds the aarch64 cross rustc
       - name: keep what it was built from
-        if: ${{ needs.files_modified.outputs.full == 'true' }}
+        if: ${{ matrix.host != 'none' }}
         run: .forgejo/checks/keep-inputs.sh host-${{ matrix.host }} "$RUNNER_TEMP/toplevel"
       # the token on stdin, not curl's command line, which any process on
       # the box can read while it runs
@@ -437,7 +459,7 @@ jobs:
   # one job per test, so they spread over every runner box and run at once
   vm_tests:
     needs: [files_modified, build_programs]
-    if: ${{ needs.files_modified.outputs.nix == 'true' && needs.files_modified.outputs.vm == 'true' }}
+    if: ${{ needs.files_modified.outputs.vm == 'true' }}
     runs-on: nix
     strategy:
       fail-fast: false
@@ -506,18 +528,24 @@ jobs:
   # ---- rust: everything in servers/ and client/ formatted, lint-clean, and
   # the tests pass - the end-to-end ones included, which run boxes
   # in-process and try to break them. Each is a nix derivation on the same
-  # compiled artifacts as the binaries (flake.nix: checks fmt, clippy,
-  # tests), cached by content: a run whose rust did not change gets last
-  # time's answer in seconds. One job: clippy's test build of a crate is
-  # the one the tests run (flake.nix crateTest), so it compiles once.
+  # compiled artifacts as the binaries (flake.nix: checks fmt, and each
+  # crate's lint and tests, rustChecks), cached by content: a run whose
+  # rust did not change gets last time's answer in seconds. A pull request
+  # builds the crates its change reaches (their sets in tests-this.json),
+  # main's full run every crate. One job: clippy's test build of a crate
+  # is the one the tests run (flake.nix crateTest), so it compiles once.
   rust:
     needs: files_modified
     if: ${{ needs.files_modified.outputs.rust == 'true' }}
     runs-on: nix
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
-      - name: fmt, clippy and cargo test (unit tests + e2e gates on localhost; app excluded)
-        run: nix build --no-link -L .#checks.x86_64-linux.fmt .#checks.x86_64-linux.clippy .#checks.x86_64-linux.tests --print-out-paths >> "$RUNNER_TEMP/built"
+      - name: fmt, and each chosen crate's clippy and cargo test (unit tests + e2e gates on localhost; app excluded)
+        env:
+          CRATES: ${{ needs.files_modified.outputs.rust_crates }}
+        run: |
+          # shellcheck disable=SC2086 # one attribute a word
+          nix build --no-link -L .#checks.x86_64-linux.fmt $CRATES --print-out-paths >> "$RUNNER_TEMP/built"
       # what these were built from, kept through the box's GC (keep-inputs.sh)
       - name: keep what it was built from
         run: .forgejo/checks/keep-inputs.sh rust "$RUNNER_TEMP/built"
@@ -525,8 +553,9 @@ jobs:
         if: failure()
 
   # The app on its own: its dependency tree (tauri, webkit) is most of
-  # any compile, so the workspace checks leave it out and this runs only
-  # when the app or what it builds on changed. Its downloads are built
+  # any compile, so the workspace checks leave it out. It has never caught
+  # a real failure on a pull request (main-only.json): main's full run
+  # alone runs it. Its downloads are built
   # after a release, not here: two boxes build them when one changes the
   # app (dd release app-next, docs/dev/app-release.md).
   app_checks:
@@ -536,9 +565,10 @@ jobs:
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
       # its lint, its tests, and its network engine's vet and tests: one
-      # job, on the app's own cached dependency build
+      # job, on the app's own cached dependency build. The downloads'
+      # recipes are evaluated by flake_check (app-release)
       - name: the app's lint and tests, and its engine's
-        run: nix build --no-link -L .#checks.x86_64-linux.clippy-app .#checks.x86_64-linux.tests-app .#checks.x86_64-linux.net-check .#legacyPackages.x86_64-linux.appReleaseEvaluates --print-out-paths >> "$RUNNER_TEMP/built"
+        run: nix build --no-link -L .#checks.x86_64-linux.clippy-app .#checks.x86_64-linux.tests-app .#checks.x86_64-linux.net-check --print-out-paths >> "$RUNNER_TEMP/built"
       # what these were built from, kept through the box's GC (keep-inputs.sh)
       - name: keep what it was built from
         run: .forgejo/checks/keep-inputs.sh app_checks "$RUNNER_TEMP/built"

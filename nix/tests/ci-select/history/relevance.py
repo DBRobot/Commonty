@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-# Which job-minutes in the history could have caught anything, and what a
-# chooser by relevance would have run instead. Reads history.py's rows,
-# realfail.py's real failures, changes.py's changed files, phases.py's VM
-# phases, score.py's two choosers, and tests-this.json (each job's code it
-# specifically exercises).
+# Which job-minutes in the history could have caught anything, job by job,
+# and what a chooser by relevance would have run instead. Reads
+# history.py's rows, realfail.py's real failures, changes.py's changed
+# files, phases.py's VM phases, and tests-this.json (each job's code it
+# specifically exercises). replay.py is the selector's own replay.
 #
 #   relevance.py DIR tests-this.json > relevance.json
 #

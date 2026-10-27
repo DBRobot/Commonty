@@ -1416,6 +1416,24 @@
               path = crateTest n;
             }) testedCrates
           );
+          # one crate's lint and tests, the same builds as clippy's and
+          # tests' above: a pull request builds the crates its change
+          # reaches (nix/tests/ci-select/plan.py), main's full run them all
+          crateChecks = pkgs.lib.genAttrs testedCrates (
+            n:
+            pkgs.linkFarm "rust-${n}" (
+              pkgs.lib.imap0 (i: path: {
+                name = "lint${pkgs.lib.optionalString (i == 0) "-tests"}";
+                inherit path;
+              }) (crateLint n)
+              ++ [
+                {
+                  name = "tests";
+                  path = crateTest n;
+                }
+              ]
+            )
+          );
         };
       # One box per entry in fleet/boxes.json: its hardware file plus its
       # roles. What a box runs is data, not a hand-written import list, and
@@ -1762,6 +1780,15 @@
           devShells = self.devShells.${system};
           systems = nixpkgs.lib.mapAttrs (_: c: c.config.system.build.toplevel) self.nixosConfigurations;
         };
+        # what a pull request's flake_check evaluates: every check and every
+        # box's system, which is where a change fails to evaluate; the
+        # packages and dev shells are main's full run's (no change in the
+        # history failed there alone)
+        ciEvalPR = {
+          inherit (self.legacyPackages.${system}.ciEval) checks systems;
+        };
+        # each workspace crate's lint and tests, by its package name
+        rustChecks = rust.crateChecks;
         # which runner boxes can take each of the runner's variants, from its
         # needs and the boxes' reports: CI places its jobs by this
         ciRunners = import ./nix/lib/ci-runners.nix { lib = nixpkgs.lib; };
@@ -1838,7 +1865,7 @@
             tests
             ;
           ci = import ./nix/tests/ci.nix (args // { inherit vmTests; });
-          # the test chooser, on made-up changes against covers.json
+          # the selector, on made-up changes against tests-this.json
           ci-select = import ./nix/tests/ci-select args;
           # no member's figures in the fleet's metrics: usage is heartbeat
           # lines, never a Prometheus sample (storage/usage.nix)

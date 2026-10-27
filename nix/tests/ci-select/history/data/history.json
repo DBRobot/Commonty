@@ -1,76 +1,76 @@
 {
- "runs": 860,
- "jobs": 17327,
- "job_minutes": 28224,
+ "runs": 905,
+ "jobs": 19502,
+ "job_minutes": 39250,
  "by_class": {
   "needed": {
-   "minutes": 20278,
-   "jobs": 6578,
-   "share": 0.718
+   "minutes": 22892,
+   "jobs": 7395,
+   "share": 0.583
+  },
+  "flake": {
+   "minutes": 4597,
+   "jobs": 39,
+   "share": 0.117
+  },
+  "infra": {
+   "minutes": 3099,
+   "jobs": 61,
+   "share": 0.079
   },
   "determined": {
-   "minutes": 2263,
-   "jobs": 830,
-   "share": 0.08
+   "minutes": 2677,
+   "jobs": 1013,
+   "share": 0.068
   },
   "stopped": {
-   "minutes": 1793,
-   "jobs": 569,
-   "share": 0.064
+   "minutes": 2035,
+   "jobs": 634,
+   "share": 0.052
   },
   "noop": {
-   "minutes": 1763,
-   "jobs": 6967,
-   "share": 0.062
+   "minutes": 2015,
+   "jobs": 7825,
+   "share": 0.051
   },
   "superseded": {
    "minutes": 892,
    "jobs": 542,
-   "share": 0.032
+   "share": 0.023
   },
   "real": {
-   "minutes": 707,
-   "jobs": 134,
-   "share": 0.025
+   "minutes": 774,
+   "jobs": 143,
+   "share": 0.02
   },
   "overhead": {
-   "minutes": 208,
-   "jobs": 1626,
+   "minutes": 270,
+   "jobs": 1850,
    "share": 0.007
-  },
-  "infra": {
-   "minutes": 192,
-   "jobs": 55,
-   "share": 0.007
-  },
-  "flake": {
-   "minutes": 130,
-   "jobs": 26,
-   "share": 0.005
   }
  },
  "by_kind": {
   "agree": {
-   "overhead": 3,
+   "overhead": 4,
    "real": 0,
    "superseded": 0
   },
   "app": {
-   "needed": 1479,
+   "needed": 1527,
    "stopped": 222,
-   "noop": 35,
+   "noop": 44,
    "superseded": 21,
    "infra": 0
   },
   "browser": {
-   "needed": 995,
-   "noop": 103,
-   "stopped": 77,
-   "determined": 74,
-   "real": 32,
-   "superseded": 18,
-   "flake": 0,
-   "infra": 0
+   "infra": 1455,
+   "needed": 1333,
+   "noop": 152,
+   "determined": 133,
+   "stopped": 89,
+   "real": 56,
+   "flake": 44,
+   "superseded": 18
   },
   "ci_ok": {
    "overhead": 1,
@@ -78,95 +78,98 @@
    "infra": 0
   },
   "files_modified": {
-   "overhead": 43,
+   "overhead": 53,
    "real": 19,
    "superseded": 14,
    "infra": 0,
    "stopped": 0
   },
   "flake": {
-   "needed": 1900,
-   "real": 145,
-   "stopped": 111,
+   "needed": 2165,
+   "flake": 1467,
+   "real": 151,
+   "stopped": 119,
    "superseded": 71,
    "infra": 15
   },
   "installer": {
-   "needed": 214,
-   "stopped": 49,
+   "needed": 475,
+   "stopped": 112,
+   "noop": 23,
    "infra": 23,
    "real": 7,
-   "noop": 0,
    "superseded": 0
   },
   "keep": {
-   "overhead": 67,
-   "superseded": 1,
-   "stopped": 1
+   "flake": 1460,
+   "overhead": 105,
+   "stopped": 4,
+   "superseded": 1
   },
   "lint": {
-   "overhead": 47,
+   "overhead": 53,
    "infra": 1,
    "superseded": 0,
    "real": 0,
    "stopped": 0
   },
   "programs": {
-   "needed": 1635,
-   "stopped": 177,
+   "needed": 1655,
+   "stopped": 178,
    "superseded": 174,
-   "noop": 125,
+   "noop": 144,
    "real": 74,
    "infra": 7
   },
   "rust": {
-   "needed": 2571,
-   "stopped": 420,
+   "needed": 2725,
+   "stopped": 432,
    "superseded": 267,
-   "noop": 251,
-   "real": 63,
+   "noop": 255,
+   "real": 64,
    "infra": 62,
    "flake": 17
   },
   "style": {
-   "overhead": 47,
+   "overhead": 54,
    "real": 19,
    "superseded": 1,
    "stopped": 0
   },
   "systems": {
-   "needed": 2487,
-   "noop": 215,
-   "stopped": 161,
+   "needed": 2693,
+   "infra": 1486,
+   "flake": 1453,
+   "noop": 273,
+   "stopped": 169,
    "superseded": 79,
-   "infra": 35,
    "real": 21
   },
   "vm": {
-   "needed": 8997,
-   "determined": 2189,
-   "noop": 1033,
-   "stopped": 574,
-   "real": 327,
+   "needed": 10319,
+   "determined": 2544,
+   "noop": 1124,
+   "stopped": 710,
+   "real": 363,
    "superseded": 247,
-   "flake": 113,
-   "infra": 48
+   "flake": 157,
+   "infra": 49
   }
  },
- "run_wall_minutes": 10923,
+ "run_wall_minutes": 13512,
  "superseded_run_wall_minutes": 1222,
  "real_failures": [
   [
    "vm:test",
-   32
+   35
   ],
   [
    "flake:other",
-   15
+   16
   ],
   [
    "vm:timeout",
-   13
+   14
   ],
   [
    "rust:build",
@@ -178,15 +181,15 @@
   ],
   [
    "vm:other",
-   7
+   8
+  ],
+  [
+   "browser:test",
+   6
   ],
   [
    "style:other",
    6
-  ],
-  [
-   "browser:test",
-   5
   ],
   [
    "rust:other",
@@ -205,6 +208,10 @@
    3
   ],
   [
+   "rust:test",
+   3
+  ],
+  [
    "systems:other",
    3
   ],
@@ -217,15 +224,15 @@
    2
   ],
   [
-   "rust:test",
-   2
-  ],
-  [
    "agree:other",
    2
   ],
   [
    "flake:test",
+   2
+  ],
+  [
+   "browser:timeout",
    2
   ],
   [
@@ -259,10 +266,6 @@
   [
    "rust:timeout",
    1
-  ],
-  [
-   "browser:timeout",
-   1
   ]
  ],
  "flakes_by_check": [
@@ -287,6 +290,26 @@
    2
   ],
   [
+   "vm(runner-restart)",
+   2
+  ],
+  [
+   "browser(site-speed)",
+   2
+  ],
+  [
+   "browser(site-links)",
+   2
+  ],
+  [
+   "flake()",
+   2
+  ],
+  [
+   "keep()",
+   2
+  ],
+  [
    "vm(games)",
    1
   ],
@@ -299,15 +322,11 @@
    1
   ],
   [
-   "vm(runner-restart)",
-   1
-  ],
-  [
    "vm(backup)",
    1
   ],
   [
-   "browser(site-speed)",
+   "vm(adblock)",
    1
   ]
  ],
@@ -326,7 +345,7 @@
   ],
   [
    "network@node2",
-   2
+   8
   ],
   [
    "oom@node1",

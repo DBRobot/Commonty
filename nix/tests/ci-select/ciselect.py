@@ -1,104 +1,25 @@
 #!/usr/bin/env python3
-# Which checks a change can reach (docs/dev/ci.md, Choosing the tests).
+# Which jobs a pull request's run runs (docs/dev/ci.md, Choosing the
+# tests): the files it changes, read from git at both ends, handed to
+# plan.py, and its answer written for the workflow.
 #
-# A check's derivation is a function of the files its evaluation reads, the
-# directories it lists and the paths it asks after. covers.json holds that
-# for every VM test, every browser and Worker check (worker_tests,
-# page_tests, site_checks) and the box installer's drive, traced from a
-# real evaluation (strace of `nix eval`, from a store copy of the tree, in
-# a fresh cache so nothing is skipped as already copied). To it the chooser
-# adds, at both ends of the change, every file the check's .nix files name
-# (static_refs), so an import a pull request adds counts before covers.json
-# is traced again. A change that touches none of a check's paths leaves its
-# derivation as it was, and the check is skipped.
-#
-#   select   files_modified: the jobs and tests a pull request needs
-#   trace    write covers.json again (all of it, or --only some checks);
-#            about a minute a check, so run it on a box
-#   matches  does this script read the flake's test list right (ci.nix)
-#   groups   the browser and Worker jobs and their checks (ci.nix)
+#   select BASE HEAD   files_modified: what this pull request runs
+#   select --everything | --nothing
+#                      main's full run; a draft or a commit already passed
+#   matches FILE       the registry's VM tests (ci.nix)
+#   groups             the browser and Worker jobs (ci.nix)
 import json
 import os
-import posixpath
 import re
-import shutil
 import subprocess
 import sys
-import tempfile
-from concurrent.futures import ThreadPoolExecutor
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import interfaces  # noqa: E402
+import tomllib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-COVERS = "nix/tests/ci-select/covers.json"
-# every test by name (vm, files, eval): a change that only adds or removes
-# names there is a new test, never a change to CI (registered)
-REGISTRY = "nix/tests/registry.nix"
-SYSTEM = "x86_64-linux"
+sys.path.insert(0, HERE)
+import interfaces  # noqa: E402
+import plan  # noqa: E402
 
-# The checks run by a browser or wrangler against fakes, not VMs, by the
-# workflow job that runs them (each job's matrix is its list, chosen check
-# by check like the VM tests)
-GROUPS = {
-    # the Cloudflare Workers under wrangler: mail, DNS, sign-in (the id
-    # Worker with the gate), the control plane's relay and validators
-    "worker_tests": [
-        "mail-worker",
-        "dns-worker",
-        "sso",
-        "control",
-        "control-upgrade",
-    ],
-    # the Mail, Files and Movies & TV pages as the app serves them, and every bar link
-    # and home tile staying in its tab
-    "page_tests": ["mail-page", "files-page", "media-page", "same-tab"],
-    # the site as a browser meets it, through node1's nginx and the gate
-    "site_checks": [
-        "site-headers",
-        "site-roles",
-        "site-a11y",
-        "site-speed",
-        "site-links",
-    ],
-}
-BROWSER = [t for ts in GROUPS.values() for t in ts]
-# Traced like a check but not one: name -> (the attribute evaluated, the
-# .nix file its static references start from). The box installer's drive,
-# for build_installer and installer_agrees.
-TARGETS = {
-    "installer": (f"installers.{SYSTEM}.box", "nix/installer/image.nix"),
-}
-
-# Under everything: a change here can move any check, so all of them run.
-FOUNDATION = re.compile(
-    r"^(flake\.(nix|lock)|nix/lib/|\.forgejo/|Cargo\.(toml|lock|nix)"
-    r"|crate-hashes\.json|client/(identity|auth)/|nix/tests/registry\.nix$"
-    # the chooser and its face readers; covers.json and minutes.json are
-    # its data, read check by check
-    r"|nix/tests/ci-select/(?!covers\.json$|minutes\.json$|[^/]*\.md$))"
-)
-# Read by no build: the docs (the gate serves them as they are, and no test
-# opens one), the notes at the top, the agents' skills, the GitHub workflow
-# (lint reads it). A docs file a .nix or .rs names by path is not one.
-DOCS = re.compile(r"^(docs/|\.claude/|\.github/|[^/]+\.md$|LICENSE$)")
-# The coarse switches, as before, for the jobs that are not chosen test by
-# test: what each job's builds can read. docs/ left nix's list: the docs
-# reach a box only in its pages, which the release builds.
-NIX = re.compile(
-    r"^(flake\.nix|flake\.lock|nix/|fleet/|secrets/|data/|servers/|client/"
-    r"|Cargo\.(toml|lock|nix)|crate-hashes\.json|\.forgejo/)"
-)
-RUST = re.compile(
-    r"^(servers/|client/|Cargo\.(toml|lock|nix)|crate-hashes\.json|flake\.(nix|lock)|\.forgejo/)"
-)
-APP = re.compile(
-    r"^(app/|client/|Cargo\.(toml|lock|nix)|crate-hashes\.json|flake\.(nix|lock)|nix/app-release/|\.forgejo/)"
-)
-# A program's own source: nix copies it into a build and never reads it,
-# so a change made of these alone cannot break the flake's evaluation, and
-# flake_check and inputs_kept have nothing to say about it.
-SOURCE_ONLY = re.compile(r"^(servers|client|app)/.+\.(rs|go)$")
 # What each test usually takes, in minutes, from the forge's history
 # (minutes.json): the longest are handed out first, so one long test never
 # starts last and holds the run open alone. A test not there counts as long.
@@ -109,53 +30,25 @@ def longest_first(tests, minutes):
     return sorted(tests, key=lambda t: (-minutes.get(t, 99), t))
 
 
-# Directories whose files are each their own thing (a test, a box module, a
-# fleet list): a read there covers that file alone, not its neighbours.
-# Anywhere else a read or a listing covers the whole directory, so a new
-# file beside the ones a check reads is already covered.
-FILE_LEVEL = {"", "nix", "nix/tests", "nix/modules/box", "nix/roles", "fleet"}
-
-
 def git(*args, cwd=None):
     return subprocess.run(
         ["git", *args], check=True, capture_output=True, text=True, cwd=cwd
     ).stdout
 
 
-def vm_tests(registry_text):
-    # (flake.nix held the list as vmTests before the registry: history reads it)
-    m = re.search(r"\n\s*(?:vm|vmTests) = \[(.*?)\];", registry_text, re.S)
-    return re.findall(r'"([^"]+)"', m.group(1)) if m else None
+def show(rev, path, cwd=None):
+    r = subprocess.run(["git", "show", f"{rev}:{path}"], capture_output=True, cwd=cwd)
+    return r.stdout.decode(errors="replace") if r.returncode == 0 else ""
 
 
-def registry_lists(text):
-    """{list: [names]} of the registry, and the text with its names and
-    comments taken out: what is left is the registry's own shape"""
-    lists = {
-        m.group(1): re.findall(r'"([^"]+)"', m.group(2))
-        for m in re.finditer(r"\n\s*(\w+) = \[(.*?)\];", text, re.S)
-    }
-    shape = "\n".join(
-        line
-        for line in text.split("\n")
-        if not re.fullmatch(r'\s*("[^"]+"|#.*)?\s*', line)
-    )
-    return lists, shape
-
-
-def registered(base_text, head_text):
-    """the names a change to the registry adds, when adding and removing
-    names (and their comments) is all it does; None when it does more"""
-    (b, bshape), (h, hshape) = registry_lists(base_text), registry_lists(head_text)
-    if bshape != hshape or set(b) != set(h):
-        return None
-    return sorted({n for k in h for n in h[k]} - {n for k in b for n in b[k]})
-
-
-def traced_names(flake_text):
-    # every name chosen one by one: the VM tests, the browser and Worker
-    # checks, and the targets that are not checks
-    return (vm_tests(flake_text) or []) + BROWSER + list(TARGETS)
+def name_status(base, head, cwd=None):
+    out = git("diff", "--name-status", "--no-renames", "-z", base, head, cwd=cwd)
+    parts = out.split("\0")
+    changes = []
+    for i in range(0, len(parts) - 1, 2):
+        s, p = parts[i][0], parts[i + 1]
+        changes.append(("M" if s in "MT" else s, p))
+    return changes
 
 
 def named_docs(read):
@@ -174,649 +67,168 @@ def named_docs(read):
     return named
 
 
-# ---- covers.json
-
-
-def load_covers(text):
-    c = json.loads(text) if text else {}
-    for k in ("dirs", "files", "listed"):
-        c[k] = {p: set(v) for p, v in c.get(k, {}).items()}
-    c["checks"] = set(c.get("checks", []))
-    return c
-
-
-def dump_covers(c, rev):
-    def inv(m):
-        return {p: sorted(m[p]) for p in sorted(m) if m[p]}
-
-    return (
-        json.dumps(
-            {
-                "_": "made by nix/tests/ci-select/ciselect.py trace",
-                "rev": rev,
-                "checks": sorted(c["checks"]),
-                "dirs": inv(c["dirs"]),
-                "files": inv(c["files"]),
-                "listed": inv(c["listed"]),
-            },
-            indent=1,
-        )
-        + "\n"
-    )
-
-
-def of_check(c, t):
-    # one check's own entries, for comparing two covers.json
-    pick = lambda m: sorted(p for p, ts in m.items() if t in ts)  # noqa: E731
-    return (pick(c["dirs"]), pick(c["files"]), pick(c["listed"]))
-
-
-def add_trace(c, t, tr):
-    for p in tr["reads"] | tr["stats"]:
-        d = posixpath.dirname(p)
-        if d in FILE_LEVEL:
-            c["files"].setdefault(p, set()).add(t)
-        else:
-            c["dirs"].setdefault(d, set()).add(t)
-    for d in tr["lists"]:
-        if d in FILE_LEVEL:
-            c["listed"].setdefault(d, set()).add(t)
-        else:
-            c["dirs"].setdefault(d, set()).add(t)
-    c["checks"].add(t)
-
-
-def missing(c, t, tr):
-    # what a trace read that covers.json does not give the check
-    out = []
-    for p in sorted(tr["reads"] | tr["stats"]):
-        d = posixpath.dirname(p)
-        ok = t in c["files"].get(p, ()) or (
-            d not in FILE_LEVEL and t in c["dirs"].get(d, ())
-        )
-        if not ok:
-            out.append(p)
-    for d in sorted(tr["lists"]):
-        m = c["listed"] if d in FILE_LEVEL else c["dirs"]
-        if t not in m.get(d, ()):
-            out.append(d + "/")
-    return out
-
-
-def touching(c, status, path, exists_before, exists_after):
-    # the checks one changed path can reach
-    d = posixpath.dirname(path)
-    hit = set(c["files"].get(path, ()))
-    if d not in FILE_LEVEL:
-        hit |= c["dirs"].get(d, set())
-    if status != "M":
-        # a name coming or going changes its directory's listing, and every
-        # directory above it that came or went with it
-        exists = exists_before if status == "A" else exists_after
-        a = d
-        while a and not exists(a):
-            a = posixpath.dirname(a)
-        for x in {d, a}:
-            hit |= c["listed"].get(x, set())
-            if x not in FILE_LEVEL:
-                hit |= c["dirs"].get(x, set())
-    return hit
-
-
-# ---- what a check's .nix files name, read without evaluating
-
-PATHLIT = re.compile(r"(?<![\w.])((?:\.\.?/)+[A-Za-z0-9_.${}/+-]*)")
-
-
-def static_refs(entry, read, isdir):
-    """Every file the .nix files reachable from `entry` name by a literal
-    path, followed through the .nix ones, and the directory of any path
-    built at evaluation (`./x/${name}.nix` names all of ./x). Cheap, and it
-    sees an import a pull request adds, which covers.json, traced before,
-    cannot. Returns (files, dirs)."""
-    files, dirs, todo = set(), set(), [entry]
-    while todo:
-        f = todo.pop()
-        if f in files:
-            continue
-        if not f.endswith(".nix"):
-            if not isdir(f):
-                files.add(f)
-            continue
-        text = read(f)
-        if text is None:
-            continue
-        files.add(f)
-        here = posixpath.dirname(f)
-        for m in PATHLIT.finditer(text):
-            lit = m.group(1).rstrip("};,)'\"")
-            dyn = "${" in lit
-            if dyn:
-                lit = lit[: lit.index("${")]
-                lit = lit[: lit.rfind("/") + 1] if "/" in lit else lit
-            q = posixpath.normpath(posixpath.join(here, lit))
-            if q.startswith(".."):
-                continue
-            if dyn or isdir(q):
-                dirs.add("" if q == "." else q)
-                if not dyn and read(q + "/default.nix") is not None:
-                    todo.append(q + "/default.nix")
-            else:
-                todo.append(q)
-    return files, dirs
-
-
-def add_static(c, checks, read, isdir):
-    # covers.json and what the checks' .nix files name now, together
-    c = {
-        k: {p: set(v) for p, v in c[k].items()} for k in ("dirs", "files", "listed")
-    } | {"checks": set(c["checks"])}
-    for t in checks:
-        entry = TARGETS[t][1] if t in TARGETS else f"nix/tests/{t}.nix"
-        if read(entry) is None:
-            entry = f"nix/tests/{t}/default.nix"
-        fs, ds = static_refs(entry, read, isdir)
-        if read(f"nix/tests/{t}.py") is not None:
-            fs.add(f"nix/tests/{t}.py")
-        for f in fs:
-            d = posixpath.dirname(f)
-            (
-                c["files"].setdefault(f, set())
-                if d in FILE_LEVEL
-                else c["dirs"].setdefault(d, set())
-            ).add(t)
-        for d in ds:
-            c["dirs"].setdefault(d, set()).add(t)
-            c["listed"].setdefault(d, set()).add(t)
-    return c
-
-
-# ---- select
-
-
-def crate_closure(roots, read):
-    # the crates a build compiles: its roots and their path dependencies,
-    # followed to the end (flake.nix crateClosure), from each Cargo.toml
-    import tomllib
-
-    seen, todo = [], list(roots)
-    while todo:
-        d = todo.pop()
-        if d in seen:
-            continue
-        seen.append(d)
+def crates(read):
+    """{crate path: package name} of the workspace (Cargo.toml), but the
+    app's, whose checks are app_checks'"""
+    try:
+        members = tomllib.loads(read("Cargo.toml"))["workspace"]["members"]
+    except (tomllib.TOMLDecodeError, KeyError, TypeError):
+        return {}
+    out = {}
+    for m in members:
         try:
-            m = tomllib.loads(read(d + "/Cargo.toml"))
-        except (tomllib.TOMLDecodeError, TypeError, OSError):
+            name = tomllib.loads(read(f"{m}/Cargo.toml"))["package"]["name"]
+        except (tomllib.TOMLDecodeError, KeyError, TypeError):
             continue
-        deps = {
-            **m.get("dependencies", {}),
-            **m.get("build-dependencies", {}),
-            **m.get("dev-dependencies", {}),
-        }
-        for v in deps.values():
-            if isinstance(v, dict) and "path" in v:
-                todo.append(posixpath.normpath(posixpath.join(d, v["path"])))
-    return seen
-
-
-# the app's crates (flake.nix sources.app): a change to any runs app_checks
-APP_ROOTS = ["app", "client/hubwriter"]
-
-
-def select(
-    changes,
-    covers_head,
-    covers_base,
-    flake_text,
-    docs_named,
-    exists,
-    app_dirs=(),
-    faces=None,
-    minutes=None,
-    registry=None,
-):
-    """changes: [(status, path)], status A/M/D (renames as a D and an A).
-    exists(rev, dir) -> bool, rev "base" or "head". faces: {component:
-    [differences]} for the components whose insides changed
-    (interfaces.stable); one with none kept its face. registry: the
-    registry's text at (base, head). Returns a dict."""
-    vms = vm_tests(flake_text) or []
-    traced = vms + BROWSER + list(TARGETS)
-    why = {}
-    out = {"docs_only": False, "all": False, "kept": [], "faces": faces or {}}
-    code = [(s, p) for s, p in changes if not (DOCS.match(p) and p not in docs_named)]
-    if changes and not code:
-        out.update(
-            docs_only=True,
-            nix=False,
-            eval=False,
-            programs=False,
-            rust=False,
-            app=False,
-            chosen=[],
-            why={},
-            vm_tests=[],
-            installer=False,
-            reason=None,
-            **{g: [] for g in GROUPS},
-        )
-        return out
-    # names added to the registry are new tests, which run as any check
-    # not traced yet does; the registry itself reaches nothing
-    added = None
-    if registry and any(p == REGISTRY for _, p in code):
-        added = registered(*registry)
-        if added is not None:
-            code = [c for c in code if c[1] != REGISTRY]
-            out["registered"] = added
-    # a component whose face held: its insides reach its own tests and its
-    # contract checks, and nothing that only reads it
-    kept = sorted(n for n, d in (faces or {}).items() if not d)
-    inside = [(s, p) for s, p in code if interfaces.inside_of(p) in kept]
-    whole = code
-    code = [c for c in code if c not in inside]
-    out["kept"] = kept
-    allr = None
-    for s, p in code:
-        if FOUNDATION.match(p):
-            allr = f"{p}: under everything"
-            break
-    c = covers_head
-    if allr is None and not vms:
-        allr = f"{REGISTRY}: no vm list to read"
-    unknown = []
-    chosen = set()
-    if allr is None:
-        for s, p in code:
-            hit = touching(
-                c, s, p, lambda d: exists("base", d), lambda d: exists("head", d)
-            )
-            hit |= touching(
-                covers_base,
-                s,
-                p,
-                lambda d: exists("base", d),
-                lambda d: exists("head", d),
-            )
-            hit &= set(traced)
-            for t in hit:
-                why.setdefault(t, p)
-            chosen |= hit
-            # claimed by a check that reads it or its directory, or by a
-            # job's path list; a listing above it alone does not claim it
-            # (a new directory at the top)
-            d = posixpath.dirname(p)
-            direct = any(
-                cv["files"].get(p) or (d not in FILE_LEVEL and cv["dirs"].get(d))
-                for cv in (c, covers_base)
-            )
-            claimed = (
-                direct or NIX.match(p) or RUST.match(p) or APP.match(p) or DOCS.match(p)
-            )
-            if not claimed:
-                unknown.append(p)
-        if unknown:
-            allr = f"{unknown[0]}: no check claims it"
-    if allr is None:
-        # a check covers.json does not know yet, or whose entries changed
-        for t in traced:
-            if t not in c["checks"]:
-                chosen.add(t)
-                why.setdefault(t, "not in covers.json yet")
-            elif of_check(c, t) != of_check(covers_base, t):
-                chosen.add(t)
-                why.setdefault(t, "its covers.json entries changed")
-    if allr is not None:
-        chosen = set(traced)
-        why = {t: allr for t in traced}
-    else:
-        for n in kept:
-            for t in interfaces.COMPONENTS[n]["checks"]:
-                if t in traced:
-                    chosen.add(t)
-                    why.setdefault(t, f"{n}'s own check (its face held)")
-    paths = [p for _, p in whole]
-    nix = (
-        any(NIX.match(p) or p in docs_named for p in paths)
-        or bool(chosen)
-        or allr is not None
-    )
-    vm = [t for t in vms if t in chosen]
-    out.update(
-        all=allr is not None,
-        nix=nix,
-        # the flake evaluated again, and its evaluation-only checks: not for
-        # a change to programs' source alone
-        eval=allr is not None
-        or bool(added)
-        or any(
-            not SOURCE_ONLY.match(p) and (NIX.match(p) or p in docs_named)
-            for p in paths
-        ),
-        rust=allr is not None
-        or any(RUST.match(p) for _, p in code)
-        or any("rust" in interfaces.COMPONENTS[n]["jobs"] for n in kept),
-        app=allr is not None
-        or any(
-            APP.match(p) or any(p.startswith(d + "/") for d in app_dirs) for p in paths
-        ),
-        chosen=sorted(chosen),
-        why=why,
-        reason=allr,
-    )
-    # the programs the VM tests carry, built once for them (build_programs);
-    # every box's system is main's full run's, not a pull request's
-    out["programs"] = bool(vm)
-    out["vm_tests"] = longest_first(vm, minutes or {})
-    for g, ts in GROUPS.items():
-        out[g] = [t for t in ts if t in chosen]
-    out["installer"] = "installer" in chosen
+        if m != "app":
+            out[m] = name
     return out
 
 
-def name_status(base, head, cwd=None):
-    out = git("diff", "--name-status", "--no-renames", "-z", base, head, cwd=cwd)
-    parts = out.split("\0")
-    changes = []
-    for i in range(0, len(parts) - 1, 2):
-        s, p = parts[i][0], parts[i + 1]
-        changes.append(("M" if s in "MT" else s, p))
-    return changes
-
-
-def dir_exists(rev, d, cwd=None):
-    if d == "":
-        return True
-    r = subprocess.run(
-        ["git", "cat-file", "-t", f"{rev}:{d}"], capture_output=True, text=True, cwd=cwd
+def hosts(read, sets):
+    boxes = json.loads(read("fleet/boxes.json") or "{}")
+    devices = json.loads(read("fleet/devices.json") or "{}")
+    return plan.host_keys(
+        [b for b in boxes if b != "_"], [d for d in devices if d != "_"], sets
     )
-    return r.returncode == 0 and r.stdout.strip() == "tree"
 
 
-def show(rev, path, cwd=None):
-    r = subprocess.run(["git", "show", f"{rev}:{path}"], capture_output=True, cwd=cwd)
-    return r.stdout.decode(errors="replace") if r.returncode == 0 else ""
-
-
-def at_rev(rev, cwd=None):
-    # read(path) and isdir(path) at a commit, for static_refs
-    blobs = set(git("ls-tree", "-r", "--name-only", rev, cwd=cwd).split("\n"))
-    trees = set(git("ls-tree", "-r", "-d", "--name-only", rev, cwd=cwd).split("\n"))
-    return (lambda f: show(rev, f, cwd) if f in blobs else None), (lambda d: d in trees)
-
-
-def covers_at(rev, checks, cwd=None, covers=None):
-    # covers.json as committed at rev, with what the checks' .nix files name
-    read, isdir = at_rev(rev, cwd)
-    c = load_covers(show(rev, COVERS, cwd)) if covers is None else covers
-    return add_static(c, checks, read, isdir)
+def registry(text):
+    return plan.registry_lists(text)[0]
 
 
 def select_revs(base, head, cwd=None):
     changes = name_status(base, head, cwd)
 
-    def read():
-        files = git("ls-tree", "-r", "--name-only", head, cwd=cwd).split("\n")
-        for f in files:
+    def read(f):
+        return show(head, f, cwd)
+
+    def every():
+        for f in git("ls-tree", "-r", "--name-only", head, cwd=cwd).split("\n"):
             if f.endswith((".nix", ".rs")):
                 yield f, show(head, f, cwd)
 
-    flake = show(head, REGISTRY, cwd)
-    checks = traced_names(flake)
-    minutes = json.loads(show(head, MINUTES, cwd) or "{}")
-    return select(
+    sets = plan.load_sets(read(plan.SETS))
+    reg = read(plan.REGISTRY)
+    return plan.plan(
         changes,
-        covers_at(head, checks, cwd),
-        covers_at(base, checks, cwd),
-        flake,
-        named_docs(read),
-        lambda which, d: dir_exists(base if which == "base" else head, d, cwd),
-        crate_closure(APP_ROOTS, lambda f: show(head, f, cwd)),
-        interfaces.stable(changes, base, head, cwd),
-        minutes,
-        (show(base, REGISTRY, cwd), flake),
+        sets,
+        registry(reg),
+        main_only=plan.load_main_only(read(plan.MAIN_ONLY)),
+        faces=interfaces.stable(changes, base, head, cwd),
+        docs_named=named_docs(every),
+        registry_base=(show(base, plan.REGISTRY, cwd), reg),
+        crates=crates(read),
+        hosts=hosts(read, sets),
     )
+
+
+def here(f):
+    return open(f).read() if os.path.exists(f) else ""
 
 
 def cmd_select(args):
-    if args[0] in ("--nothing", "--everything"):
-        # a draft or a commit already passed: nothing; not a pull request:
-        # everything, untraced
-        on = args[0] == "--everything"
-        minutes = json.load(open(MINUTES)) if os.path.exists(MINUTES) else {}
-        vms = longest_first(vm_tests(open(REGISTRY).read()) or [], minutes)
-        r = {
-            "docs_only": False,
-            "all": on,
-            "reason": "not a pull request" if on else None,
-            "nix": on,
-            "eval": on,
-            "programs": on,
-            "kept": [],
-            "faces": {},
-            "rust": on,
-            "app": on,
-            "chosen": [],
-            "why": {},
-            "vm_tests": vms if on else [],
-            "installer": on,
-            **{g: ts if on else [] for g, ts in GROUPS.items()},
-        }
+    if args[0] == "--nothing":
+        r = plan.nothing()
+    elif args[0] == "--everything":
+        r = plan.everything(registry(here(plan.REGISTRY)), crates(here))
     else:
         r = select_revs(args[0], args[1])
-    for n, d in r.get("faces", {}).items():
-        print(
-            f"{n}: {'face held: its own tests and contract checks' if not d else '; '.join(d)}"
-        )
+    minutes = json.loads(here(MINUTES) or "{}")
+    r["vm_tests"] = longest_first(r["vm_tests"], minutes)
+    for n, d in r["faces"].items():
+        print(f"{n}: {'face held: its own checks' if not d else '; '.join(d)}")
     if r["docs_only"]:
         print("docs only: style and lint, nothing else")
-    elif r["all"]:
-        print(f"everything: {r['reason']}")
-    for t in r.get("chosen", []):
-        print(f"  {t}: {r['why'][t]}")
+    if r["global"]:
+        print(f"everything: {r['global']}")
+    for k, w in sorted(r["why"].items()):
+        print(f"  {k}: {w}")
+    for k, w in sorted(r["main_only"].items()):
+        print(f"  {k}: main's full run alone ({w})")
+    for p in r["unclaimed"]:
+        print(f"  no job tests {p}")
     print(
-        f"nix: {r['nix']}  eval: {r['eval']}  programs: {r['programs']}  "
-        f"rust: {r['rust']}  app: {r['app']}  installer: {r['installer']}  "
-        f"vm tests: {len(r.get('vm_tests', []))}  "
-        + "  ".join(f"{g}: {len(r.get(g, []))}" for g in GROUPS)
+        f"flake: {r['flake']} (systems: {r['systems_eval']}, checks: "
+        f"{len(r['eval_checks'])})  keep: {r['keep']}  rust: {r['rust']} "
+        f"(crates: {len(r['rust_crates'])})  app: {r['app']}  programs: "
+        f"{r['programs']}  hosts: {len(r['hosts'])}  installer: {r['installer']}"
+        f"  vm tests: {len(r['vm_tests'])}  "
+        + "  ".join(f"{g}: {len(r[g])}" for g in plan.GROUPS)
     )
+    # every name goes into a nix attribute and a job's name: a name from
+    # the change's own registry or Cargo.toml is never more than one word
+    names = (
+        r["vm_tests"]
+        + r["eval_checks"]
+        + r["rust_crates"]
+        + r["hosts"]
+        + [t for g in plan.GROUPS for t in r[g]]
+    )
+    bad = [n for n in names if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", n)]
+    if bad:
+        print(f"not a check's name: {bad}", file=sys.stderr)
+        return 1
     gh = os.environ.get("GITHUB_OUTPUT")
     if gh:
         with open(gh, "a") as f:
-            for k in ("nix", "eval", "programs", "rust", "app", "installer"):
+            for k in (
+                "flake",
+                "systems_eval",
+                "keep",
+                "rust",
+                "app",
+                "programs",
+                "installer",
+            ):
                 f.write(f"{k}={'true' if r[k] else 'false'}\n")
+            f.write(f"vm={'true' if r['vm_tests'] else 'false'}\n")
+            # attributes for nix build, one line
+            f.write(
+                "eval_checks="
+                + " ".join(
+                    f".#checks.x86_64-linux.{c}"
+                    for c in r["eval_checks"]
+                    if c != plan.APP_EVAL
+                )
+                + (
+                    " .#legacyPackages.x86_64-linux.appReleaseEvaluates"
+                    if plan.APP_EVAL in r["eval_checks"]
+                    else ""
+                )
+                + "\n"
+            )
+            f.write(
+                "rust_crates="
+                + " ".join(
+                    f".#legacyPackages.x86_64-linux.rustChecks.{c}"
+                    for c in r["rust_crates"]
+                )
+                + "\n"
+            )
             # a matrix is never empty: the forge creates no job at all for
             # an empty one, and ci_ok, which needs it, then waits forever
             # (run 860, 2026-10-24). "none" stands for nothing chosen, and
             # each job's if skips on it
-            vm = r.get("vm_tests", [])
-            f.write(f"vm={'true' if vm else 'false'}\n")
-            f.write(f"vm_tests={json.dumps(vm or ['none'])}\n")
-            for g in GROUPS:
-                f.write(f"{g}={json.dumps(r.get(g, []) or ['none'])}\n")
+            f.write(f"vm_tests={json.dumps(r['vm_tests'] or ['none'])}\n")
+            f.write(f"pr_hosts={json.dumps(r['hosts'] or ['none'])}\n")
+            for g in plan.GROUPS:
+                f.write(f"{g}={json.dumps(r[g] or ['none'])}\n")
     return 0
-
-
-# ---- tracing
-
-
-def store_copy(rev, cwd=None):
-    # the tree at rev, as a flake from a store path: nix reads its files
-    # with plain opens (a git flake reads them from git's objects, where a
-    # trace cannot see which), and hashes nothing it does not use
-    tmp = tempfile.mkdtemp(prefix="ciselect-tree.")
-    try:
-        a = subprocess.Popen(["git", "archive", rev], stdout=subprocess.PIPE, cwd=cwd)
-        subprocess.run(["tar", "-x", "-C", tmp], stdin=a.stdout, check=True)
-        if a.wait() != 0:
-            raise SystemExit(f"git archive {rev} failed")
-        return subprocess.run(
-            ["nix", "store", "add", "--name", "source", tmp],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-    finally:
-        shutil.rmtree(tmp)
-
-
-FD = r"(?:AT_FDCWD|-?\d+)<([^>]*)>"
-CALL = re.compile(
-    r"^(openat2|openat|newfstatat|statx|faccessat2|faccessat)\("
-    + FD
-    + r', "((?:[^"\\]|\\.)*)"'
-)
-PCALL = re.compile(r'^(open|stat|lstat|access|readlink)\("((?:[^"\\]|\\.)*)"')
-DENTS = re.compile(r"^getdents64\(\d+<([^>]*)>")
-
-
-def parse_trace(files, root):
-    reads, stats, lists = set(), set(), set()
-    pre = root.rstrip("/") + "/"
-
-    def rel(p):
-        if p == root:
-            return ""
-        if p.startswith(pre):
-            return posixpath.normpath(p[len(pre) :])
-        return None
-
-    for fn in files:
-        for line in open(fn, errors="replace"):
-            m = DENTS.match(line)
-            if m:
-                r = rel(m.group(1))
-                if r is not None:
-                    lists.add("" if r == "." else r)
-                continue
-            m = CALL.match(line)
-            if m:
-                call, d, name = m.groups()
-                full = name if name.startswith("/") else (d + "/" + name if name else d)
-            else:
-                m = PCALL.match(line)
-                if not m:
-                    continue
-                call, full = m.groups()
-            r = rel(posixpath.normpath(full))
-            if r is None or r == ".":
-                continue
-            ok = re.search(r"\) = (\d+)", line)
-            if (
-                call.startswith("open")
-                and ok
-                and "O_DIRECTORY" not in line
-                and "O_PATH" not in line
-            ):
-                reads.add(r)
-            else:
-                stats.add(r)
-    # a directory looked at is in lists or stats; a read file is not a stat
-    return {"reads": reads, "stats": stats - reads, "lists": lists}
-
-
-def trace_one(src, check, build=False, keep=None):
-    tmp = tempfile.mkdtemp(prefix="ciselect-trace.")
-    try:
-        env = {**os.environ, "XDG_CACHE_HOME": os.path.join(tmp, "cache")}
-        what = TARGETS[check][0] if check in TARGETS else f"checks.{SYSTEM}.{check}"
-        attr = f"path:{src}#{what}"
-        cmd = (
-            ["nix", "build", "--no-link", "-L", attr]
-            if build
-            else ["nix", "eval", "--raw", attr + ".drvPath"]
-        )
-        r = subprocess.run(
-            [
-                "strace",
-                "--seccomp-bpf",
-                "-f",
-                "-ff",
-                "-qq",
-                "-y",
-                "-o",
-                os.path.join(tmp, "t"),
-                "-e",
-                "trace=openat,openat2,open,newfstatat,statx,stat,lstat,access,faccessat,faccessat2,readlink,getdents64",
-                *cmd,
-            ],
-            env=env,
-            capture_output=not build,
-            text=True,
-        )
-        files = [os.path.join(tmp, f) for f in os.listdir(tmp) if f.startswith("t.")]
-        tr = parse_trace(files, src)
-        tr["ok"] = r.returncode == 0
-        tr["out"] = (r.stdout or "").strip() if not build else ""
-        tr["err"] = (r.stderr or "")[-2000:] if not build else ""
-        return tr
-    finally:
-        shutil.rmtree(tmp)
-
-
-def cmd_trace(args):
-    rev, only, jobs = "HEAD", None, 4
-    out = COVERS
-    while args:
-        a = args.pop(0)
-        if a == "--rev":
-            rev = args.pop(0)
-        elif a == "--only":
-            only = args.pop(0).split(",")
-        elif a == "--jobs":
-            jobs = int(args.pop(0))
-        elif a == "--out":
-            out = args.pop(0)
-    sha = git("rev-parse", rev).strip()
-    checks = only or traced_names(show(sha, REGISTRY))
-    c = load_covers(open(out).read() if only and os.path.exists(out) else "")
-    if only:
-        for m in ("dirs", "files", "listed"):
-            for p in list(c[m]):
-                c[m][p] -= set(only)
-    src = store_copy(sha)
-    print(f"tracing {len(checks)} checks of {sha[:9]} ({src})", file=sys.stderr)
-
-    def one(t):
-        tr = trace_one(src, t)
-        print(
-            f"  {t}: {'ok' if tr['ok'] else 'FAILED'} {len(tr['reads'])} read",
-            file=sys.stderr,
-        )
-        return t, tr
-
-    bad = []
-    with ThreadPoolExecutor(jobs) as ex:
-        for t, tr in ex.map(one, checks):
-            if not tr["ok"] and "does not provide attribute" in tr["err"]:
-                continue
-            if not tr["ok"]:
-                bad.append(t)
-                print(tr["err"], file=sys.stderr)
-                continue
-            add_trace(c, t, tr)
-    open(out, "w").write(dump_covers(c, sha))
-    return 1 if bad else 0
 
 
 def main():
     if len(sys.argv) < 2:
-        print(
-            __doc__ or "select BASE HEAD | run CHECK... | trace [--only a,b] | matches",
-            file=sys.stderr,
-        )
+        print(__doc__ or "select BASE HEAD | matches FILE | groups", file=sys.stderr)
         return 2
     cmd, args = sys.argv[1], sys.argv[2:]
     if cmd == "select":
         return cmd_select(args)
-    if cmd == "trace":
-        return cmd_trace(args)
     if cmd == "matches":
-        print(json.dumps(sorted(vm_tests(open(args[0]).read()) or [])))
+        print(json.dumps(sorted(registry(open(args[0]).read()).get("vm", []))))
         return 0
     if cmd == "groups":
-        print(json.dumps(sorted(GROUPS)))
+        print(json.dumps(sorted(plan.GROUPS)))
         return 0
     print(f"unknown command {cmd}", file=sys.stderr)
     return 2

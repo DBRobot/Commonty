@@ -1,0 +1,18 @@
+{
+ "_": "Jobs that run in main's full run alone: by every pull request run in the history, each ran at least 300 times and 300 minutes and never caught a real failure (a failure of the box, the forge, CI itself or a test's own race is not one). Written by history/replay.py --main-only; the replay applies the same rule at each run from the runs before it alone. A job main's full run catches failing comes off this list.",
+ "as_of": "2026-10-27",
+ "jobs": {
+  "app": {
+   "runs": 359,
+   "minutes": 1793
+  },
+  "library": {
+   "runs": 407,
+   "minutes": 645
+  },
+  "systems": {
+   "runs": 1119,
+   "minutes": 1194
+  }
+ }
+}

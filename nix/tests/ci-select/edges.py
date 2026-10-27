@@ -1,453 +1,307 @@
 #!/usr/bin/env python3
-# The chooser on made-up changes, against this tree's covers.json: a new
-# directory, a rename, the test helpers, a lockfile bump, a test's own
-# file, docs alone, docs with code, a page, a path nothing claims. The
-# ci-select check runs it; `edges.py ROOT --table` prints what it chose.
+# The selector (plan.py) on made-up changes against this tree's
+# tests-this.json, and the sets themselves held to the tree: every
+# registered check has a set, every path a set names is in the tree, every
+# job main-only.json and a component's own checks name is one. The
+# ci-select check runs it; `edges.py ROOT` prints what each case chose.
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import ciselect as cs  # noqa: E402
+import ciselect  # noqa: E402
+import interfaces  # noqa: E402
+import plan  # noqa: E402
+
+
+def tree(root):
+    out = []
+    for d, ds, fs in os.walk(root):
+        ds[:] = [x for x in ds if x not in (".git", "target", "node_modules", "result")]
+        for f in fs:
+            out.append(os.path.relpath(os.path.join(d, f), root))
+    return sorted(out)
 
 
 def run(root):
-    covers = cs.load_covers(open(os.path.join(root, cs.COVERS)).read())
-    flake = open(os.path.join(root, cs.REGISTRY)).read()
-    every = set(cs.traced_names(flake))
-    # a check covers.json has not traced yet runs on every change until it
-    # is; the cases judge the traced ones, and that it ran
-    untraced = every - covers["checks"]
-    # the group jobs as the cases judge them: of the traced checks only
-    groups = {g: [t for t in ts if t not in untraced] for g, ts in cs.GROUPS.items()}
+    def read(f):
+        p = os.path.join(root, f)
+        return open(p, errors="replace").read() if os.path.isfile(p) else ""
 
-    def named():
-        for d, _, fs in os.walk(root):
-            for f in fs:
-                if f.endswith((".nix", ".rs")):
-                    p = os.path.join(d, f)
-                    yield os.path.relpath(p, root), open(p, errors="replace").read()
+    files = tree(root)
+    raw = json.loads(read(plan.SETS))
+    sets = plan.Sets(raw)
+    reg_text = read(plan.REGISTRY)
+    reg = ciselect.registry(reg_text)
+    main_only = plan.load_main_only(read(plan.MAIN_ONLY))
+    crates = ciselect.crates(read)
+    hosts = ciselect.hosts(read, sets)
+    docs_named = ciselect.named_docs(
+        lambda: ((f, read(f)) for f in files if f.endswith((".nix", ".rs")))
+    )
+    problems = []
 
-    docs_named = cs.named_docs(named)
+    # ---- the sets, held to the tree
+    registered = set(reg.get("vm", [])) | set(reg.get("eval", [])) | set(plan.GROUPED)
+    for n in sorted(registered):
+        if not sets.has(n):
+            problems.append(f"{n} is registered but has no set in tests-this.json")
+    for n in sorted(set(raw.get("_vm", [])) ^ set(reg.get("vm", []))):
+        problems.append(f"{n}: tests-this.json's _vm and the registry's vm differ")
+    for path, name in crates.items():
+        if not sets.has(f"rust:{path}"):
+            problems.append(f"crate {name} ({path}) has no rust:{path} set")
+    for k in [
+        plan.RUST,
+        plan.APP,
+        plan.APP_EVAL,
+        plan.FLAKE,
+        plan.KEEP,
+        plan.INSTALLER,
+    ]:
+        if not sets.has(k):
+            problems.append(f"the {k} job has no set")
+    for h, k in hosts.items():
+        if not sets.has(k):
+            problems.append(f"{h}'s system ({k}) has no set")
+    for k in main_only:
+        if not sets.has(k):
+            problems.append(f"main-only.json names {k}, which is no job")
+    for n, c in interfaces.COMPONENTS.items():
+        for k in c["own"]:
+            if not sets.has(k):
+                problems.append(f"{n}'s own check {k} has no set")
+    shared = raw.get("_shared_by_family", {})
+    for k, v in raw.items():
+        if k.startswith("_"):
+            continue
+        for g in list(v["paths"]) + list(shared.get(v.get("family", ""), [])):
+            r = plan.rx([g])
+            if not any(r.match(f) for f in files):
+                problems.append(f"{k}: {g} is in no file of the tree")
 
-    def stat(c):
-        return cs.add_static(
-            c,
-            sorted(every),
-            lambda f: (
-                open(os.path.join(root, f), errors="replace").read()
-                if os.path.isfile(os.path.join(root, f))
-                else None
-            ),
-            lambda d: os.path.isdir(os.path.join(root, d)),
-        )
-
-    def choose(
-        changes, new_dirs=(), gone_dirs=(), base_covers=None, faces=None, reg=None
-    ):
-        def exists(which, d):
-            if which == "base" and d in new_dirs:
-                return False
-            if which == "head" and d in gone_dirs:
-                return False
-            return d == "" or os.path.isdir(os.path.join(root, d)) or d in new_dirs
-
-        return cs.select(
+    # ---- the cases
+    def choose(changes, faces=None, registry_base=None, mo=None):
+        return plan.plan(
             changes,
-            stat(covers),
-            stat(base_covers or covers),
-            reg[1] if reg else flake,
-            docs_named,
-            exists,
-            cs.crate_closure(
-                cs.APP_ROOTS, lambda f: open(os.path.join(root, f)).read()
-            ),
-            faces,
-            None,
+            sets,
             reg,
+            main_only=main_only if mo is None else mo,
+            faces=faces,
+            docs_named=docs_named,
+            registry_base=registry_base,
+            crates=crates,
+            hosts=hosts,
         )
 
-    def lacking(t):
-        # covers.json without one check's entries: as if a pull request
-        # had added them
-        c = cs.load_covers(open(os.path.join(root, cs.COVERS)).read())
-        for k in ("dirs", "files", "listed"):
-            for p in c[k]:
-                c[k][p].discard(t)
-        return c
-
-    pages = {
-        t
-        for t in every
-        if any(
-            t in ts
-            for d, ts in stat(covers)["dirs"].items()
-            if d.startswith("servers/web-shared")
-        )
-    }
-    # the checks that read the gate's code: what a change to its face reaches
-    gate_readers = {
-        t
-        for d, ts in stat(covers)["dirs"].items()
-        if d == "servers/gate/src" or d.startswith("servers/gate/src/")
-        for t in ts
-    }
-    gate_own = set(cs.interfaces.COMPONENTS["gate"]["checks"])
-    gate_rs = [("M", "servers/gate/src/joke.rs")]
-    added = flake.replace("  vm = [\n", '  vm = [\n    # a new one\n    "newtest"\n', 1)
-    reshaped = flake.replace("  eval = [", "  later = [ ];\n  eval = [", 1)
+    # the VM tests a pull request can run: main-only.json's are main's
+    vm = set(reg.get("vm", [])) - main_only
+    gate_own = set(interfaces.COMPONENTS["gate"]["own"])
+    control_own = set(interfaces.COMPONENTS["control"]["own"])
+    gate_readers = {t for t in vm if sets.hits(t, ["servers/gate/src/lib.rs"])}
+    added = reg_text.replace(
+        "  vm = [\n", '  vm = [\n    # a new one\n    "newtest"\n', 1
+    )
+    reshaped = reg_text.replace("  eval = [", "  later = [ ];\n  eval = [", 1)
+    any_vm = "acme"
     cases = [
         (
-            "a test registered, with its files",
-            [
-                ("M", cs.REGISTRY),
-                ("A", "nix/tests/newtest.nix"),
-                ("A", "nix/tests/newtest.py"),
-            ],
-            lambda r: (
-                not r["all"]
-                and r.get("registered") == ["newtest"]
-                and r["vm_tests"] == ["newtest"]
-                and "console" not in r["chosen"]
-                and r["eval"]
-            ),
-            [],
-            [],
-            None,
-            None,
-            (flake, added),
-        ),
-        (
-            "the registry changed beyond its names",
-            [("M", cs.REGISTRY)],
-            lambda r: r["all"],
-            [],
-            [],
-            None,
-            None,
-            (flake, reshaped),
-        ),
-        (
-            "a gate-internal change with an unchanged interface",
-            gate_rs,
-            lambda r: (
-                set(r["chosen"]) == gate_own
-                and not r["vm_tests"]
-                and r["rust"]
-                and not r["eval"]
-                and not r["programs"]
-                and not r["all"]
-                and r["kept"] == ["gate"]
-            ),
-            [],
-            [],
-            None,
-            {"gate": []},
-        ),
-        (
-            "a gate route-schema change runs what reads the gate",
-            gate_rs,
-            lambda r: (
-                set(r["chosen"]) == gate_readers
-                and r["vm_tests"]
-                and "console" not in r["chosen"]
-                and not r["all"]
-                and r["kept"] == []
-            ),
-            [],
-            [],
-            None,
-            {"gate": ["rust-routes servers/gate/src: the face changed"]},
-        ),
-        (
-            "a control-internal change with an unchanged interface",
-            [("M", "servers/system/control/place/place.go")],
-            lambda r: (
-                r["chosen"] == ["control"]
-                and not r["vm_tests"]
-                and not r["eval"]
-                and not r["rust"]
-            ),
-            [],
-            [],
-            None,
-            {"control": []},
-        ),
-        (
-            "the gate's face held, a module beside it changed",
-            gate_rs + [("M", "nix/modules/forge/forgejo.nix")],
-            lambda r: (
-                "forge" in r["chosen"]
-                and gate_own <= set(r["chosen"])
-                and "console" not in r["chosen"]
-                and r["eval"]
-            ),
-            [],
-            [],
-            None,
-            {"gate": []},
-        ),
-        (
-            "the face readers (part of the chooser)",
-            [("M", "nix/tests/ci-select/faces/rust_routes.py")],
-            lambda r: r["all"],
-        ),
-        (
-            "the interface map (part of the chooser)",
-            [("M", "nix/tests/ci-select/interfaces.py")],
-            lambda r: r["all"],
-            [],
-            [],
-            None,
-            {},
-        ),
-        (
-            "a test's own file",
-            [("M", "nix/tests/acme.py")],
-            lambda r: r["chosen"] == ["acme"],
-        ),
-        (
-            "a new test helper file",
-            [("A", "nix/tests/lib/later.py")],
-            lambda r: (
-                0 < len(r["chosen"]) < len(every) and "console" not in r["chosen"]
-            ),
-        ),
-        (
-            "a test helper changed",
-            [("M", "nix/tests/lib/waits.py")],
-            lambda r: (
-                0 < len(r["chosen"]) < len(every) and "console" not in r["chosen"]
-            ),
-        ),
-        (
-            "a renamed module",
-            [
-                ("D", "nix/modules/forge/live.nix"),
-                ("A", "nix/modules/forge/live-pages.nix"),
-            ],
-            lambda r: "forge" in r["chosen"] and "console" not in r["chosen"],
-        ),
-        (
-            "a new directory in a crate",
-            [("A", "servers/games/src/catalogue/mod.rs")],
-            lambda r: "games" in r["chosen"] and "console" not in r["chosen"],
-            ["servers/games/src/catalogue"],
-        ),
-        (
-            "a new crate",
-            [("A", "servers/newsvc/Cargo.toml"), ("A", "servers/newsvc/src/main.rs")],
-            lambda r: len(r["chosen"]) >= len(every) // 2,
-            ["servers/newsvc", "servers/newsvc/src"],
-        ),
-        (
-            "a new top-level directory",
-            [("A", "tools/run.sh")],
-            lambda r: r["all"],
-            ["tools"],
-        ),
-        ("a path nothing claims", [("M", "scripts/sync-app-web")], lambda r: r["all"]),
-        (
-            "a crate the app builds on",
-            [("M", "servers/system/release/src/bin/dd-attest.rs")],
-            lambda r: r["app"] and r["rust"] and not r["all"],
-        ),
-        ("Cargo.lock bumped", [("M", "Cargo.lock")], lambda r: r["all"]),
-        ("nix/lib changed", [("M", "nix/lib/script.nix")], lambda r: r["all"]),
-        (
-            "the workflow changed",
-            [("M", ".forgejo/workflows/entry_point.yml")],
-            lambda r: (
-                r["all"]
-                and r["installer"]
-                and all(r[g] == ts for g, ts in groups.items())
-            ),
-        ),
-        (
             "docs alone",
-            [("M", "docs/dev/ci.md"), ("A", "docs/guide/new.md"), ("M", "README.md")],
-            lambda r: (
-                r["docs_only"]
-                and not (r["nix"] or r["rust"] or r["app"] or r["installer"])
-                and not r["vm_tests"]
-                and not any(r[g] for g in cs.GROUPS)
-            ),
+            [("M", "docs/dev/ci.md"), ("A", "docs/guide/new.md")],
+            {},
+            lambda r: r["docs_only"] and not r["why"] and not r["flake"],
         ),
         (
-            "a page script the app carries",
-            [("M", "app/web/_dd/static/calendar.js")],
-            lambda r: (
-                r["page_tests"] == groups["page_tests"]
-                and r["site_checks"] == ["site-links"]
-                and not r["worker_tests"]
-                and set(r["vm_tests"]) <= {"site-journeys"}
-                and not r["installer"]
-                and not r["all"]
-            ),
-        ),
-        (
-            "a box page's script",
-            [("M", "servers/mail/web/mail-search.js")],
-            lambda r: (
-                set(r["worker_tests"]) <= {"mail-worker", "sso"}
-                and not r["page_tests"]
-                and r["site_checks"]
-                and not r["installer"]
-                and not r["all"]
-            ),
-        ),
-        (
-            "a Worker's source",
-            [("M", "client/mail/worker/worker.js")],
-            lambda r: (
-                "mail-worker" in r["worker_tests"]
-                and "control" not in r["worker_tests"]
-                and not r["page_tests"]
-                and not r["site_checks"]
-                and not r["installer"]
-            ),
-        ),
-        (
-            "the installer's own module",
-            [("M", "nix/installer/setup.nix")],
-            lambda r: (
-                r["installer"]
-                and r["nix"]
-                and not r["all"]
-                and not any(r[g] for g in cs.GROUPS)
-                and set(r["chosen"]) <= {"installer", "join-install"}
-            ),
-        ),
-        (
-            "the installer's screen",
-            [("M", "nix/installer/web/setup.js")],
-            lambda r: r["installer"] and not r["all"],
-        ),
-        (
-            "the program the installer carries (the agent's crate)",
-            [("M", "servers/system/release/src/bin/dd-attest.rs")],
-            lambda r: r["installer"] and not r["all"],
-        ),
-        (
-            "a box module the installer does not embed",
-            [("M", "nix/modules/forge/forgejo.nix")],
-            lambda r: not r["installer"] and not r["all"],
-        ),
-        (
-            "the chooser itself",
-            [("M", "nix/tests/ci-select/ciselect.py")],
-            lambda r: (
-                r["all"]
-                and r["installer"]
-                and all(r[g] == ts for g, ts in groups.items())
-            ),
-        ),
-        (
-            "flake.lock bumped (the installer's nixpkgs)",
-            [("M", "flake.lock")],
-            lambda r: r["all"] and r["installer"],
+            "docs with code",
+            [("M", "docs/dev/ci.md"), ("M", f"nix/tests/{any_vm}.py")],
+            {},
+            lambda r: not r["docs_only"] and any_vm in r["vm_tests"],
         ),
         (
             "the terms (a check reads them by name)",
             [("M", "docs/policies/terms.md")],
-            lambda r: not r["docs_only"] and r["nix"] and not r["all"],
+            {},
+            lambda r: "terms-version" in r["why"] and not r["docs_only"],
         ),
         (
-            "docs with code",
-            [("M", "docs/dev/games.md"), ("M", "servers/games/src/main.rs")],
-            lambda r: (
-                "games" in r["chosen"] and "console" not in r["chosen"] and r["rust"]
-            ),
-        ),
-        (
-            "a page alone",
-            [("M", "servers/web-shared/home.css")],
-            lambda r: (
-                r["chosen"]
-                and set(r["chosen"]) <= pages
-                and r["nix"]
-                and "console" not in r["chosen"]
-            ),
-        ),
-        (
-            "a page removed",
-            [("D", "servers/web-shared/home.css")],
-            lambda r: r["chosen"] and set(r["chosen"]) <= pages,
-        ),
-        (
-            "a check new to covers.json",
+            "a test's own script",
             [("M", "nix/tests/acme.py")],
-            lambda r: "acme" in r["chosen"] and "forge" in r["chosen"],
-            [],
-            [],
-            "forge",
+            {},
+            lambda r: r["vm_tests"] == ["acme"] and r["programs"] and not r["rust"],
+        ),
+        (
+            "the VM tests' shared helpers",
+            [("M", "nix/tests/lib/waits.py")],
+            {},
+            lambda r: set(r["vm_tests"]) == vm and not r["page_tests"],
+        ),
+        (
+            "flake.lock bumped: every job a pull request runs",
+            [("M", "flake.lock")],
+            {},
+            lambda r: (
+                r["global"]
+                and set(r["vm_tests"]) == vm
+                and r["rust_crates"] == sorted(crates.values())
+                and all(k in r["main_only"] for k in main_only)
+                and r["systems_eval"]
+                and all(r[g] == ts for g, ts in plan.GROUPS.items())
+                and all(k not in r["why"] for k in main_only)
+                and not r["installer"]
+            ),
+        ),
+        (
+            "a gate-internal change with its face held: its own checks",
+            [("M", "servers/gate/src/directory.rs")],
+            {"faces": {"gate": []}},
+            lambda r: (
+                r["kept"] == ["gate"]
+                and set(r["why"]) == gate_own
+                and not r["vm_tests"]
+                and set(r["rust_crates"]) == {"verify", "dd"}
+            ),
+        ),
+        (
+            "a gate change whose face moved: what tests the gate",
+            [("M", "servers/gate/src/directory.rs")],
+            {"faces": {"gate": ["rust-routes servers/gate/src: the face changed"]}},
+            lambda r: (
+                gate_readers <= set(r["vm_tests"]) and "directory" in r["vm_tests"]
+            ),
+        ),
+        (
+            "a control-internal change with its face held",
+            [("M", "servers/system/control/state/machine.go")],
+            {"faces": {"control": []}},
+            lambda r: set(r["why"]) == control_own and not r["vm_tests"],
+        ),
+        (
+            "a control change whose face moved",
+            [("M", "servers/system/control/state/machine.go")],
+            {"faces": {"control": ["apidiff state: changed"]}},
+            lambda r: control_own <= set(r["why"]) and r["vm_tests"],
+        ),
+        (
+            "a test registered, with its files",
+            [
+                ("M", plan.REGISTRY),
+                ("A", "nix/tests/newtest.nix"),
+                ("A", "nix/tests/newtest.py"),
+            ],
+            {"registry_base": (reg_text, added)},
+            lambda r: (
+                r["registered"] == ["newtest"]
+                and "newtest" in r["why"]
+                and not r["global"]
+                and "console" not in r["vm_tests"]
+            ),
+        ),
+        (
+            "the registry changed beyond its names: what tests it, not everything",
+            [("M", plan.REGISTRY)],
+            {"registry_base": (reg_text, reshaped)},
+            lambda r: (
+                not r["global"]
+                and "ci" in r["why"]
+                and r["systems_eval"]
+                and not r["vm_tests"]
+            ),
+        ),
+        (
+            "one crate's source: that crate's lint and tests, and fmt",
+            [("M", "client/davbridge/src/gate.rs")],
+            {},
+            lambda r: (
+                "davbridge" in r["rust_crates"]
+                and "verify" not in r["rust_crates"]
+                and r["rust"]
+                and not r["vm_tests"]
+            ),
+        ),
+        (
+            "the app: main's full run alone",
+            [("M", "app/src/lib.rs")],
+            {},
+            lambda r: (
+                not r["app"] and ("app" in r["main_only"] or "app" not in main_only)
+            ),
+        ),
+        (
+            "the workflow: the checks that read it, not everything",
+            [("M", ".forgejo/workflows/entry_point.yml")],
+            {},
+            lambda r: "ci" in r["why"] and not r["global"] and not r["vm_tests"],
+        ),
+        (
+            "the selector itself: its own check",
+            [("M", "nix/tests/ci-select/plan.py")],
+            {},
+            lambda r: "ci-select" in r["why"] and not r["global"] and not r["vm_tests"],
+        ),
+        (
+            "a path no job tests: style and lint, and it is named",
+            [("A", "tools/a-new-thing.sh")],
+            {},
+            lambda r: r["unclaimed"] == ["tools/a-new-thing.sh"] and not r["why"],
+        ),
+        (
+            "the installer's own module: main's full run alone",
+            [("M", "nix/installer/image.nix")],
+            {},
+            lambda r: not r["installer"] and "installer" in r["main_only"],
+        ),
+        (
+            "a box page's script: the site checks, not the VM tests that never look",
+            [("M", "servers/web-shared/home.css")],
+            {},
+            lambda r: "stylesheet" in r["why"] and r["site_checks"],
+        ),
+        (
+            "the home controller's module: its system, built once",
+            [("M", "nix/controller/default.nix")],
+            {},
+            lambda r: "home-controller" in r["hosts"] and "node1" not in r["hosts"],
+        ),
+        (
+            "a job main-only.json names does not run",
+            [("M", "nix/tests/acme.py")],
+            {"mo": {"acme"}},
+            lambda r: "acme" not in r["vm_tests"] and "acme" in r["main_only"],
         ),
     ]
-    rows, bad = [], []
-    for case in cases:
-        title, changes, ok = case[:3]
-        new_dirs = case[3] if len(case) > 3 else []
-        gone = case[4] if len(case) > 4 else []
-        base = lacking(case[5]) if len(case) > 5 and case[5] else None
-        faces = case[6] if len(case) > 6 else None
-        reg = case[7] if len(case) > 7 else None
-        r = choose(changes, set(new_dirs), set(gone), base, faces, reg)
-        seen = dict(
-            r,
-            chosen=[t for t in r["chosen"] if t not in untraced],
-            vm_tests=[t for t in r["vm_tests"] if t not in untraced],
-            **{g: [t for t in r[g] if t not in untraced] for g in cs.GROUPS},
-        )
-        good = bool(ok(seen)) and (r["docs_only"] or untraced <= set(r["chosen"]))
+    rows = []
+    for title, changes, kw, ok in cases:
+        r = choose(changes, **kw)
+        good = bool(ok(r))
         if not good:
-            bad.append(title)
-        kind = (
-            "docs only"
-            if r["docs_only"]
-            else (
-                "everything (" + r["reason"] + ")"
-                if r["all"]
-                else f"{len(r['chosen'])} of {len(every)}"
-            )
-        )
-        rows.append(
-            (
-                title,
-                " ".join(f"{s} {p}" for s, p in changes),
-                kind,
-                r["chosen"] if not r["all"] else [],
-                good,
-                r,
-            )
-        )
-    return rows, bad, sorted(untraced)
+            problems.append(f"case failed: {title}")
+        rows.append((title, changes, r, good))
+    return rows, problems
 
 
 def main():
     root = sys.argv[1] if len(sys.argv) > 1 else "."
-    rows, bad, untraced = run(root)
-    if untraced:
+    rows, problems = run(root)
+    for title, changes, r, good in rows:
         print(
-            f"not in covers.json yet, so on every change: {' '.join(untraced)}\n"
-            f"  trace it on a box: nix/tests/ci-select/ciselect.py trace --only {','.join(untraced)}"
+            f"{'ok  ' if good else 'FAIL'} {title}: "
+            + " ".join(f"{s} {p}" for s, p in changes)
         )
-    for title, changes, kind, chosen, good, r in rows:
-        flags = " ".join(k for k in ("nix", "rust", "app", "installer") if r.get(k))
-        print(
-            f"{'ok  ' if good else 'FAIL'} {title}: {changes}\n     -> {kind}; jobs: {flags or 'style, lint'}"
-        )
-        if chosen and not r["all"]:
-            print(f"        {' '.join(chosen)}")
-    if "--json" in sys.argv:
-        json.dump(
-            [
-                {"case": t, "changes": c, "chose": k, "tests": ch, "ok": g}
-                for t, c, k, ch, g, _ in rows
-            ],
-            open(sys.argv[sys.argv.index("--json") + 1], "w"),
-            indent=1,
-        )
-    return 1 if bad else 0
+        if r["docs_only"]:
+            print("     -> docs only")
+        else:
+            print(
+                f"     -> {len(r['why'])} jobs: {' '.join(sorted(r['why']))[:300]}"
+                + (
+                    f"; main's alone: {' '.join(sorted(r['main_only']))}"
+                    if r["main_only"]
+                    else ""
+                )
+            )
+    for p in problems:
+        print(f"FAIL {p}")
+    return 1 if problems else 0
 
 
 if __name__ == "__main__":

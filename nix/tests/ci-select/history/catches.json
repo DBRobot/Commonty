@@ -1,0 +1,263 @@
+{
+ "_": "Which of today's jobs would catch each real failure (realfail.json) whose job was not one check: a flake_check, rust, programs or systems failure, read from its log. Keys are tests-this.json's; 'programs' is the build the VM tests wait on. A VM or browser job's failure is caught by that check, and needs no line here. 'cause' marks a failure that was not the pull request's code, with the evidence: infra (the box or the forge), ci (CI's own tooling), test (the test's own race, fixed in the test). 'eval' marks a failure to evaluate a check or a box's system, which flake_check's evaluation of every check and system catches wherever it is.",
+ "54": {
+  "catch": [
+   "directory"
+  ],
+  "log": "flake: vm-test-run-directory failed to evaluate (dd.backup option missing)",
+  "eval": true
+ },
+ "55": {
+  "catch": [
+   "directory"
+  ],
+  "log": "vm (one job for every test): the option dd.backup does not exist, in directory's evaluation",
+  "eval": true
+ },
+ "56": {
+  "catch": [
+   "directory"
+  ],
+  "log": "flake: vm-test-run-directory failed to evaluate",
+  "eval": true
+ },
+ "58": {
+  "catch": [
+   "directory"
+  ],
+  "log": "vm (one job for every test): the option dd.backup does not exist",
+  "eval": true
+ },
+ "127": {
+  "catch": [
+   "rust:client/cli"
+  ],
+  "log": "build_client built dd and ran its tests: boxes_share_the_directory_and_refuse_squats failed (e2e.rs)"
+ },
+ "201": {
+  "catch": [
+   "rust:servers/gate",
+   "programs"
+  ],
+  "log": "build_client: verify did not compile (templates not found)"
+ },
+ "250": {
+  "catch": [
+   "rust:client/cli"
+  ],
+  "log": "rust: dd's e2e did not compile (verify::pages::Service has no field description)"
+ },
+ "258": {
+  "catch": [
+   "flake"
+  ],
+  "log": "systems(node1): node1's system failed to evaluate (attribute description missing)",
+  "eval": true
+ },
+ "435": {
+  "catch": [
+   "rust"
+  ],
+  "log": "rust: fmt (client/identity/src/lib.rs)"
+ },
+ "461": {
+  "catch": [
+   "rust"
+  ],
+  "log": "rust: fmt (verify signins.rs)"
+ },
+ "463": {
+  "catch": [
+   "rust:client/cli"
+  ],
+  "log": "rust: dd's clippy"
+ },
+ "477": {
+  "catch": [
+   "ci"
+  ],
+  "log": "flake: ci-matrix-matches (today checks.ci)"
+ },
+ "510": {
+  "catch": [
+   "forge"
+  ],
+  "log": "flake: vm-test-run-forge failed to evaluate",
+  "eval": true
+ },
+ "536": {
+  "catch": [
+   "rust"
+  ],
+  "log": "rust: fmt (verify lib.rs)"
+ },
+ "560": {
+  "catch": [
+   "rust"
+  ],
+  "log": "rust: fmt (verify pages.rs)"
+ },
+ "563": {
+  "catch": [
+   "app-release"
+  ],
+  "log": "flake: nix flake check could not evaluate commonty-linux after a GC (path ...ubuntu-22.04-jammy-amd64.nix.drv is not valid, an import from derivation); appReleaseEvaluates left flake check for this. The change touched agent.nix and dd-attest.rs only",
+  "cause": "ci"
+ },
+ "596": {
+  "catch": [
+   "rust:servers/games"
+  ],
+  "log": "rust: games' test a_query_port_the_game_opens_by_itself failed"
+ },
+ "622": {
+  "catch": [
+   "stylesheet"
+  ],
+  "log": "flake: one-set-of-pages (checks.stylesheet)"
+ },
+ "653": {
+  "catch": [
+   "stylesheet"
+  ],
+  "log": "flake: one-set-of-pages (checks.stylesheet)"
+ },
+ "658": {
+  "catch": [
+   "stylesheet"
+  ],
+  "log": "flake: one-set-of-pages (checks.stylesheet)"
+ },
+ "671": {
+  "catch": [
+   "nginx"
+  ],
+  "log": "flake: nginx-configs-parse (checks.nginx)"
+ },
+ "679": {
+  "catch": [
+   "systems(home-controller)"
+  ],
+  "log": "systems(home-controller): the controller's system did not build"
+ },
+ "686": {
+  "catch": [
+   "placement"
+  ],
+  "log": "flake: checks.placement failed to evaluate",
+  "eval": true
+ },
+ "706": {
+  "catch": [
+   "rust:servers/games",
+   "programs"
+  ],
+  "log": "programs(boxes): rust_games did not compile (libc missing, Cargo.nix)"
+ },
+ "716": {
+  "catch": [
+   "nginx"
+  ],
+  "log": "flake: nginx-configs-parse (checks.nginx)"
+ },
+ "721": {
+  "catch": [
+   "stylesheet"
+  ],
+  "log": "flake: one-set-of-pages (checks.stylesheet)"
+ },
+ "762": {
+  "catch": [
+   "pdf-editor"
+  ],
+  "log": "flake: checks.pdf-editor's test failed (NSS_Init)"
+ },
+ "772": {
+  "catch": [
+   "flake",
+   "forge-follow",
+   "net-follow"
+  ],
+  "log": "flake: the home controller's system, forge-follow and net-follow failed to evaluate",
+  "eval": true
+ },
+ "781": {
+  "catch": [
+   "rust:client/davbridge"
+  ],
+  "log": "rust: davbridge's test build did not compile"
+ },
+ "786": {
+  "catch": [
+   "flake"
+  ],
+  "log": "flake: the evaluation was killed mid-way; the log names nothing that failed",
+  "cause": "infra"
+ },
+ "793": {
+  "catch": [
+   "ci-select"
+  ],
+  "log": "flake: checks.ci-select"
+ },
+ "796": {
+  "catch": [
+   "systems"
+  ],
+  "log": "systems(node2): the build passed, recording its path got http 500 from the forge",
+  "cause": "infra"
+ },
+ "815": {
+  "catch": [
+   "stylesheet"
+  ],
+  "log": "flake: one-set-of-pages (checks.stylesheet)"
+ },
+ "832": {
+  "catch": [
+   "rust:servers/gate"
+  ],
+  "log": "rust: verify's test a_v2_envelope_reads_as_the_entry_it_carries failed"
+ },
+ "837": {
+  "catch": [
+   "needs-units"
+  ],
+  "log": "flake: checks.needs-units failed to evaluate",
+  "eval": true
+ },
+ "848": {
+  "catch": [
+   "rust:servers/gate"
+  ],
+  "log": "rust: verify's lint (unused import)"
+ },
+ "871": {
+  "catch": [
+   "rust:servers/gate"
+  ],
+  "log": "rust: verify's test the_status_is_services_alone failed"
+ },
+ "875": {
+  "catch": [
+   "leaving",
+   "site-journeys"
+  ],
+  "log": "flake: checks.leaving and checks.site-journeys failed to evaluate (nodes.box.dd.store)",
+  "eval": true
+ },
+ "790": {
+  "catch": [
+   "leaving"
+  ],
+  "cause": "test",
+  "log": "vm(leaving): AssertionError: a suspension keeps things for the window - the test's own race, fixed in the test by f841a5df (2026-10-22); the change was CI's (the runner, ci-resume)"
+ },
+ "808": {
+  "catch": [
+   "leaving"
+  ],
+  "cause": "test",
+  "log": "vm(leaving): the same race as run 790, fixed by f841a5df, which changed only the test and docs/dev/leaving.md"
+ }
+}

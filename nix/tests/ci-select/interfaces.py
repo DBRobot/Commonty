@@ -4,8 +4,8 @@
 # leaves its face byte for byte the same (and every Go package API apidiff
 # compares the same), runs that component's own tests and its contract
 # tests; the checks that merely read it (the VM tests above it) are left
-# out. A face that changed walks out to what reads the component, which
-# covers.json already knows.
+# out. A face that changed walks out to every job whose set in
+# tests-this.json names the component's files.
 #
 #   interfaces.py compare BASE HEAD    which components kept their face
 #   interfaces.py face NAME DIR        one component's face, from a tree
@@ -23,16 +23,23 @@ COMPONENTS = {
     # the gate (servers/gate): its HTTP routes with what each handler takes
     # and answers, the environment it reads, the box paths and ports it
     # names (faces/rust_routes.py). Its pages (templates/, web/) are not
-    # insides: they are what a browser meets, chosen by covers.json.
+    # insides: they are what a browser meets, chosen by the jobs' sets.
     "gate": {
         "inside": r"^servers/gate/src/.+\.rs$",
         "faces": [("rust-routes", "servers/gate/src")],
-        # its crate's tests and those of the crates built on it (the cli's
-        # end to end runs a gate in-process): the rust job
-        "jobs": ["rust"],
-        # the real gate behind node1's nginx, asked as every kind of person;
-        # the id Worker signing in through it
-        "checks": ["site-headers", "site-roles", "sso"],
+        # what runs when its insides change and its face holds, by its key
+        # in tests-this.json: its crate's tests and lint and the cli's (whose
+        # end to end runs a gate in-process), fmt; the real gate behind
+        # node1's nginx, asked as every kind of person; the id Worker
+        # signing in through it
+        "own": [
+            "rust",
+            "rust:servers/gate",
+            "rust:client/cli",
+            "site-headers",
+            "site-roles",
+            "sso",
+        ],
     },
     # the control plane (servers/system/control): what crosses the wire and
     # the HTTP routes, flags, files and ports of its commands
@@ -49,10 +56,16 @@ COMPONENTS = {
                 ["state", "state/computers", "state/ident", "wire"],
             ),
         ],
-        "jobs": [],
         # every package's go tests, and the relay, witness and three
-        # validators under wrangler
-        "checks": ["control"],
+        # validators under wrangler; the relay without its witness, and the
+        # moves between releases
+        "own": [
+            "control",
+            "control-relay",
+            "control-upgrade",
+            "control-together",
+            "control-signfail",
+        ],
     },
 }
 
