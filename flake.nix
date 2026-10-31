@@ -1858,6 +1858,9 @@
           # the staging run before a release is signed (docs/dev/rollout.md),
           # asked of a box by `dd release publish`; not one of CI's
           rollout-stage = vm "rollout-stage";
+          # a real box's first install, run by hand outside the sandbox for its
+          # internet (nix/tests/join-real.nix); hours, so not one of CI's
+          join-real = vm "join-real";
         }
         // nixpkgs.lib.genAttrs vmTests vm
         # each a file of its own, nix/tests/<name>.nix, given the usual args
