@@ -819,7 +819,43 @@ pub fn check_envelope_assertion(
     }
     let a: Assertion = serde_json::from_slice(&B64.decode(sig_b64).map_err(|_| Error::Signature)?)
         .map_err(|_| Error::Signature)?;
-    assertion_over(passkey, &a, challenge)
+    root_assertion_over(passkey, &a, challenge)
+}
+
+/// The pages of the domain a root passkey may speak for the account on.
+/// Every name under the relying party can ask the passkey to sign anything,
+/// and what it signs here changes who the account is on every box: a box
+/// serving some other name of the domain must not be able to ask.
+pub const ROOT_PAGES: &[&str] = &["home", "compute"];
+
+/// `assertion_over`, for what only the root may say: made on a `ROOT_PAGES`
+/// name directly under the relying party.
+fn root_assertion_over(passkey: &Passkey, a: &Assertion, expected: &[u8]) -> Result<()> {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64_URL;
+    use sha2::Digest as _;
+    assertion_over(passkey, a, expected)?;
+    let client = B64_URL
+        .decode(&a.client_data_json)
+        .map_err(|_| Error::Signature)?;
+    let c: serde_json::Value = serde_json::from_slice(&client).map_err(|_| Error::Signature)?;
+    let origin = c["origin"].as_str().unwrap_or_default();
+    let (page, rp) = origin
+        .strip_prefix("https://")
+        .and_then(|h| h.split_once('.'))
+        .ok_or(Error::Signature)?;
+    let auth = B64_URL
+        .decode(&a.authenticator_data)
+        .map_err(|_| Error::Signature)?;
+    // a passkey from before its relying party was recorded: the one it signed for
+    let ours = match passkey.rp_id.as_deref() {
+        Some(known) => rp == known,
+        None => auth.len() >= 32 && sha2::Sha256::digest(rp.as_bytes())[..] == auth[..32],
+    };
+    if ours && ROOT_PAGES.contains(&page) {
+        Ok(())
+    } else {
+        Err(Error::Signature)
+    }
 }
 
 fn check_assertion(signed: &SignedEntry) -> Result<()> {
@@ -1269,7 +1305,7 @@ pub fn verify_leave(s: &SignedLeave, on_file: &Entry) -> Result<()> {
         let a: Assertion =
             serde_json::from_slice(&B64.decode(&s.signature).map_err(|_| Error::Signature)?)
                 .map_err(|_| Error::Signature)?;
-        return assertion_over(passkey, &a, &expected);
+        return root_assertion_over(passkey, &a, &expected);
     }
     let sig = B64.decode(&s.signature).map_err(|_| Error::Signature)?;
     let sig = Signature::from_slice(&sig).map_err(|_| Error::Signature)?;
