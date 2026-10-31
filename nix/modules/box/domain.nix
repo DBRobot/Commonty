@@ -27,6 +27,15 @@
         "";
     description = "the DNS Worker's address; empty: the gateway's own token keeps the zone";
   };
+  # The domain the names of a box that joined on its own key are under: its
+  # store's, and what the plan gives it (gate/acme.nix, storage/store.nix, the
+  # DNS Worker's RECORDS joinedZone). One place, for them to be under another
+  # domain than the fleet's own pages
+  options.dd.joinedDomain = lib.mkOption {
+    type = lib.types.str;
+    default = config.dd.domain;
+    description = "the domain a joined box's names are under";
+  };
   # Sign-in, once for every box, at the id Worker (servers/system/id) once
   # `dd id setup` has written fleet/id-worker.json: each box's sessions are
   # then for each of its names alone (servers/gate/src/sso.rs)

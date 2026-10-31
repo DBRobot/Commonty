@@ -612,6 +612,87 @@ for what, extra, parts in (
         403,
     )
 
+# a box that joined on its own key asks for a certificate's challenge: with
+# the key the agreed state has for it, for its store's name and a name of
+# what the agreed plan gives it. W3, the Worker with an agreed state to ask
+WORKER = W3
+spki = base64.b64encode(
+    keys[J]
+    .public_key()
+    .public_bytes(
+        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+).decode()
+ipb = (100 << 24) | (64 << 16) | 11
+store = "store.%s.commonty.test" % J
+placed_control({}, joined={J: {"ipv4": ipb}})
+check(
+    "joined acme: a relay that does not say its key: refused",
+    ask(J, "present", store, V1)[0],
+    403,
+)
+withkey = {J: {"ipv4": ipb, "key": spki}}
+placed_control({}, joined=withkey)
+check("joined acme: its store's name", ask(J, "present", store, V1)[0], 200)
+check(
+    "joined acme: the record is written",
+    ("TXT", "_acme-challenge." + store, V1) in records(),
+    True,
+)
+check("joined acme: and cleaned up", ask(J, "cleanup", store, V1)[0], 200)
+for what, name in (
+    ("a name nothing gives it", "home.commonty.test"),
+    ("another box's store", "store.j00000000cc.commonty.test"),
+    ("a listed box's store", "store.box1.commonty.test"),
+    ("the bare name", "commonty.test"),
+    ("a service the plan gives it none of", "llm.commonty.test"),
+):
+    check("joined acme: %s: refused" % what, ask(J, "present", name, V1)[0], 403)
+check(
+    "joined acme: its name under a key not its own: refused",
+    ask(J, "present", store, V1, signer="box1")[0],
+    403,
+)
+check(
+    "joined acme: a box the agreed state does not have: refused",
+    ask("j00000000cc", "present", "store.j00000000cc.commonty.test", V1, signer=J)[0],
+    403,
+)
+placed_control({"llama-swap": [J], "pub-page": [J], "ente-museum": [J]}, joined=withkey)
+llm = ask(J, "present", "llm.commonty.test", V1)
+check("joined acme: a name of what the plan gives it", llm[0], 200)
+ask(J, "cleanup", "llm.commonty.test", V1)
+check(
+    "joined acme: never a public name, whatever the plan",
+    ask(J, "present", "pub.commonty.test", V1)[0],
+    403,
+)
+check(
+    "joined acme: never a name under a lease, whatever the plan",
+    ask(J, "present", "photos.commonty.test", V1)[0],
+    403,
+)
+placed_control({}, joined=withkey, runs={"llama-swap": [J]})
+check(
+    "joined acme: its own word that it runs a service gets no name",
+    ask(J, "present", "llm.commonty.test", V1)[0],
+    403,
+)
+req = urllib.request.Request(
+    "http://127.0.0.1:8899/control",
+    data=json.dumps({"fresh": False}).encode(),
+    method="POST",
+)
+urllib.request.urlopen(req).read()
+check(
+    "joined acme: no fresh agreement: refused, its store's name too",
+    ask(J, "present", store, V1)[0],
+    403,
+)
+placed_control({"llama-swap": [J]}, joined=withkey)
+WORKER = "http://127.0.0.1:8787"
+placed_control({}, headscale="box1", ente_museum="box1")
+
 # box1's own door, as its helper asks: a tunnel with a secret it made, kept
 # in its credentials; asked again with them there, nothing is asked
 d = subprocess.run(["mktemp", "-d"], capture_output=True, text=True).stdout.strip()

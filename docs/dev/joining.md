@@ -45,6 +45,11 @@ anyone needs to trust it with.
   fleet, 8 joining at once at the relay. One unheard for 30 days is
   dropped from the agreed state.
 
+- **Its certificate** is for its store's name, `store.<its name>.<domain>`,
+  so the copies other boxes send pass TLS. The DNS Worker writes the challenge
+  for a request signed by the key the agreed state has for it, under a fresh
+  agreement, and refuses any other name.
+
 ## Reaching a service on a box that joined
 
 All of this follows the agreed state and the release's rules. What the box
@@ -65,7 +70,8 @@ says of itself opens nothing.
   a joined box only when the plan gives that service no box of the release's.
   A public name never goes to one: it has no tunnel. Nor does a name
   under a lease.
-- **Certificates**: a joined box gets none from the DNS Worker.
+- **A certificate** for such a name, one for each, is ordered when the plan
+  gives the box the service. The Worker refuses it otherwise.
 - **Mail** stays with the release's boxes (`send.js`): a joined box can't send
   as the domain.
 
@@ -76,7 +82,8 @@ bucket reads a copy back, and a copy found missing counts for nothing.
 Waste a copy slot that a box with more room would have had.
 
 What it can't do: run anything, see any plaintext, reach any service, be
-reached by anyone's device, get a certificate, take a public name, or change what the plan does with the release's boxes.
+reached by anyone's device, get a certificate for another box's name, take a
+public name, or change what the plan does with the release's boxes.
 
 ## As a member's box (being built)
 

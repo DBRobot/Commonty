@@ -51,6 +51,7 @@
   "joined-box",
   "joined-serves",
   "joined-reach",
+  "joined-store-tls",
   "leaving",
   "unlock",
   "vault",
@@ -971,6 +972,30 @@
    "servers/system/control/place/place.go": "the plan"
   },
   "notes": "No real game VM: the manager is stopped and a listener stands for a game (games has the real one). ",
+  "family": "vm"
+ },
+ "joined-store-tls": {
+  "paths": [
+   "nix/tests/joined-store-tls.nix",
+   "nix/tests/joined-store-tls.py",
+   "nix/tests/dns-worker/fake.py",
+   "nix/modules/storage/store.nix",
+   "nix/modules/gate/acme.nix",
+   "nix/modules/gate/acme-ask.sh",
+   "nix/modules/gate/acme-exec.sh",
+   "servers/system/dns/worker.js"
+  ],
+  "why": {
+   "nix/tests/joined-store-tls.nix": "test itself",
+   "nix/tests/joined-store-tls.py": "test itself",
+   "nix/tests/dns-worker/fake.py": "the stand-in for Cloudflare and the agreed state",
+   "nix/modules/storage/store.nix": "the store's vhost on 3443, dd-store-copy's url for a joined box",
+   "nix/modules/gate/acme.nix": "a joined box's certificate names, the order",
+   "nix/modules/gate/acme-ask.sh": "the helper signing the ask",
+   "nix/modules/gate/acme-exec.sh": "lego's provider",
+   "servers/system/dns/worker.js": "what it gives a joined box, by the agreed state"
+  },
+  "notes": "The control relay's /leases carrying the key is the relay's own; this test stands in for it.",
   "family": "vm"
  },
  "joined-serves": {

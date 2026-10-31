@@ -31,6 +31,7 @@
     "joined-box"
     "joined-serves"
     "joined-reach"
+    "joined-store-tls"
     "photos"
     "llm"
     "vault"
