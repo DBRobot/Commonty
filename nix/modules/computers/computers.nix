@@ -33,6 +33,9 @@ let
   keptGiB = lib.foldl' (a: s: a + (fp.capability.sizes.${s}.memory or 0)) 0 (
     lib.filter (s: s != "computers") brought
   );
+  # the box itself, and before the services are measured, all of them
+  baseMiB = 2048;
+  budgetMiB = baseMiB + builtins.ceil (keptGiB * 1024);
   # the guest's own nixpkgs, without the box's overlays: the guest rebuilds
   # from plain nixpkgs (guest/base.nix), so the host's first system is the
   # one the guest would build
@@ -350,9 +353,14 @@ in
       default = policy.disk;
     };
     reserveMiB = lib.mkOption {
-      type = lib.types.ints.unsigned;
-      default = 2048 + builtins.ceil (keptGiB * 1024);
-      description = "memory the box keeps for itself and the services it is built with, never given to a computer";
+      type = lib.types.nullOr lib.types.ints.unsigned;
+      default = null;
+      description = "a fixed reserve the box keeps from computers, in place of its services' measured memory (null: measured, the needs' sizes until measured)";
+    };
+    headroom = lib.mkOption {
+      type = lib.types.numbers.positive;
+      default = 1.5;
+      description = "what the services' measured peak is multiplied by before the box offers the rest to computers";
     };
     network = lib.mkOption {
       type = lib.types.bool;
@@ -628,7 +636,12 @@ in
       serviceConfig.Type = "oneshot";
       script = ddScript ./computer-facts.sh {
         DIR = private;
-        RESERVE_BYTES = cfg.reserveMiB * 1024 * 1024;
+        RESERVE_BYTES = (if cfg.reserveMiB != null then cfg.reserveMiB else budgetMiB) * 1024 * 1024;
+        MEASURED = lib.optionalString (cfg.reserveMiB == null) "/var/lib/dd-facts/services.prom";
+        BASE_BYTES = baseMiB * 1024 * 1024;
+        HEADROOM = cfg.headroom;
+        # six missed 5-minute measures
+        STALE_SECONDS = 1800;
       };
     };
     systemd.timers.dd-computer-facts = {

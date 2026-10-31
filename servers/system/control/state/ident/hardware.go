@@ -20,8 +20,8 @@ const (
 	MinMemTotal   = 7 << 30 // "8 GiB": MemTotal leaves out what firmware and graphics keep
 	MinSystemDisk = 128e9   // the disk the system is on, bytes
 
-	// compute: enough to host a service or a member's computer, which are
-	// capped at 8 threads and 16 GiB
+	// compute: enough to host a service, or a member's computer of 8
+	// threads and 16 GiB (a member's computers may take 32 GiB together)
 	ComputeThreads  = 8
 	ComputeMemTotal = 14.5 * (1 << 30) // "16 GiB"
 	// storage: usable store, bytes; copies are kept twice

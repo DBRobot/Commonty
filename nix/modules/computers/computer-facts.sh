@@ -4,19 +4,35 @@
 # less one, the room where the disks go. And what each computer here
 # holds, for a move's cost. All zeros without KVM, or while the box drains:
 # nothing new is placed here.
+#
+# In: DIR RESERVE_BYTES (the needs' sizes, or the owner's fixed reserve)
+#     MEASURED (services.prom, or empty for the fixed reserve) BASE_BYTES
+#     HEADROOM STALE_SECONDS; FACTS MEMINFO KVM for the logic check
 set -euo pipefail
 
-out=/var/lib/dd-facts/computers.prom
-mkdir -p /var/lib/dd-facts
+facts=${FACTS:-/var/lib/dd-facts}
+out=$facts/computers.prom
+mkdir -p "$facts"
 mem=0 threads=0 disk=0
 # a box being drained (its owner's word, or leaving the fleet) takes nothing new
 draining=no
-if grep -qx 'dd_box_draining 1' /var/lib/dd-facts/draining.prom 2>/dev/null; then
+if grep -qx 'dd_box_draining 1' "$facts/draining.prom" 2>/dev/null; then
   draining=yes
 fi
-if [ -e /dev/kvm ] && [ "$draining" = no ]; then
-  total=$(awk '/^MemTotal:/ {print $2 * 1024}' /proc/meminfo)
-  mem=$((total - RESERVE_BYTES))
+if [ -e "${KVM:-/dev/kvm}" ] && [ "$draining" = no ]; then
+  total=$(awk '/^MemTotal:/ {print $2 * 1024}' "${MEMINFO:-/proc/meminfo}")
+  # the services' measured peak (service-memory.nix) with headroom, not the
+  # computers' own units; no measure or a stale one: the needs' sizes
+  reserve=$RESERVE_BYTES
+  measure=${MEASURED:-}
+  if [ -n "$measure" ] && [ -s "$measure" ] &&
+    [ $(($(date +%s) - $(stat -c %Y "$measure"))) -le "${STALE_SECONDS:-1800}" ]; then
+    kept=$(awk -v base="$BASE_BYTES" -v h="$HEADROOM" '
+      /^dd_service_memory_bytes\{/ && !/service="computers"/ { s += $NF; n++ }
+      END { if (n) printf "%.0f\n", base + s * h }' "$measure")
+    [ -z "$kept" ] || reserve=$kept
+  fi
+  mem=$((total - reserve))
   [ "$mem" -gt 0 ] || mem=0
   threads=$(($(nproc) - 1))
   [ "$threads" -gt 0 ] || threads=0

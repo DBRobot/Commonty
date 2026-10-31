@@ -321,8 +321,8 @@ QUALIFYING (ident.Qualify)    the minimum and any one of
   system: boxes don't share builds, rustc peaks near 1 GB a job, and the
   closure is 5 to 11 GB, with generations and its share of the store
   beside it. Compute is what hosting a service or a member's computer
-  needs: both are capped at 8 threads and 16 GiB. Storage is 4 TB because
-  copies are kept twice.
+  needs: 8 threads and 16 GiB (a member's computers may take 32 GiB
+  together). Storage is 4 TB because copies are kept twice.
 - **A box at the minimum and nothing more** ("just enough to run") joins as
   a stranger and holds copies, but gives its member no access. A weak CPU
   with 4 TB of store qualifies, and so does one with a GPU.

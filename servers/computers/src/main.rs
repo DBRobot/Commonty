@@ -146,9 +146,9 @@ fn host() -> Host {
         placed: env_or("DD_COMPUTERS_PLACED", "/run/dd-placed").into(),
         control: env_or("DD_COMPUTERS_CONTROL", "127.0.0.1:4195"),
         limits: Limits {
-            memory: num("DD_COMPUTERS_MEMORY_MIB", 16384),
+            memory: num("DD_COMPUTERS_MEMORY_MIB", 32768),
             threads: num("DD_COMPUTERS_THREADS", 8),
-            disk: num("DD_COMPUTERS_DISK_GIB", 200),
+            disk: num("DD_COMPUTERS_DISK_GIB", 500),
             port_base: num("DD_COMPUTERS_PORT_BASE", 27200),
             port_count: num("DD_COMPUTERS_PORT_COUNT", 200),
         },

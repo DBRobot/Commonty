@@ -17,9 +17,9 @@
     }
   },
   "computers": {
-    "memory": 16384,
+    "memory": 32768,
     "threads": 8,
-    "disk": 200,
+    "disk": 500,
     "portBase": 27200,
     "portCount": 200
   },

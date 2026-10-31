@@ -366,7 +366,7 @@ except Exception:
     raise
 # against this box's limits (dd.computers.memoryMiB above; the policy's
 # on a real box)
-assert listed("using 1.0 GiB of 1.5 GiB, 1 of 8 threads, 8 of 200 GiB"), box.succeed(
+assert listed("using 1.0 GiB of 1.5 GiB, 1 of 8 threads, 8 of 500 GiB"), box.succeed(
     "cat /tmp/list"
 )
 assert not listed(" nope ")

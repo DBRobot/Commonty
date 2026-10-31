@@ -35,7 +35,7 @@ host, a template unit, a firewall chain refilled from who may reach it.
 ## What a member decides
 
 - **Memory, threads, disk**, each its own and changeable. A member's
-  computers together, running or not, stay within 16G, 8 threads and 200G of disk
+  computers together, running or not, stay within 32G, 8 threads and 500G of disk
   (`fleet/policy.json` `computers`, for now). Disk counts toward their storage
   allowance, as game worlds do from now on (below).
 - **Packages**, in a Nix file: a NixOS module for the guest
@@ -213,8 +213,13 @@ browser: compute.<domain>        CLI: dd computer ...
 
 - **What a box can host**: each box writes `computers.prom` to its facts, and its
   heartbeat carries it:
-  - `dd_computer_max_mem_bytes`: its memory, less what the services it carries
-    keep aside, less 2G;
+  - `dd_computer_max_mem_bytes`: its memory, less 2G, less 1.5 times what
+    its services hold at their measured peak (`services.prom`, from
+    `dd-service-memory`; the computers' own units not counted), the factor
+    `dd.computers.headroom`. With no measure, or one older than 30 minutes,
+    less the needs' sizes of every service it is built with instead, as
+    before measures: such a box never offers more. `dd.computers.reserveMiB`
+    sets a fixed reserve in place of both;
   - `dd_computer_max_threads`: its threads, less one;
   - `dd_computer_max_disk_bytes`: what `tank/enc/computers` has free under its quota.
   - `dd_computer_used_bytes{computer="<id>"}`: what each computer keeps
@@ -412,10 +417,10 @@ everywhere. No box decides anything about a computer.
 - **The port pool's size** (`fleet/policy.json` `computers.portCount`,
   200 from 27200 for the whole fleet, 16 per member): David's decision,
   not made yet.
-- **node1's room**: its services keep about 49 GiB by the release's
-  estimates (`dd.computers.reserveMiB`, from the needs' sizes), so it
-  offers about 12 GiB and 7 threads to computers; a 16 GiB or 8-thread
-  computer does not fit there until those estimates or the policy change.
+- **node1's room**: by the needs' sizes its services would keep about 48
+  GiB; measured, they hold about 22 GiB at their peak (14 of it the CI
+  runner), so it offers about 27 GiB and 7 threads to computers
+  (2026-10-30). A 32 GiB or 8-thread computer does not fit on it.
 - **Snapshots and moves** with their disks: not built. A computer whose
   box fails waits (own) or starts afresh elsewhere (any) without its disks.
 - **Disks of a deleted computer** stay on the box that ran it; nothing
