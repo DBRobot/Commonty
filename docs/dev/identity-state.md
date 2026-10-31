@@ -228,7 +228,10 @@ gate (refusing an item already sent or already judged, Rust
 ## 3. The rules, once
 
 These are today's rules (identity::accept, the gate's replay, leaving.rs),
-moved, not changed. Each item is judged at its agreed time `at`.
+moved, not changed. Each item is judged at its agreed time `at`. One rule
+comes first, for every kind: with `root_pages` in the release's config, a
+passkey's signature made on any other page is refused
+([gate.md](gate.md#a-boxs-own-sign-in)).
 
 - **entry, a name nobody holds (a claim)**: the body must pass `accept`
   against nothing (well-formed name, at least one device unless a passkey

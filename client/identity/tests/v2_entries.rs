@@ -169,6 +169,10 @@ impl Pk {
     }
 
     fn answer(&self, challenge: &[u8]) -> String {
+        self.answer_on(challenge, "https://home.example.org")
+    }
+
+    fn answer_on(&self, challenge: &[u8], origin: &str) -> String {
         use p256::ecdsa::signature::Signer as _;
         use sha2::Digest as _;
         let mut auth = sha2::Sha256::digest(b"example.org").to_vec();
@@ -177,7 +181,7 @@ impl Pk {
         let client = serde_json::to_vec(&json!({
             "type": "webauthn.get",
             "challenge": B64URL.encode(challenge),
-            "origin": "https://home.example.org",
+            "origin": origin,
             "crossOrigin": false
         }))
         .unwrap();
@@ -223,6 +227,36 @@ fn passkey_entry(pk: &Pk, version: u64) -> Entry {
         removed_boxes: vec![],
         version,
         updated: version,
+    }
+}
+
+#[test]
+fn only_the_accounts_own_pages_may_ask_a_root_passkey_to_change_it() {
+    let pk = Pk::new(9);
+    let on = |origin: &str| {
+        let e = passkey_entry(&pk, 1);
+        let body = serde_json::to_vec(&e).unwrap();
+        SignedEntry::from_envelope(&envelope::Envelope {
+            v: 2,
+            kind: envelope::ENTRY.into(),
+            body: B64.encode(&body),
+            sig: pk.answer_on(&envelope::passkey_challenge(envelope::ENTRY, &body), origin),
+            recovery_sig: None,
+        })
+        .unwrap()
+    };
+    verify(&on("https://home.example.org")).unwrap();
+    verify(&on("https://compute.example.org")).unwrap();
+    // the browser lets any of these ask, since the relying party is the
+    // domain: a joined box's name above all, and another service's page
+    for origin in [
+        "https://x.j0123456789.example.org",
+        "https://home.j0123456789.example.org",
+        "https://metrics.node2.example.org",
+        "https://git.example.org",
+        "https://example.org",
+    ] {
+        assert!(verify(&on(origin)).is_err(), "{origin}");
     }
 }
 

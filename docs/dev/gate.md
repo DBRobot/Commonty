@@ -278,6 +278,13 @@ run a ceremony: the allowed origins are `https://<h>.<domain>` for each
 of `VERIFY_HOSTS`, plus `https://home.<domain>` (`own_hosts`). A page on
 another host could be another box relaying this box's challenge.
 
+The browser lets any name under the relying party ask the passkey to sign
+anything, and a root passkey's signature changes the account on every box.
+So what only the root may say (an entry, a leave, an enlist, a computer) counts
+only if made on `home.<domain>` or `compute.<domain>`
+(`identity::ROOT_PAGES`; the judge's `root_pages` in the config), and
+Settings and the sign-up page send other names there.
+
 Each ceremony's state is kept in memory for 300 s under a random id; the
 browser sends it back in `x-dd-ceremony`.
 
