@@ -279,6 +279,11 @@ assert ident["enlisted"][0]["qualifies"] == "gpu" and ident["enlisted"][0]["coun
 )
 # the services are open to her now
 wait(fleet, f"test $({verify}) = 200", timeout=60)
+# its next build is for her, by what the agreed state says; and nobody logs in
+box.wait_until_succeeds(
+    "jq -e '.owner == \"ada\"' /var/lib/dd/box/enlisted.json", timeout=60
+)
+box.fail("test -s /etc/ssh/authorized_keys.d/admin")
 assert json.loads(
     fleet.succeed(f"curl -sf {auth} http://127.0.0.1:4281/_dd/network/joined")
 )[0]["enlisted"]
@@ -356,6 +361,11 @@ assert "load" not in kept[-1]["boxes"][nix["keyName"]].get("facts", {}), kept[-1
 fleet.succeed(f"cd /root/f && python3 {nix['fleet']} item unenlist {nix['keyName']}")
 wait(fleet, f"{mine} | jq -e '.boxes == []'", timeout=120)
 wait(fleet, f"test $({verify}) = 403", timeout=60)
+box.wait_until_succeeds("jq -e '.owner == null' /var/lib/dd/box/enlisted.json", timeout=60)
+# it knows her as a former owner, and the release's switch being off, nothing
+# of hers is asked to be removed
+box.succeed("test -e /var/lib/dd-control/owners-seen/ada")
+box.fail("systemctl list-units --all 'dd-forget-owner@*' | grep -q ada")
 ident = json.loads(fleet.succeed("curl -sf 'http://127.0.0.1:4191/identity?name=ada'"))[
     "member"
 ]
