@@ -1678,10 +1678,14 @@
    "servers/web-shared/shell.js",
    "servers/home/web/pages/home.html",
    "app/web/_dd/**",
+   "servers/home/web/use-app.js",
+   "servers/home/web/pages/use-app.html",
    "servers/gate/src/pages.rs"
   ],
   "why": {
    "nix/tests/same-tab.nix": "test derivation; cmp of shell.js and home.html copies",
+   "servers/home/web/use-app.js": "a linked browser's handoff page goes to the app's copy itself",
+   "servers/home/web/pages/use-app.html": "the handoff page the flow opens",
    "nix/tests/same-tab/**": "flow.py",
    "servers/web-shared/shell.js": "cmp against the app's copy",
    "servers/home/web/pages/home.html": "cmp against the app's copy",

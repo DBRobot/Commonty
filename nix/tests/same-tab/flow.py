@@ -3,6 +3,7 @@
 # the app serves a browser it let in (s-<label>.localhost), and in the bar
 # above Photos and Passwords there (p- and v-). The pages, the bar and its
 # script are the real ones (app/web/_dd, which the box serves the same);
+# the handoff page a box serves for a key page is the box's (argv 2).
 # /_dd/me is a member's as the gate writes it (pages::me_json), with the
 # services the roles add. Nothing answers but this script: every other
 # address is a page that says it was reached.
@@ -12,6 +13,8 @@ import sys
 from playwright.sync_api import sync_playwright
 
 WEB = sys.argv[1]
+# the box's own pages, for the handoff page (use-app)
+BOX = sys.argv[2]
 DOMAIN = "commonty.test"
 LABEL = "0123456789abcdef0123456789abcdef"
 APP = f"http://s-{LABEL}.localhost:41660"
@@ -19,6 +22,8 @@ PHOTOS = f"http://p-{LABEL}.localhost:41661"
 HOME = f"https://home.{DOMAIN}"
 
 ICON = '<path d="M3 3h14v14H3z"/>'
+# what the app writes into a let-in browser's pages for their links to a box
+LINK_KEY = "f" * 64
 
 
 def service(name, url):
@@ -94,6 +99,8 @@ def answer(route):
         )
     if path.startswith("/_dd/static/"):
         f = os.path.join(WEB, "static", path[len("/_dd/static/") :])
+        if not os.path.isfile(f):
+            f = os.path.join(BOX, path[len("/_dd/static/") :])
         if os.path.isfile(f):
             return route.fulfill(
                 status=200,
@@ -107,16 +114,28 @@ def answer(route):
     # them (with the domain the app writes into each)
     page = (
         "home"
-        if path == "/_dd/home"
+        if path in ("/_dd/home", "/_dd/settings") and origin not in (APP, PHOTOS)
         else PAGES.get(path)
         if origin in (APP, PHOTOS)
         else None
     )
+    # the handoff page, as the gate serves a key page to a member's browser
+    if (
+        host == f"files.{DOMAIN}"
+        and path == "/_dd/files"
+        and req.resource_type == "document"
+    ):
+        html = open(os.path.join(BOX, "pages", "use-app.html")).read()
+        return route.fulfill(status=200, content_type="text/html", body=html)
     if page and req.resource_type == "document":
         html = open(os.path.join(WEB, "pages", page + ".html")).read()
         if origin in (APP, PHOTOS):
             html = html.replace(
                 "</head>", f'<meta name="dd-domain" content="{DOMAIN}"></head>', 1
+            )
+        if origin == APP:
+            html = html.replace(
+                "</head>", f'<meta name="dd-app-link" content="{LINK_KEY}"></head>', 1
             )
         return route.fulfill(status=200, content_type="text/html", body=html)
     if req.resource_type == "document":
@@ -268,6 +287,154 @@ with sync_playwright() as p:
         "photos: Files goes to the app's Files",
         tile(f"{PHOTOS}/_dd/home", "Files") == f"{APP}/_dd/files",
     )
+
+    # 4. a box's page in a browser the app let in and signed in there: the
+    # box keeps where the app answers it, out of the pages' reach, and says
+    # only that it does (dd_app_linked), so what the app carries opens the
+    # app's copy through the box, with no handoff page and no link for the
+    # system to pass on. The pages a box serves itself stay the box's.
+    def here(start, urls):
+        page.goto(start)
+        return page.evaluate(
+            "(us) => import('/_dd/static/shell.js').then((m) => us.map((u) => m.here(u)))",
+            urls,
+        )
+
+    links_of = [
+        f"https://files.{DOMAIN}/_dd/calendar",
+        "/_dd/settings#backups",
+        f"https://photos.{DOMAIN}/_dd/photos",
+        f"https://vault.{DOMAIN}/",
+        f"https://llm.{DOMAIN}/",
+        f"https://games.{DOMAIN}/",
+        f"https://metrics.{DOMAIN}/x?y=1",
+    ]
+    unlinked = here(f"https://games.{DOMAIN}/", links_of)
+    check(
+        "unlinked box page: every link is the box's own",
+        [u.split("#")[0] for u in unlinked]
+        == [
+            f"https://files.{DOMAIN}/_dd/calendar",
+            "/_dd/settings",
+            f"https://photos.{DOMAIN}/_dd/photos",
+            f"https://vault.{DOMAIN}/",
+            f"https://llm.{DOMAIN}/",
+            f"https://games.{DOMAIN}/",
+            f"https://metrics.{DOMAIN}/x?y=1",
+        ],
+    )
+    if failed and failed[-1].startswith("unlinked"):
+        print("   ", unlinked)
+
+    def linked_on(host, value="1"):
+        ctx.clear_cookies()
+        ctx.add_cookies(
+            [
+                {
+                    "name": "dd_app_linked",
+                    "value": value,
+                    "domain": host,
+                    "path": "/",
+                    "secure": True,
+                }
+            ]
+        )
+
+    opened_here = "/_dd/app-signin?open="
+    linked_on(f"games.{DOMAIN}")
+    linked = here(f"https://games.{DOMAIN}/", links_of)
+    want = [
+        opened_here + "site&path=%2F_dd%2Fcalendar",
+        opened_here + "site&path=%2F_dd%2Fsettings%23backups",
+        opened_here + "photos",
+        opened_here + "vault",
+        opened_here + "site&path=%2F_dd%2Fchat",
+        f"https://games.{DOMAIN}/",
+        f"https://metrics.{DOMAIN}/x?y=1",
+    ]
+    check(
+        "linked box page: the app carries it, the app's copy; else the box's",
+        linked == want,
+    )
+    if linked != want:
+        print("   ", linked)
+    # a box's own Settings, at its Backups: straight on to the app's
+    linked_on(f"home.{DOMAIN}")
+    page.goto(f"https://home.{DOMAIN}/_dd/settings#backups")
+    try:
+        page.wait_for_url(
+            f"https://home.{DOMAIN}"
+            + opened_here
+            + "site&path=%2F_dd%2Fsettings%23backups",
+            timeout=5000,
+        )
+        check("linked: the box's Settings#backups opens the app's", True)
+    except Exception:
+        check(
+            f"linked: the box's Settings#backups opens the app's (at {page.url})", False
+        )
+    # sent back by the box (nothing kept there after all): no loop
+    page.goto(f"https://home.{DOMAIN}/_dd/settings")
+    # the tiles drawn: the page's script ran to its end and did not leave
+    try:
+        page.wait_for_selector("main .services a.service", timeout=5000)
+    except Exception:
+        pass
+    check(
+        "linked: sent straight back, the box's Settings stays",
+        page.url == f"https://home.{DOMAIN}/_dd/settings",
+    )
+    # the handoff page for a key page goes there by itself too
+    linked_on(f"files.{DOMAIN}")
+    page.goto(f"https://files.{DOMAIN}/_dd/files")
+    try:
+        page.wait_for_url(lambda u: opened_here in u, timeout=5000)
+        check(
+            "linked: the handoff page opens the app's copy itself",
+            page.url
+            == f"https://files.{DOMAIN}" + opened_here + "site&path=%2F_dd%2Ffiles",
+        )
+    except Exception:
+        check(
+            f"linked: the handoff page opens the app's copy itself (at {page.url})",
+            False,
+        )
+    # linked on another name of the fleet's: not here
+    linked_on(f"files.{DOMAIN}")
+    check(
+        "linked elsewhere: this box's links are its own",
+        here(f"https://games.{DOMAIN}/", links_of[:1]) == links_of[:1],
+    )
+    linked_on(f"games.{DOMAIN}", "0")
+    check(
+        "a dd_app_linked of 0 is no link",
+        here(f"https://games.{DOMAIN}/", links_of[:1]) == links_of[:1],
+    )
+    # the handoff page with no such cookie shows its button, as before
+    ctx.clear_cookies()
+    page.goto(f"https://files.{DOMAIN}/_dd/files")
+    page.wait_for_selector("#use-app:not([hidden])", timeout=5000)
+    check(
+        "unlinked: the handoff page still offers the app",
+        page.url == f"https://files.{DOMAIN}/_dd/files",
+    )
+
+    # 5. a box's own page linked from the app's pages: through the app's
+    # click route, with the key the app wrote into that page
+    signin = here(
+        f"{APP}/_dd/home",
+        [f"https://games.{DOMAIN}/", f"https://metrics.{DOMAIN}/x?y=1#z"],
+    )
+    check(
+        "app: a box's own page is reached through the app, with its page's key",
+        signin
+        == [
+            f"/_dd/app/to-box?host=games.{DOMAIN}&rd=%2F&k={LINK_KEY}",
+            f"/_dd/app/to-box?host=metrics.{DOMAIN}&rd=%2Fx%3Fy%3D1%23z&k={LINK_KEY}",
+        ],
+    )
+    if failed and failed[-1].startswith("app: a box"):
+        print("   ", signin)
 
     check("no tab was opened", len(ctx.pages) == 1)
     b.close()

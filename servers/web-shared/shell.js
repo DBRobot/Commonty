@@ -76,6 +76,15 @@ const appSite = (() => {
   return m ? `http://s-${m[1]}.localhost:41660` : '';
 })();
 
+/// On a box's page, a browser this computer's app let in and signed in
+/// here: the box keeps where the app answers it, where no page can read it
+/// (servers/gate/src/app_signin.rs), and says only that it does
+const linkedHere = !inApp && !servedByApp && !appSite
+  && document.cookie.split(';').some((c) => c.trim() === 'dd_app_linked=1');
+/// the app's copy of one of its pages (a path with its query and #) for
+/// that browser, through this box, which knows where the app is
+const appCopy = (service, path) => `/_dd/app-signin?${new URLSearchParams(path ? { open: service, path } : { open: service })}`;
+
 /// a request to the app's own routes (/_dd/app/...), with the secret the
 /// app put in this page when it served it: the app answers nothing else
 export function appFetch(url, init = {}) {
@@ -85,6 +94,11 @@ export function appFetch(url, init = {}) {
 /// A part holding a key, on a page a box served: the member's app opens its
 /// own copy of `path` in this browser (as use-app.js), or `nothing` runs
 export function toApp(path, nothing) {
+  // a browser the app let in goes straight there
+  if (linkedHere) {
+    location.href = appCopy('site', path);
+    return;
+  }
   let left = false;
   const away = () => { left = true; };
   window.addEventListener('blur', away, { once: true });
@@ -103,6 +117,11 @@ export const noApp = () => el('span', {}, "Nothing opened: the Commonty app isn'
 /// `text`, and one button that hands this part to the app (toApp); `props`
 /// are the button's own (its data-guide for Monty)
 export function throughApp(text, label, path, props = {}) {
+  // a browser the app let in has nothing to press: the app's copy, now
+  if (linkedHere) {
+    location.replace(appCopy('site', path));
+    return el('span', {});
+  }
   const after = el('span', {}, ' No Commonty app on this computer? ', getApp());
   const open = el('button', { class: 'inline', type: 'button', ...props, text: label });
   open.onclick = () => toApp(path, () => after.replaceChildren(' ', noApp()));
@@ -129,9 +148,40 @@ function served(url) {
     if (u.hostname.startsWith('llm.')) return appSite + '/_dd/chat';
     if (u.pathname === '/_dd/photos') return '/_dd/app/go?service=photos';
     if (u.hostname.startsWith('vault.')) return '/_dd/app/go?service=vault';
+    // a box's own page (Games, Git, Metrics): through the app, which lets
+    // that box ask it to sign this browser in, so no passkey is asked
+    // there (app/src/local.rs to_box); the key says the click was here
+    const k = document.querySelector('meta[name="dd-app-link"]')?.content;
+    if (servedByApp && k && u.protocol === 'https:' && onFleet(u.href)) {
+      return `/_dd/app/to-box?${new URLSearchParams({ host: u.hostname, rd: u.pathname + u.search + u.hash, k })}`;
+    }
     return url;
   } catch {
     return url;
+  }
+}
+// The same for a browser the app let in, on a box's page: what the app
+// carries opens the app's copy, and nothing asks which
+function linked(url) {
+  try {
+    const u = new URL(url, location.href);
+    if (carried.includes(u.pathname) || u.pathname === '/_dd/chat') return appCopy('site', u.pathname + u.search + u.hash);
+    if (u.hostname.startsWith('llm.')) return appCopy('site', '/_dd/chat');
+    if (u.pathname === '/_dd/photos' || u.hostname.startsWith('photos.')) return appCopy('photos');
+    if (u.hostname.startsWith('vault.')) return appCopy('vault');
+    return url;
+  } catch {
+    return url;
+  }
+}
+// and a box's own copy of one of those pages is left at once for the
+// app's, unless it was just tried and the box sent it back here
+if (linkedHere && (carried.includes(location.pathname) || location.pathname === '/_dd/chat')) {
+  let tried = 0;
+  try { tried = Number(sessionStorage.getItem('dd-app-open')) || 0; } catch { /* each time */ }
+  if (Date.now() - tried > 10000) {
+    try { sessionStorage.setItem('dd-app-open', String(Date.now())); } catch { /* each time */ }
+    location.replace(appCopy('site', location.pathname + location.search + location.hash));
   }
 }
 // The bar's addresses come from a box (/_dd/me): a path on this page's own
@@ -161,6 +211,7 @@ function linkable(url) {
 export function here(raw) {
   const url = linkable(raw);
   if (servedByApp || appSite) return served(url);
+  if (linkedHere) return linked(url);
   if (!inApp) return url;
   try {
     const u = new URL(url, location.href);
