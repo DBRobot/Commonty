@@ -127,9 +127,9 @@
       };
       depends = {
         store.local = true;
-        # its collection keeps what the releases branch wants: the one the
-        # forge holding the lease has (storage/cache.nix)
-        forgejo.local = true;
+        # its collection reads the releases branch at the public door
+        # (storage/cache.nix)
+        forgejo.local = false;
       };
       privacy = "none"; # what any build of this public repo makes
     };
