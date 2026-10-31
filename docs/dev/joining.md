@@ -291,12 +291,16 @@ replaying the directory serves its replay, which knows invites only).
 - **Anyone signed up and not shut out** may keep a pending backup and see
   and remove their boxes, whatever their access: that is how a box comes
   to give them access.
-- **Placement**: an enlisted, qualifying box of a member with access is
-  a peer of the release's boxes for copies: a copy it holds is kept as one
-  on a box of the release is, and a stranger's word never pushes it out
-  (`place.Decide`'s `members`). It runs no service: it is in no release's
-  capability table, holds no lease, and its owner's box would see others'
-  plaintext if it did.
+- **Placement**: an enlisted box of a member with access is theirs
+  (`place.Owners`, from the agreed state alone, read alike by every box and
+  the witness). A copy it holds is kept as one on a box of the release is,
+  and a stranger's word never pushes it out. Once joined boxes are attested
+  (`attested`, off today) it may run what reads nobody's data (`joined`
+  `services`) and its owner's own (`own`, trust `own`), one for them on their
+  boxes, never the instance the fleet shares and never a fleet name; a box
+  the fleet's owner enlisted is theirs like a box of the release, leases
+  aside. A stranger runs nothing. A ban, leaving or an unenlist takes it all
+  out of the next plan.
 
 ## Hardware
 
