@@ -159,6 +159,14 @@ TABLE = [
         "L Y - - Y Y Y",
         "the games manager's API, as its page asks it",
     ),
+    ("compute", "/", "GET", "L - - - Y Y Y", "Remote computers' page: members"),
+    (
+        "compute",
+        "/api/state",
+        "GET",
+        "L - - - Y Y Y",
+        "their computers' API, as the page and `dd computer` ask it",
+    ),
     ("git", "/", "GET", "L Y Y Y Y Y Y", "Git's page: any session"),
     (
         "git",
@@ -215,6 +223,7 @@ OUTSIDE = [
     ("code", "/", "Y", "the forge's public door"),
     ("files", "/_dd/files", "X", "private"),
     ("games", "/", "X", "private"),
+    ("compute", "/api/state", "X", "private"),
     ("git", "/", "X", "private"),
     (
         "git",

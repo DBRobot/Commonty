@@ -1377,7 +1377,8 @@ dd.verify.enable          run it (default true; VM tests that do not involve the
 dd.verify.role            "full" | "directory" (core.nix: directory; gateway.nix: full)
 dd.verify.port            4181
 dd.verify.hosts           the subdomains it stands in front of:
-                          files llm metrics git home photos games
+                          files llm metrics git home photos games, and
+                          compute where a box hosts remote computers
 dd.verify.names           extra names a token's audience may be (default: dd.box.net)
 dd.verify.directoryReaders  keys that read single entries: fleet/mail.json reader (core.nix)
 dd.verify.housePeers      the same house's boxes (flake.nix)
@@ -1567,7 +1568,10 @@ nginx.nix       every box's nginx config through `nginx -t`
   the tree), so a typo fails a test rather than a page.
 - **A new host** the gate stands in front of goes in `dd.verify.hosts`,
   or its pages cannot run a passkey ceremony (`own_hosts`) and it gets no
-  `/_dd/` location or `@login`.
+  `/_dd/` location or `@login`. Its `auth_request /_dd/verify` then lands
+  on the service behind it: compute.<domain>'s server answered 404 there,
+  and nginx turned that into a 500 for everyone (until 2026-10-30). A row
+  in `nix/tests/site/roles.py` for the name catches it.
 - **A new public path** goes through public.nix: a name not listed there
   is closed to outsiders, whatever the gate would answer.
 - **Rename debt.** The crate, unit, user and variables are still `verify`.

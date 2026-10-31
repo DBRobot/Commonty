@@ -248,3 +248,166 @@ facts = box.succeed("cat /var/lib/dd-facts/computers.prom")
 for name in ("mem_bytes", "threads", "disk_bytes"):
     assert f"dd_computer_max_{name} 0\n" in facts, facts
 assert int(box.succeed("ls /var/lib/dd-facts | grep -c '^computers.prom'")) == 1
+
+# ---- the whole road, as a member takes it from their laptop: `dd computer`
+# through nginx and the gate, judged, placed and leased by the box's own
+# dd-control with the relay's witness, started here, and SSH into it
+box.succeed("rm /var/lib/dd-facts/draining.prom")
+box.succeed("systemctl start dd-computer-facts.service")
+box.succeed("systemctl stop control-stand-in.service")
+box.succeed("rm -f /run/dd-placed/computer-*")
+
+# somewhere on the web, as the guest sees it: not the box, not a private
+# network (a namespace of its own, at a documentation address)
+box.succeed(
+    "ip netns add web && ip link add web0 type veth peer name web1 netns web"
+    " && ip addr add 198.51.100.1/24 dev web0 && ip link set web0 up"
+    " && ip -n web addr add 198.51.100.2/24 dev web1 && ip -n web link set web1 up"
+    " && ip -n web link set lo up && mkdir -p /srv/web && echo reached > /srv/web/hello"
+)
+box.succeed("systemctl start web-far.service")
+box.wait_until_succeeds("curl -sf -m 3 http://198.51.100.2/hello")
+
+box.succeed(
+    "mkdir -p /root/f/w && cd /root/f"
+    f" && cp {nix['worker']}/worker.js {nix['worker']}/wasm_exec.js {nix['worker']}/witness.wasm w/"
+    " && chmod -R u+w ."
+)
+box.succeed(
+    "cat > /root/f/w/wrangler.toml <<'EOF'\n"
+    'name = "computers"\nmain = "worker.js"\ncompatibility_date = "2026-05-01"\nno_bundle = true\n'
+    'rules = [\n  { type = "CompiledWasm", globs = ["**/*.wasm"] },\n  { type = "ESModule", globs = ["**/*.js"] },\n]\n'
+    '[[durable_objects.bindings]]\nname = "RELAY"\nclass_name = "Relay"\n'
+    '[[migrations]]\ntag = "v1"\nnew_sqlite_classes = ["Relay"]\nEOF'
+)
+box.succeed(
+    "systemd-run --unit fleet -p WorkingDirectory=/root/f"
+    " -E HOME=/root -E WRANGLER_SEND_METRICS=false -E CI=1 -E CLOUDFLARE_CF_FETCH_ENABLED=false"
+    " -E PATH=/run/current-system/sw/bin"
+    f" python3 {nix['fleet']} {nix['control']}"
+)
+box.wait_until_succeeds(
+    "test -e /root/f/ready || systemctl is-failed -q fleet.service", timeout=600
+)
+if box.execute("test -e /root/f/ready")[0] != 0:
+    print(
+        box.execute(
+            "journalctl -u fleet --no-pager | tail -40; tail -40 /root/f/relay.log"
+        )[1]
+    )
+    raise AssertionError("the test fleet did not come up")
+box.succeed("systemctl start dd-control.service")
+box.wait_until_succeeds(
+    "curl -sf http://127.0.0.1:4195/state | jq -e '.boxes | has(\"box\")'", timeout=180
+)
+# the gate, now reading who is who from the agreed state
+box.succeed("systemctl restart dd-verify.service")
+box.wait_for_open_port(4181)
+box.wait_until_succeeds(
+    "curl -sf -X PUT -H 'content-type: application/json' --data-binary @/root/f/entry.json"
+    " http://127.0.0.1:4181/_dd/directory/tom",
+    timeout=180,
+)
+box.wait_until_succeeds(
+    "curl -sf http://127.0.0.1:4195/identity | jq -e '.members.tom.status == \"member\"'",
+    timeout=120,
+)
+
+# nobody signed in: sent to sign in, never nginx's 500 (compute.<domain>
+# had no gate in front of it until the gate's hosts named it)
+code = box.succeed(
+    "curl -sk -o /dev/null -w '%{http_code}' --resolve compute.test.invalid:443:127.0.0.1"
+    " https://compute.test.invalid/api/state"
+).strip()
+assert code == "302", code
+
+box.succeed(
+    "mkdir -p /root/.ssh && printf 'Host *\\n  StrictHostKeyChecking no\\n"
+    "  UserKnownHostsFile /dev/null\\n  ConnectTimeout 5\\n' > /root/.ssh/config"
+)
+tom = (
+    f"HOME=/root DD_KEYRING_FILE=/root/tom.json {nix['dd']} computer"
+    " --directory http://home.test.invalid:8080/_dd/directory"
+)
+
+
+def listed(text):
+    """whether `dd computer list` shows this line, now"""
+    return box.execute(f"{tom} list > /tmp/list && grep -cF '{text}' /tmp/list")[0] == 0
+
+
+# a config, with a Nix file (the empty one the image already applied, so the
+# guest does not rebuild offline), and a computer made from it
+box.succeed("printf '{ ... }: { }\\n' > /root/dev.nix")
+box.succeed(f"{tom} config dev --memory 1024 --threads 1 --disk 8 --nix /root/dev.nix")
+box.wait_until_succeeds(
+    f"{tom} list > /tmp/list && grep -c '^config dev .*my boxes' /tmp/list", timeout=120
+)
+# anyone's box is asked first, and a no makes nothing
+box.succeed(f"{tom} config wide --memory 1024 --threads 1 --disk 8 --anywhere")
+box.wait_until_succeeds(
+    f'{tom} list > /tmp/list && grep -c "^config wide .*anyone\'s box" /tmp/list',
+    timeout=120,
+)
+out = box.fail(f"echo n | {tom} make wide nope 2>&1")
+assert "someone else's box" in out and "not made" in out, out
+box.succeed(f"{tom} make dev")
+try:
+    box.wait_until_succeeds(
+        f"{tom} list > /tmp/list && grep -c 'on box, ssh -p 27200 tom@127.0.0.1' /tmp/list",
+        timeout=300,
+    )
+except Exception:
+    print(
+        box.execute(
+            "curl -s http://127.0.0.1:4195/plan; journalctl -u dd-control --no-pager | tail -30"
+        )[1]
+    )
+    raise
+# against this box's limits (dd.computers.memoryMiB above; the policy's
+# on a real box)
+assert listed("using 1.0 GiB of 1.5 GiB, 1 of 8 threads, 8 of 200 GiB"), box.succeed(
+    "cat /tmp/list"
+)
+assert not listed(" nope ")
+cid = box.succeed(
+    "curl -sf http://127.0.0.1:4195/computers"
+    " | jq -er '.computers | to_entries[] | select(.value.name == \"dev\") | .key'"
+).strip()
+assert box.succeed("stat -c %a /root/.config/commonty/computers").strip() == "700"
+assert (
+    box.succeed("stat -c %a /root/.config/commonty/computers/dev.device-key").strip()
+    == "600"
+)
+
+# SSH in, with the key `dd` made on this device and put in the signed item
+ssh = f"timeout 60 env {tom} ssh dev"
+try:
+    box.wait_until_succeeds(f"{ssh} true", timeout=900)
+except Exception:
+    print(
+        box.execute(
+            f"systemctl status dd-computer@{cid} --no-pager; tail -c 20000 /var/lib/private/dd-computer/{cid}/console.log"
+        )[1]
+    )
+    raise
+assert box.succeed(f"{ssh} whoami").strip() == "tom"
+# the web, from inside
+assert (
+    box.succeed(f"{ssh} curl -sf -m 10 http://198.51.100.2/hello").strip() == "reached"
+)
+box.fail(f"{ssh} test -e /var/lib/dd/apply.log")
+
+# stopped and started again from the laptop: /home is as it was
+box.succeed(f"{ssh} 'echo kept > ~/kept && sync'")
+box.succeed(f"{tom} stop dev")
+box.wait_until_succeeds(
+    f"! systemctl is-active -q dd-computer@{cid}.service && test ! -e /run/dd-placed/computer-{cid}",
+    timeout=240,
+)
+box.wait_until_succeeds(
+    f"{tom} list > /tmp/list && grep -c '^dev  *stopped' /tmp/list", timeout=60
+)
+box.succeed(f"{tom} start dev")
+box.wait_until_succeeds(f"{ssh} true", timeout=900)
+assert box.succeed(f"{ssh} cat kept").strip() == "kept"

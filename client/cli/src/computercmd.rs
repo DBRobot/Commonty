@@ -51,10 +51,11 @@ pub enum ComputerCmd {
     },
     /// Delete a config; remote computers made from it keep running
     Forget { name: String },
-    /// A new remote computer from a saved config, started
+    /// A new remote computer from a saved config, started; named as the
+    /// config unless a name is given
     Make {
         config: String,
-        name: String,
+        name: Option<String>,
         /// yes to running on someone else's box, without being asked
         #[arg(long)]
         yes: bool,
@@ -477,6 +478,7 @@ pub async fn run(cmd: ComputerCmd, keys: &auth::Store, dirs: &[String]) -> Resul
             println!("config {name} deleted");
         }
         ComputerCmd::Make { config, name, yes } => {
+            let name = name.unwrap_or_else(|| config.clone());
             plain_name(&name)?;
             let s = api.state().await?;
             let user = s["user"].as_str().context("who you are")?.to_string();

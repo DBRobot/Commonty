@@ -533,6 +533,10 @@ in
     users.users.nginx = lib.mkIf (cfg.manager && config.services.nginx.enable) {
       extraGroups = [ "dd-computers" ];
     };
+    # the gate stands in front of compute.<domain>: its /_dd/verify that
+    # auth_request asks, the sign-in redirect, and a token's audience. Without
+    # it nginx's subrequest found no location, a 404, and answered 500
+    dd.verify.hosts = lib.mkIf cfg.manager [ "compute" ];
     services.nginx.virtualHosts."compute.${base}" = lib.mkIf cfg.manager {
       useACMEHost = base;
       forceSSL = true;

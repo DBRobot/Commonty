@@ -314,6 +314,8 @@ grow an computer; a running one isn't stopped.
   each host box's `dd-computers` from dd-control: the member's configs
   and computers as agreed, where the plan puts each and its address on
   the Commonty network, and their totals against the limits.
+  `computers.nix` puts `compute` in `dd.verify.hosts`, which gives the
+  name its `/_dd/verify` and sign-in redirect.
 - **Changing**: every change is a signed item put at the gate,
   `PUT /_dd/computers/{kind}`. The page signs with the member's passkey
   (sha256 of `commonty <kind> v2\0` and the body, as the judge checks);
@@ -328,8 +330,15 @@ grow an computer; a running one isn't stopped.
   from the browser's device key, or a device root) must be the app's
   carried copy, never a box's.
 - **The CLI**: `dd computer list`, `config <name> ...`, `forget <name>`,
-  `make <config> <name>`, `start|stop|apply|delete|ssh <name>`.
+  `make <config> [<name>]` (named as its config when no name is given),
+  `start|stop|apply|delete|ssh <name>`.
   It asks the same question before "anyone's".
+- **Tested** end to end in `nix/tests/computers.nix`: after the box's side
+  with stand-ins, `dd computer config`, `make`, `list`, `ssh`, `stop` and
+  `start` as a member, through nginx and the gate to the box's own
+  dd-control, which judges, places and leases the computer with the
+  relay's witness (`computers/fleet.py`); the guest reaches the web and
+  keeps `/home` across a stop.
 
 ## The records
 
