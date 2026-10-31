@@ -1,11 +1,17 @@
 # shellcheck shell=bash
 # The nix cache, held to what is still wanted: every path under the systems
 # of the last KEEP releases, and anything uploaded in the last AGE days (a
-# CI run's builds, a release on its way). Everything else goes. REPO is the
-# fleet's repository on this box's forge (its releases branch says which
-# systems each release had); CACHE the cache's nix store url; BUCKET and
-# ENDPOINT where its objects are. DRY=1 counts and deletes nothing.
+# CI run's builds, a release on its way). Everything else goes. SOURCE is the
+# fleet's repository at the public door (its releases branch says which
+# systems each release had), whichever box holds the forge; CACHE the cache's
+# nix store url; BUCKET and ENDPOINT where its objects are. DRY=1 counts and
+# deletes nothing.
 set -euo pipefail
+REPO=$TMP/repo.git
+git clone -q --bare --single-branch --branch releases "$SOURCE" "$REPO" || {
+  echo "the forge did not answer: next time" >&2
+  exit 0
+}
 mapfile -t roots < <(git -c safe.directory="$REPO" -C "$REPO" log -n "$KEEP" --format=%H releases -- current.json |
   while read -r c; do git -c safe.directory="$REPO" -C "$REPO" show "$c:current.json" | jq -r '.payload.boxes[].path'; done | sort -u)
 [ "${#roots[@]}" -gt 0 ] || { echo "no releases found; nothing removed" >&2; exit 1; }
