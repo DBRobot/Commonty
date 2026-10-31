@@ -69,6 +69,8 @@
     # switched by the control plane: it runs where the plan puts it (box/placed.nix)
     placed = true;
     what = "every box's history, read out of the bucket";
+    # every box's health and whose it is
+    trust = "owner";
     # every box's blocks, in its home's store (fleet-placement.nix homes);
     # each box's sidecar writes them there. History, not anyone's data: one
     # copy
@@ -95,6 +97,8 @@
     # switched by the control plane: it runs where the plan puts it (box/placed.nix)
     placed = true;
     what = "the fleet view: this box's own sidecar and the bucket, as one";
+    # every box's health and whose it is
+    trust = "owner";
     alwaysOn = true;
     # metrics.<domain>, with the page over it (metrics-page, beside it), and
     # grafana.<domain>'s way there: the DNS Worker points them at its box
@@ -127,6 +131,8 @@
     # switched by the control plane: it runs where the plan puts it (box/placed.nix)
     placed = true;
     what = "the metrics the boxes members set up send, each box apart, for its member alone";
+    # every member's box's figures
+    trust = "owner";
     units = [
       "thanos-receive-joined"
       "thanos-query-joined"
@@ -161,6 +167,8 @@
     # gives back once it has stopped (box/placed.nix)
     lease = true;
     what = "merges and thins the history in the bucket";
+    # every box's history
+    trust = "owner";
     instances = 1;
     base = {
       # it downloads blocks to merge them: room for the biggest, overestimated
@@ -181,6 +189,8 @@
 
   metrics-page = {
     what = "metrics.<domain>: our pages over the fleet view, members only";
+    # the fleet view's page
+    trust = "owner";
     alwaysOn = true;
     base = {
       uses = {
@@ -244,6 +254,8 @@
     # switched by the control plane: it runs where the plan puts it (box/placed.nix)
     placed = true;
     what = "mails what is wrong on any box (disks, pools, backups), read from the fleet view";
+    # what is wrong on every box
+    trust = "owner";
     # a box that is down cannot say so: this has to stay up
     alwaysOn = true;
     units = [ "dd-fleet-alerts" ];

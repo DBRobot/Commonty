@@ -78,6 +78,8 @@ in
     RELEASE_KEY = "/etc/dd/release.pub";
     SOURCE = "git+https://code.${domain}/${repo}";
     DETECT = "${../modules/box/report}/detect.sh";
+    # what its owner's box.json starts as
+    BOX_JSON = "${./box.json}";
     # the commit this installer was made from: no release issued before it
     NOT_BEFORE = toString (self.lastModified or 0);
     # where a disk's backup goes before it is wiped (backup.sh)

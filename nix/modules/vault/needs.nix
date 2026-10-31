@@ -4,8 +4,8 @@
     what = "passwords: everyone's vault, encrypted on their own devices";
     # the page master passwords are typed into comes with the app
     # (app/src/local.rs), never from a box; the box still holds every vault,
-    # and could delete them: a member's box, never a stranger's
-    trust = "household";
+    # and could delete them
+    trust = "owner";
     alwaysOn = true;
     grows = [ "passwords" ];
     # one vault: its records are one database
@@ -55,9 +55,9 @@
 
   vaultwarden-send = {
     what = "Send links: one thing shared with anyone, opened without an account";
-    # the page a Send is decrypted in comes with the app, never a box; a
-    # member's box holds the Sends
-    trust = "household";
+    # the page a Send is decrypted in comes with the app, never a box; this
+    # box holds the Sends, beside the vault
+    trust = "owner";
     # the vault's sign-in secret with failover on: made wherever the vault
     # is carried, as the gate on every such box reads it
     units = [ "dd-vault-keys" ];
@@ -84,6 +84,8 @@
     # switched by the control plane: it runs where the plan puts it (box/placed.nix)
     placed = true;
     what = "the breach list, so checking a password never leaves the box";
+    # beside the vault, and what passwords are checked passes through it
+    trust = "owner";
     # the public breach list, about 90G fetched on a timer
     traffic = {
       class = "high";
@@ -111,7 +113,7 @@
         # only the vault reads it, beside it: the two go together
         vaultwarden.local = true;
       };
-      privacy = "none"; # a public list
+      privacy = "metadata"; # the list is public; what is checked against it is not
     };
   };
 }

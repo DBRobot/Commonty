@@ -75,11 +75,14 @@ let
     (can "diy-nas" "pihole" && can "office-desktop" "pihole" && can "thin-client" "pihole")
     # postgres wants an SSD; a NAS of spinning disks has none
     (!(can "diy-nas" "postgresql") && lib.hasInfix "SSD" (why "diy-nas" "postgresql"))
-    (can "office-desktop" "postgresql")
+    (can "n100-minipc" "postgresql")
+    # what reads someone else's stays off a member's box
+    (!(can "office-desktop" "postgresql") && lib.hasInfix "only on" (why "office-desktop" "postgresql"))
     # a 64G eMMC holds no nix cache
     (!(can "thin-client" "nix-cache") && lib.hasInfix "storage" (why "thin-client" "nix-cache"))
-    # members' sandboxed CI anywhere with the threads
-    (can "gaming-pc" "members-runner" && can "diy-nas" "members-runner")
+    # members' CI is in the clear on its box, so not on a member's; a runner
+    # on the owner's goes by its threads
+    (!(can "gaming-pc" "members-runner") && can "xeon-r740" "members-runner")
     # a box's certificate is its own names, asked of the DNS Worker, so
     # what sits behind nginx may run on anyone's box: a game server on a
     # gaming PC
@@ -106,9 +109,10 @@ let
     "gaming-pc: no vault"
     "pihole on households' boxes"
     "diy-nas: no postgres without an SSD"
-    "office-desktop: postgres"
+    "n100-minipc: postgres"
+    "office-desktop: no postgres, it holds everyone's records"
     "thin-client: no nix cache"
-    "members-runner on helpers' boxes"
+    "members-runner on the owner's boxes alone"
     "gaming-pc: no games until certificates move"
     "transcode: an encoder first"
     "pihole: mains before battery"

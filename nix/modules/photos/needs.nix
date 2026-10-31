@@ -2,12 +2,15 @@
 {
   ente-museum = {
     what = "the photos server: people's encrypted photos and the albums' records";
+    # everyone's photos and who has them: it answers Photos' names, as the pages it serves do
+    trust = "owner";
     # photos are encrypted on the device; it holds them and their metadata
     traffic = {
       class = "medium";
       upMbps = 10;
     };
     alwaysOn = true;
+    secrets = [ "ente-demo-password" ];
     # one library of everyone's photos: its records are one database
     instances = 1;
     # one writer: the box holding its lease, with its own keys (ente.nix)
@@ -54,9 +57,8 @@
     what = "Ente's own web apps (photos, albums, accounts, cast, locker), with our patches, served as files";
     # Photos itself comes with the app (app/src/local.rs), but the box still
     # serves Ente's albums, accounts, cast and locker pages, which handle
-    # keys in the browser: a member's box, never a stranger's, until those
-    # come with the app too
-    trust = "household";
+    # keys in the browser: the fleet owner's, until those come with the app too
+    trust = "owner";
     alwaysOn = true;
     # the photos app is where a member types their password: whoever has
     # root on the box that serves it could change it

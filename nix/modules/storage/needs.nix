@@ -2,6 +2,8 @@
 {
   postgresql = {
     what = "the databases of the services on this box";
+    # every service's records here, the vault's among them
+    trust = "owner";
     # who may run it follows the services whose databases it holds
     alwaysOn = true;
     units = [
@@ -40,6 +42,7 @@
 
   restic-backup = {
     what = "this box's own state, encrypted here, into its own bucket in its own store, copied where the plan finds room";
+    secrets = [ "restic-password" ];
     units = [
       "restic-backups-*"
       "dd-backup-stale"
@@ -68,6 +71,8 @@
     # switched by the control plane: it runs where the plan puts it (box/placed.nix)
     placed = true;
     what = "every database on this box dumped daily, on the encrypted bulk pool, and backed up";
+    # a dump is every database as it is
+    trust = "owner";
     units = [
       "postgresqlBackup-*"
       "postgres-backup-verify"
@@ -94,6 +99,8 @@
     # switched by the control plane: it runs where the plan puts it (box/placed.nix)
     placed = true;
     what = "the fleet's built closures, in the bucket, for every box's releases";
+    # what any build of this public repo makes
+    trust = "any";
     traffic = {
       class = "high";
       downMbps = 100;
@@ -132,6 +139,8 @@
     # switched by the control plane: it runs where the plan puts it (box/placed.nix)
     placed = true;
     what = "what each member keeps across every service, against their allowance";
+    # what every member keeps, and museum's tables
+    trust = "owner";
     # no admin login: museum's own database user counts Photos, sets the
     # limits it works out, and lists a leaver for museum to delete
     units = [

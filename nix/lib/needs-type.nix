@@ -313,13 +313,21 @@ t.attrsOf (
         description = "at most this many in one house (a house's DNS is one box)";
       };
       trust = lib.mkOption {
-        type = t.enum [
-          "owner"
-          "household"
-          "any"
-        ];
-        default = "any";
-        description = "whose boxes may run it: the fleet owner's only (it holds the keys to everything, or hands people the code that holds theirs); the owner's or a box of a household it serves (it reads that household's own data); any box";
+        type = t.nullOr (
+          t.enum [
+            "owner"
+            "household"
+            "own"
+            "any"
+          ]
+        );
+        default = null;
+        description = "whose boxes may run it, said by every service that does not run on every box (tests/placement.nix): the fleet owner's only (it holds the keys to everything, reads what is not the box's owner's, or hands people the code that holds theirs); the owner's or a box of a household it serves (it reads that household's own data); own: a box's owner's own things, which reads plaintext but only theirs, on a member's box only once the plan keeps it to them; any box (it reads nobody's data)";
+      };
+      secrets = lib.mkOption {
+        type = t.listOf t.str;
+        default = [ ];
+        description = "what it reads from the box's own sops file, by name; a box that joined on its own key has none (tests/placement.nix holds this to the boxes' own files)";
       };
       traffic = lib.mkOption {
         type = t.submodule {

@@ -30,6 +30,7 @@
     "join-install"
     "joined-box"
     "joined-serves"
+    "joined-games"
     "photos"
     "llm"
     "vault"
