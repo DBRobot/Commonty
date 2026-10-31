@@ -17,6 +17,6 @@ pkgs.runCommand "same-tab-e2e"
     export HOME=$TMPDIR
     cmp ${../../servers/web-shared/shell.js} ${../../app/web/_dd/static/shell.js}
     cmp ${../../servers/home/web/pages/home.html} ${../../app/web/_dd/pages/home.html}
-    python3 ${./same-tab/flow.py} ${../../app/web/_dd}
+    python3 ${./same-tab/flow.py} ${../../app/web/_dd} ${../../servers/home/web}
     touch $out
   ''

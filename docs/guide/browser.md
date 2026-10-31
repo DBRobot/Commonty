@@ -37,11 +37,19 @@ The first time, you link your browser to the app once, for all of them:
 After that, every one of these pages opens in the app by itself, with no
 code and no button: Photos, Passwords, Files, Movies & TV, Chat and Mail,
 from a link, a bookmark or the address bar, even after the app or the
-computer restarts. The buttons in Settings open their parts with no code
-too.
+computer restarts. Settings, Backups included, opens the app's copy
+straight away, with nothing to press.
 
-To stop a browser opening them, open the app's **This device** screen
-and press **Forget** beside it under **Browsers you let in**. Signing
+A linked browser is also signed in to your boxes by the app: Games, Git,
+Metrics and the rest open without your passkey. Open each from one of the
+app's pages once (the bar or the home page); from then on that box signs
+you in through the app by itself, from a link or a bookmark too. Signing
+out in the browser stops this until you next open a box from the app's
+pages.
+
+To stop a browser opening them, and being signed in by the app, open
+the app's **This device** screen and press **Forget** beside it under
+**Browsers you let in**. Signing
 out in that browser forgets it too. A forgotten browser asks for a code
 again next time.
 

@@ -21,6 +21,18 @@ and Backups and device names in Settings) open through the Commonty app
 on that computer, not from a box. That is one click in the app, not
 another sign-in. See [Using a browser](browser.md).
 
+## In a browser linked to the app: no sign-in
+
+Once a browser is linked to the app on the same computer, the app signs
+it in to your boxes, so there is no passkey to use. A box learns to ask
+the app the first time you open it from one of the app's pages. Each time a box asks,
+the app signs a one-minute pass for that box alone with this device's
+key; the box checks the device is still yours and starts the usual
+8-hour sign-in. Your keys stay in the app. Removing the device, or
+**Forget** on the browser in the app, ends it. **Sign out** in the browser
+ends the app's sign-ins on every box at once, and turns this off until you
+next open a box from the app's pages.
+
 Passwords is the one place you type something more: your vault opens with
 its own master password, on your own device. Signing in only proves who
 you are.

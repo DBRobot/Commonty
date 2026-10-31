@@ -64,6 +64,17 @@ function handOff() {
   }, 3000);
 }
 
+// A browser the app let in and has signed in here: this box keeps where
+// the app answers it (servers/gate/src/app_signin.rs), so the page goes
+// there itself, through the box, with no link for the system to hand over
+const linkedHere = document.cookie.split(';').some((c) => c.trim() === 'dd_app_linked=1');
+function straight() {
+  const q = new URLSearchParams({ open: vault ? 'vault' : photos ? 'photos' : 'site' });
+  const path = asked();
+  if (path !== '/') q.set('path', path);
+  location.replace(`/_dd/app-signin?${q}`);
+}
+
 document.getElementById('open').addEventListener('click', handOff);
 document.getElementById('retry').addEventListener('click', handOff);
 
@@ -121,6 +132,9 @@ if (vault && location.pathname === '/sso-connector.html') {
   location.replace(`/send${location.hash}`);
 } else if (vault && location.hash.startsWith('#/sso')) {
   sso(new URLSearchParams(location.hash.split('?')[1] || ''));
+} else if (linkedHere) {
+  show('opening');
+  straight();
 } else if (noted()) {
   show('opening');
   handOff();
