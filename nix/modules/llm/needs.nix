@@ -7,7 +7,7 @@
     placed = true;
     what = "runs one language model at a time, for the chat page and the API";
     # every member's chats, in the clear
-    trust = "owner";
+    trust = "any";
     traffic = {
       class = "medium";
       downMbps = 50;
@@ -78,7 +78,7 @@
     placed = true;
     what = "web search for members, and the chat's search";
     # what members search for
-    trust = "owner";
+    trust = "any";
     traffic = {
       class = "medium";
       downMbps = 10;

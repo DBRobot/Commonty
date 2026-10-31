@@ -50,6 +50,7 @@
   "join-install",
   "joined-box",
   "joined-serves",
+  "joined-games",
   "leaving",
   "unlock",
   "vault",
@@ -990,6 +991,31 @@
   },
   "notes": "Gate is only fleet scaffolding here; included directory.rs/ident.rs only. A gate startup break (lib.rs/main.rs) would also fail it but that is caught by many other tests. dd-agent is disabled, so the release crate is excluded.",
   "family": "vm"
+ },
+ "joined-games": {
+  "paths": [
+   "nix/tests/joined-games.nix",
+   "nix/tests/joined-games.py",
+   "nix/tests/joined-games-vm/**",
+   "nix/installer/box.json",
+   "nix/modules/games/**",
+   "nix/modules/box/placed.nix",
+   "nix/modules/box/zfs-datasets.nix",
+   "nix/roles/game.nix",
+   "nix/roles/bundles.json",
+   "nix/lib/fleet-placement.nix",
+   "nix/lib/placement-inputs.nix",
+   "nix/lib/capability.nix",
+   "nix/lib/needs.nix",
+   "nix/lib/needs-type.nix",
+   "servers/games/**"
+  ],
+  "why": {
+   "nix/installer/box.json": "the box.json the box is built from",
+   "nix/modules/games/**": "dd-games and its name in nginx",
+   "nix/modules/box/zfs-datasets.nix": "the dataset the installer names",
+   "nix/lib/placement-inputs.nix": "joined.own lets it be built and carried"
+  }
  },
  "leaving": {
   "paths": [
@@ -2402,7 +2428,13 @@
    "fleet/boxes.json",
    "fleet/boxes/*/hardware.json",
    "fleet/boxes/*/box.json",
-   "fleet/policy.json"
+   "fleet/policy.json",
+   "nix/lib/placement-inputs.nix",
+   "nix/lib/fleet-placement.nix",
+   "nix/lib/capability.nix",
+   "nix/lib/needs-type.nix",
+   "nix/installer/box.json",
+   "nix/tests/placement-joined/**"
   ],
   "why": {
    "nix/tests/placement.nix": "the check",
@@ -2413,7 +2445,10 @@
    "fleet/boxes.json": "box list",
    "fleet/boxes/*/hardware.json": "signed report",
    "fleet/boxes/*/box.json": "owner's box.json",
-   "fleet/policy.json": "failover/policy for capability"
+   "fleet/policy.json": "failover/policy for capability",
+   "nix/lib/placement-inputs.nix": "joined's tiers",
+   "nix/installer/box.json": "what a fresh box's carries are built from",
+   "nix/tests/placement-joined/**": "a real report under that box.json"
   },
   "notes": "Also: any module's units decide which services a box 'runs' (running box); nix/lib/{capability,fleet-placement,needs}.nix are foundation."
  },

@@ -68,6 +68,7 @@ let
   order = [
     "core"
     "gateway"
+    "cache-door"
     "photos"
     "media"
     "llm"
@@ -141,6 +142,7 @@ let
   joined =
     { dir, name }:
     let
+      tier = s: builtins.elem s (inputs.joined.services ++ inputs.joined.named ++ inputs.joined.own);
       cap =
         (import ./capability.nix {
           inherit lib needs policy;
@@ -155,15 +157,13 @@ let
       rs = lib.filter (r: !(bundles.${r}.one or false)) (bundlesFor {
         inherit (cap) can;
         has = _: false;
-        allowed = s: builtins.elem s inputs.joined.services;
+        allowed = tier;
       });
     in
     {
       bundles = rs;
       built = servicesOf rs;
-      carries = lib.filter (s: builtins.elem s inputs.joined.services) (
-        carriesOf cap.can (servicesOf rs)
-      );
+      carries = lib.filter tier (carriesOf cap.can (servicesOf rs));
     };
 in
 {

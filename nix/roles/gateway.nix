@@ -29,7 +29,6 @@ in
     ../modules/gate/mail-worker.nix
     ../modules/gate/security-txt.nix
     ../modules/net/headscale.nix
-    ../modules/smarthome/cache-door.nix
   ];
   # the fleet's own network is run from here
   dd.headscale.enable = true;
@@ -177,6 +176,4 @@ in
     locations."= /_dd/storage/mine" = docsGate;
   };
 
-  # the home controllers' updates, read-only from this box's store
-  dd.cacheDoor.enable = true;
 }

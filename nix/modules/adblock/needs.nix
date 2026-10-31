@@ -47,6 +47,8 @@
     # switched by the control plane: it runs where the plan puts it (box/placed.nix)
     placed = true;
     what = "opens a household's home controller's card at boot, by one blinded key operation, on the house network alone; never learns the card's key";
+    # one blinded key operation, and requires.place keeps it in its house
+    trust = "any";
     units = [ "tangd*" ];
     perHouse = 1;
     # its keys are this box's: a controller's card opens only with them, so

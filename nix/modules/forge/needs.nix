@@ -2,6 +2,8 @@
 {
   forgejo = {
     what = "git: repositories, issues, pull requests, CI runs, releases";
+    # every repository, and what merges into the fleet's own
+    trust = "owner";
     # public repositories only, which members push and clone
     traffic = {
       class = "medium";
@@ -59,6 +61,8 @@
 
   forgejo-public = {
     what = "the public repositories' pages, to anyone";
+    # forgejo's own process, beside it
+    trust = "owner";
     alwaysOn = true;
     base = {
       uses = {
@@ -150,7 +154,10 @@
     # on every box that carries it
     spread = true;
     what = "runs members' own CI, sandboxed (Docker and gVisor), with no way into the fleet";
-    # members' own jobs, sandboxed, with no way into the fleet
+    # each job is in the clear on the box that runs it
+    trust = "any";
+    # its registration token is sealed to the runner boxes the forge lists (runner-keys.nix)
+    secrets = [ "members-runner-token" ];
     traffic = {
       class = "high";
       downMbps = 50;
@@ -169,7 +176,7 @@
         inbound = "none";
       };
       depends.docker.local = true;
-      privacy = "none"; # each job sees only itself
+      privacy = "plaintext"; # each job sees only itself; the box sees every job
     };
   };
 }

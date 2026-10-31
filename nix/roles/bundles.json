@@ -34,7 +34,12 @@
       "cloudflared",
       "dd-dns",
       "headscale",
-      "mail-worker-check",
+      "mail-worker-check"
+    ]
+  },
+  "cache-door": {
+    "why": "the home controllers' updates, from this box's nix store: built wherever the public door is, and on a member's box without it",
+    "services": [
       "harmonia"
     ]
   },

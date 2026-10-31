@@ -68,17 +68,19 @@ let
       ]
     )
     (lib.hasInfix "GPU" (why "xeon-r740" "llama-swap"))
-    # what holds keys or reads everyone's data stays on the owner's boxes
-    (!(can "gaming-pc" "llama-swap") && lib.hasInfix "only on" (why "gaming-pc" "llama-swap"))
+    # what holds keys stays on the owner's boxes; a model does not
+    (!(can "gaming-pc" "headscale") && lib.hasInfix "only on" (why "gaming-pc" "headscale"))
     (!(can "gaming-pc" "vaultwarden"))
     # a household's own DNS on that household's box
     (can "diy-nas" "pihole" && can "office-desktop" "pihole" && can "thin-client" "pihole")
     # postgres wants an SSD; a NAS of spinning disks has none
     (!(can "diy-nas" "postgresql") && lib.hasInfix "SSD" (why "diy-nas" "postgresql"))
-    (can "office-desktop" "postgresql")
+    (can "n100-minipc" "postgresql")
+    # what is kept off other people's boxes stays off
+    (!(can "office-desktop" "postgresql") && lib.hasInfix "only on" (why "office-desktop" "postgresql"))
     # a 64G eMMC holds no nix cache
     (!(can "thin-client" "nix-cache") && lib.hasInfix "storage" (why "thin-client" "nix-cache"))
-    # members' sandboxed CI anywhere with the threads
+    # members' CI anywhere with the threads
     (can "gaming-pc" "members-runner" && can "diy-nas" "members-runner")
     # a box's certificate is its own names, asked of the DNS Worker, so
     # what sits behind nginx may run on anyone's box: a game server on a
@@ -102,11 +104,12 @@ let
     "n100-minipc: llama-swap for memory"
     "xeon-r740 can run all but llama-swap and its search"
     "xeon-r740: llama-swap for want of a GPU"
-    "gaming-pc: llama-swap is the owner's"
+    "gaming-pc: headscale is the owner's"
     "gaming-pc: no vault"
     "pihole on households' boxes"
     "diy-nas: no postgres without an SSD"
-    "office-desktop: postgres"
+    "n100-minipc: postgres"
+    "office-desktop: no postgres, it holds the vault's records"
     "thin-client: no nix cache"
     "members-runner on helpers' boxes"
     "gaming-pc: no games until certificates move"

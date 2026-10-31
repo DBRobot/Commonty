@@ -31,11 +31,11 @@ fleet.wait_until_succeeds("test -e /root/f/ready", timeout=600)
 
 # the box, under its key's name from the start (joined-box moves it there):
 # by its capability it is built with the house's Tang and carries it, and
-# Pi-hole is built in and not carried
+# Pi-hole is built in; the plan does not give it (below)
 box.wait_for_unit("multi-user.target")
 assert box.succeed("hostname").strip() == nix["keyName"]
 carries = json.loads(box.succeed("cat /etc/dd-placed/carries.json"))
-assert "tang" in carries and "pihole" not in carries, carries
+assert "tang" in carries, carries
 box.fail("systemctl is-active --quiet tangd.socket")
 
 # its key in its TPM, its pool, the fleet's config, the release's inputs and

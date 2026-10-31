@@ -5,6 +5,8 @@
 {
   computers = {
     what = "members' remote computers, each a VM with its own disks";
+    # members' disks and memory; whose go where is the plan's
+    trust = "any";
     traffic = {
       class = "high";
       upMbps = 10;

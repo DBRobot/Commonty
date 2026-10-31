@@ -66,6 +66,7 @@ in
           "RELEASE_KEY"
           "SOURCE"
           "DETECT"
+          "BOX_JSON"
           "NOT_BEFORE"
           "FILES"
         ] config.environment.variables
