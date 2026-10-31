@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"commonty/control/state"
+	"commonty/control/state/attest"
 )
 
 func fleet() (Inputs, *state.State) {
@@ -689,6 +690,8 @@ func joinedClaiming(svcs ...string) (Inputs, *state.State) {
 		f["can/"+svc], f["carries/"+svc], f["runs/"+svc] = 5, 1, 1
 	}
 	s.Boxes["jabc"] = &state.BoxState{LastSeen: s.Time - 1000, Facts: f}
+	s.Attest = attest.New()
+	s.Attest.Done["jabc"] = &attest.Record{At: s.Time}
 	return in, s
 }
 
@@ -716,7 +719,8 @@ func TestAnAttestedJoinedBoxRunsOnlyWhatItsTierAllows(t *testing.T) {
 	pg := in.Services["postgres"]
 	pg.Lease, pg.Placed = true, true
 	in.Services["postgres"] = pg
-	p := Decide(in, s, 90_000, nil)
+	members := map[string]bool{"jabc": true}
+	p := Decide(in, s, 90_000, members)
 	if !runs(p, "jabc", "web") {
 		t.Fatalf("web, allowed and claimed, sticky where it runs: %+v", p.Boxes)
 	}
@@ -728,8 +732,44 @@ func TestAnAttestedJoinedBoxRunsOnlyWhatItsTierAllows(t *testing.T) {
 	// and its word only narrows: not claimed, not given
 	in2, s2 := joinedClaiming()
 	in2.Joined = &JoinedRules{Attested: true, Services: []string{"web"}}
-	if p := Decide(in2, s2, 90_000, nil); len(p.Boxes["jabc"]) != 0 {
+	if p := Decide(in2, s2, 90_000, members); len(p.Boxes["jabc"]) != 0 {
 		t.Fatalf("given what it did not say it can: %+v", p.Boxes["jabc"])
+	}
+}
+
+// the switch on says nothing of any one box: it needs its own proof,
+// current, and a member's enlisting
+func TestAJoinedBoxRunsOnlyOnItsOwnProofAndEnlisted(t *testing.T) {
+	members := map[string]bool{"jabc": true}
+	given := func(s *state.State, in Inputs, members map[string]bool) bool {
+		return runs(Decide(in, s, 90_000, members), "jabc", "web")
+	}
+	in, s := joinedClaiming("web")
+	in.Joined = &JoinedRules{Attested: true, Services: []string{"web"}}
+	if !given(s, in, members) {
+		t.Fatal("proved and enlisted, not given it")
+	}
+	if given(s, in, nil) {
+		t.Fatal("given it with no member having enlisted it")
+	}
+	rec := s.Attest.Done["jabc"]
+	rec.Failed = "it did not start the fleet's own system"
+	if given(s, in, members) {
+		t.Fatal("given it on a proof that no longer holds")
+	}
+	rec.Failed = ""
+	rec.At = s.Time - attest.ProofFresh - 1
+	if given(s, in, members) {
+		t.Fatal("given it on a stale proof")
+	}
+	delete(s.Attest.Done, "jabc")
+	if given(s, in, members) {
+		t.Fatal("given it with no proof of its own")
+	}
+	// another box's proof is not this one's
+	s.Attest.Done["jother"] = &attest.Record{At: s.Time}
+	if given(s, in, members) {
+		t.Fatal("given it on another box's proof")
 	}
 }
 
