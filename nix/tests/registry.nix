@@ -35,6 +35,7 @@
     "vault"
     "adblock"
     "unlock"
+    "boot-key"
     "leaving"
     "home-controller"
     "waits"

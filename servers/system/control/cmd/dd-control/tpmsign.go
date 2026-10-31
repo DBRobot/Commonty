@@ -1,7 +1,10 @@
 package main
 
-// Signing with the box's TPM-held key, under its signed boot (PCR 7): the
-// key dd-unlock-enrol made on the boot partition (sig.pub, sig.priv).
+// Signing with the box's TPM-held key, under its signed boot: the key on the
+// boot partition (sig.pub, sig.priv). One dd-unlock-enrol made (node1's and
+// node2's) is PCR 7's; one made under the box's approver (approver.tpm beside
+// it, dd-boot-key) opens under PCRs 4 and 7 as the approver approved
+// (docs/dev/attestation.md).
 //
 // One connection to /dev/tpmrm0 for the life of the process, one signature
 // at a time. The key is loaded once and kept; a policy session is made for
@@ -43,6 +46,8 @@ import (
 	"time"
 
 	"commonty/control/state"
+	"commonty/control/state/attest"
+	"commonty/control/tpm"
 
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
@@ -50,12 +55,12 @@ import (
 )
 
 // tpmLock is the file every user of the TPM on a box takes (flock) around
-// its use: dd-control, and the scripts that sign with tpm2-tools
-// (gate/box-sign.sh, gate/acme-ask.sh, mail-send.sh), all root, as the
-// device is root's alone. In a directory only root may enter, the file
-// root's and 0600: a user who could open it could hold it, and every
+// its use: dd-control, control/tpm's users, and the scripts that sign with
+// tpm2-tools (gate/box-sign.sh, gate/acme-ask.sh, mail-send.sh), all root,
+// as the device is root's alone. In a directory only root may enter, the
+// file root's and 0600: a user who could open it could hold it, and every
 // signature here would wait on them (box/control.nix makes both)
-const tpmLock = "/run/dd-tpm/lock"
+const tpmLock = tpm.LockPath
 
 // tpmDevice is what the signer needs of a TPM: the real one (tpmBackend)
 // or a test's
@@ -209,29 +214,7 @@ func (s *signer) take() func() {
 	}
 }
 
-// openLock opens the lock file, made 0600 in a 0700 directory if missing,
-// and refuses one that anybody but this process's user owns or may open:
-// whoever can open it can hold it
-func openLock(path string) (*os.File, error) {
-	_ = os.Mkdir(filepath.Dir(path), 0o700)
-	f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0o600)
-	if err != nil {
-		return nil, err
-	}
-	for _, p := range []string{filepath.Dir(path), path} {
-		fi, err := os.Stat(p)
-		if err != nil {
-			_ = f.Close()
-			return nil, err
-		}
-		st, ok := fi.Sys().(*syscall.Stat_t)
-		if !ok || int(st.Uid) != os.Getuid() || fi.Mode().Perm()&0o077 != 0 {
-			_ = f.Close()
-			return nil, fmt.Errorf("%s: not %d's alone (%v, uid %d)", p, os.Getuid(), fi.Mode().Perm(), st.Uid)
-		}
-	}
-	return f, nil
-}
+func openLock(path string) (*os.File, error) { return tpm.OpenLock(path) }
 
 // contextGap: the TPM refused to save a context. Through the kernel's
 // resource manager that comes back as EFAULT from the device (the kernel
@@ -339,17 +322,12 @@ func (b *tpmBackend) sign(digest []byte) ([]byte, error) {
 	if err := b.ready(); err != nil {
 		return nil, err
 	}
-	pcr7 := func(t transport.TPM, h tpm2.TPMISHPolicy, _ tpm2.TPM2BNonce) error {
-		_, err := tpm2.PolicyPCR{
-			PolicySession: h,
-			Pcrs: tpm2.TPMLPCRSelection{PCRSelections: []tpm2.TPMSPCRSelection{{
-				Hash: tpm2.TPMAlgSHA256, PCRSelect: tpm2.PCClientCompatible.PCRs(7),
-			}}},
-		}.Execute(t)
-		return err
+	policy := policyPCR7
+	if _, err := os.Stat(filepath.Join(b.keys, "approver.tpm")); err == nil {
+		policy = b.policyApproved
 	}
 	rsp, err := tpm2.Sign{
-		KeyHandle: tpm2.AuthHandle{Handle: b.key.Handle, Name: b.key.Name, Auth: tpm2.Policy(tpm2.TPMAlgSHA256, 16, pcr7)},
+		KeyHandle: tpm2.AuthHandle{Handle: b.key.Handle, Name: b.key.Name, Auth: tpm2.Policy(tpm2.TPMAlgSHA256, 16, policy)},
 		Digest:    tpm2.TPM2BDigest{Buffer: digest},
 		InScheme: tpm2.TPMTSigScheme{
 			Scheme:  tpm2.TPMAlgECDSA,
@@ -371,6 +349,107 @@ func (b *tpmBackend) sign(digest []byte) ([]byte, error) {
 		new(big.Int).SetBytes(ecc.SignatureR.Buffer),
 		new(big.Int).SetBytes(ecc.SignatureS.Buffer),
 	})
+}
+
+// policyPCR7: a key dd-unlock-enrol made
+func policyPCR7(t transport.TPM, h tpm2.TPMISHPolicy, _ tpm2.TPM2BNonce) error {
+	_, err := tpm2.PolicyPCR{
+		PolicySession: h,
+		Pcrs: tpm2.TPMLPCRSelection{PCRSelections: []tpm2.TPMSPCRSelection{{
+			Hash: tpm2.TPMAlgSHA256, PCRSelect: tpm2.PCClientCompatible.PCRs(7),
+		}}},
+	}.Execute(t)
+	return err
+}
+
+// errNotApproved: no approval here for this boot at this epoch. No retry
+// mends that; a boot the box did not approve has no use of its key
+var errNotApproved = fmt.Errorf("this boot is not one the box approved: %w", fs.ErrNotExist)
+
+// policyApproved: a key under the box's approver (dd-tpm-policy does the
+// same for the shell's users): PCRs 4 and 7 now, the epoch now, and the
+// approver's signature over that policy (tpm/bootkey.go writes it)
+func (b *tpmBackend) policyApproved(t transport.TPM, h tpm2.TPMISHPolicy, _ tpm2.TPM2BNonce) error {
+	if _, err := (tpm2.PolicyPCR{
+		PolicySession: h,
+		Pcrs: tpm2.TPMLPCRSelection{PCRSelections: []tpm2.TPMSPCRSelection{{
+			Hash: tpm2.TPMAlgSHA256, PCRSelect: tpm2.PCClientCompatible.PCRs(4, 7),
+		}}},
+	}).Execute(t); err != nil {
+		return err
+	}
+	nv, err := tpm2.NVReadPublic{NVIndex: tpm2.TPMHandle(attest.EpochIndex)}.Execute(t)
+	if err != nil {
+		return fmt.Errorf("the epoch counter: %w", err)
+	}
+	index := tpm2.NamedHandle{Handle: tpm2.TPMHandle(attest.EpochIndex), Name: nv.NVName}
+	owner := tpm2.AuthHandle{Handle: tpm2.TPMRHOwner, Auth: tpm2.PasswordAuth(nil)}
+	epoch, err := tpm2.NVRead{AuthHandle: owner, NVIndex: index, Size: 8}.Execute(t)
+	if err != nil {
+		return fmt.Errorf("the epoch: %w", err)
+	}
+	if _, err := (tpm2.PolicyNV{
+		AuthHandle: owner, NVIndex: index, PolicySession: h,
+		OperandB: tpm2.TPM2BOperand{Buffer: epoch.Data.Buffer}, Operation: tpm2.TPMEOEq,
+	}).Execute(t); err != nil {
+		return err
+	}
+	cur, err := tpm2.PolicyGetDigest{PolicySession: h}.Execute(t)
+	if err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(filepath.Join(b.keys, "approvals", hex.EncodeToString(cur.PolicyDigest.Buffer)+".sig"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return errNotApproved
+	}
+	if err != nil {
+		return err
+	}
+	var sig struct{ R, S *big.Int }
+	if rest, err := asn1.Unmarshal(raw, &sig); err != nil || len(rest) != 0 {
+		return fmt.Errorf("an approval that is no signature: %v", err)
+	}
+	// the boot partition is anyone's who has the disk: never trust its sizes
+	if sig.R.Sign() <= 0 || sig.S.Sign() <= 0 || sig.R.BitLen() > 256 || sig.S.BitLen() > 256 {
+		return errors.New("an approval that is no P-256 signature")
+	}
+	pubRaw, err := os.ReadFile(filepath.Join(b.keys, "approver.tpm"))
+	if err != nil {
+		return err
+	}
+	pub, err := tpm2.Unmarshal[tpm2.TPM2BPublic](pubRaw)
+	if err != nil {
+		return fmt.Errorf("approver.tpm: %w", err)
+	}
+	// under the owner's hierarchy: the null one's ticket is good for nothing
+	loaded, err := tpm2.LoadExternal{InPublic: *pub, Hierarchy: tpm2.TPMRHOwner}.Execute(t)
+	if err != nil {
+		return fmt.Errorf("loading the approver: %w", err)
+	}
+	defer func() { _, _ = tpm2.FlushContext{FlushHandle: loaded.ObjectHandle}.Execute(t) }()
+	ticket, err := tpm2.VerifySignature{
+		KeyHandle: tpm2.NamedHandle{Handle: loaded.ObjectHandle, Name: loaded.Name},
+		Digest:    tpm2.TPM2BDigest{Buffer: attest.ApprovalDigest(cur.PolicyDigest.Buffer)},
+		Signature: tpm2.TPMTSignature{
+			SigAlg: tpm2.TPMAlgECDSA,
+			Signature: tpm2.NewTPMUSignature(tpm2.TPMAlgECDSA, &tpm2.TPMSSignatureECC{
+				Hash:       tpm2.TPMAlgSHA256,
+				SignatureR: tpm2.TPM2BECCParameter{Buffer: sig.R.FillBytes(make([]byte, 32))},
+				SignatureS: tpm2.TPM2BECCParameter{Buffer: sig.S.FillBytes(make([]byte, 32))},
+			}),
+		},
+	}.Execute(t)
+	if err != nil {
+		return fmt.Errorf("the approval: %w", err)
+	}
+	_, err = tpm2.PolicyAuthorize{
+		PolicySession:  h,
+		ApprovedPolicy: tpm2.TPM2BDigest{Buffer: cur.PolicyDigest.Buffer},
+		PolicyRef:      tpm2.TPM2BDigest{Buffer: attest.ApprovalRef},
+		KeySign:        loaded.Name,
+		CheckTicket:    ticket.Validation,
+	}.Execute(t)
+	return err
 }
 
 func (b *tpmBackend) reset() {

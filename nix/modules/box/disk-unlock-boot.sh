@@ -29,13 +29,13 @@ fi
 esp() {
   # on the running box it is mounted already
   if [ -e /boot/dd/unlock/sig.priv ]; then
-    mkdir -p "$KEYS" && cp /boot/dd/unlock/* "$KEYS"/
+    mkdir -p "$KEYS" && cp -r /boot/dd/unlock/* "$KEYS"/
     return
   fi
   [ -n "$part" ] || return 1
   mkdir -p "$w/esp" "$KEYS"
   mount -o ro "$part" "$w/esp" || return 1
-  cp "$w/esp/dd/unlock/"* "$KEYS"/ 2>/dev/null
+  cp -r "$w/esp/dd/unlock/"* "$KEYS"/ 2>/dev/null
   umount "$w/esp"
   # on its TPM alone, no signing key is asked for (a joined box makes its
   # own at its first boot); otherwise it signs its ask to the Worker
@@ -77,13 +77,25 @@ router() {
   ip -4 neigh show "$gw" 2>/dev/null | awk '/lladdr/ {print tolower($5); exit}'
 }
 
-sign() {
+# one user of the TPM at a time, where there are others (cmd/dd-control/tpmsign.go):
+# on the running box; in the initrd there is no lock and no one else
+tpm_locked() {
+  if [ -r /run/dd-tpm/lock ]; then
+    { flock -w 10 9 || true; "$@"; } 9</run/dd-tpm/lock
+  else
+    "$@"
+  fi
+}
+
+sign() { tpm_locked sign_locked "$@"; }
+
+sign_locked() {
   # the parent is made the same each time from the TPM's own seed; the key
   # under it can only be loaded here, and used only under PCR 7 as it was
   tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx" &&
     tpm2_load -Q -C "$w/srk.ctx" -u "$KEYS/sig.pub" -r "$KEYS/sig.priv" -c "$w/sig.ctx" &&
     tpm2_startauthsession -Q --policy-session -S "$w/s.ctx" &&
-    tpm2_policypcr -Q -S "$w/s.ctx" -l sha256:7 &&
+    dd-tpm-policy "$w/s.ctx" "$KEYS" &&
     tpm2_sign -Q -c "$w/sig.ctx" -g sha256 -s ecdsa -f plain -p "session:$w/s.ctx" -o "$w/sig.bin" "$1"
   local r=$?
   tpm2_flushcontext "$w/s.ctx" >/dev/null 2>&1 || true
@@ -131,11 +143,14 @@ if [ -n "$TPM_ONLY" ] && [ -e "$KEYS/rekeyed" ] && [ -e "$KEYS/half.priv.new" ];
   mv "$KEYS/half.pub.new" "$KEYS/half.pub" && mv "$KEYS/half.priv.new" "$KEYS/half.priv"
 fi
 if [ -e "$KEYS/half.priv" ]; then
-  tpm2_load -Q -C "$w/srk.ctx" -u "$KEYS/half.pub" -r "$KEYS/half.priv" -c "$w/half.ctx"
-  tpm2_startauthsession -Q --policy-session -S "$w/h.ctx"
-  tpm2_policypcr -Q -S "$w/h.ctx" -l sha256:7
-  tpm2_unseal -c "$w/half.ctx" -p "session:$w/h.ctx" -o "$w/half" || true
-  tpm2_flushcontext "$w/h.ctx" >/dev/null 2>&1 || true
+  unseal_half() {
+    tpm2_load -Q -C "$w/srk.ctx" -u "$KEYS/half.pub" -r "$KEYS/half.priv" -c "$w/half.ctx"
+    tpm2_startauthsession -Q --policy-session -S "$w/h.ctx"
+    dd-tpm-policy "$w/h.ctx" "$KEYS" || say "dd-unlock: this boot is not one the box approved"
+    tpm2_unseal -c "$w/half.ctx" -p "session:$w/h.ctx" -o "$w/half" || true
+    tpm2_flushcontext "$w/h.ctx" >/dev/null 2>&1 || true
+  }
+  tpm_locked unseal_half
 else
   # a box that joined, at its first boot: the installer's half, under no
   # PCR, opens the disk this once; dd-unlock-seal then seals a new half

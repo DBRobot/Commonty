@@ -256,8 +256,9 @@ target.wait_until_succeeds(
 target.succeed("test -s /boot/dd/unlock/half.priv")
 target.fail("test -e /boot/dd/unlock/bootstrap.priv")
 
-# its key to join with, made then, under that boot (PCR 7): the one its
-# join presents (box-key.spki), and its name from it
+# its key to join with, made then, under its approver, which approved
+# that boot (PCRs 4 and 7): the one its join presents (box-key.spki), and
+# its name from it
 seal = target.succeed("journalctl -b -u dd-unlock-seal --no-pager")
 spki = target.succeed(
     "export TPM2TOOLS_TCTI=device:/dev/tpmrm0 w=$(mktemp -d) && cd $w"
@@ -269,13 +270,16 @@ assert target.succeed("cat /var/lib/dd/box-key.spki").strip() == spki
 name = target.succeed(
     "base64 -d < /var/lib/dd/box-key.spki | sha256sum | cut -c1-10"
 ).strip()
-assert f"made under the same boot: j{name}" in seal, seal
+assert f"made under this boot's approval: j{name}" in seal, seal
+target.succeed(
+    "test -s /boot/dd/unlock/approver.tpm && test -s /boot/dd/unlock/join.policy"
+)
 sign = (
     "export TPM2TOOLS_TCTI=device:/dev/tpmrm0 w=$(mktemp -d) && cd $w && echo hi > m"
     " && tpm2_createprimary -Q -C o -G ecc256 -c srk.ctx"
     " && tpm2_load -Q -C srk.ctx -u /boot/dd/unlock/sig.pub -r /boot/dd/unlock/sig.priv -c sig.ctx"
     " && tpm2_startauthsession -Q --policy-session -S s.ctx"
-    " && tpm2_policypcr -Q -S s.ctx -l sha256:7"
+    " && dd-tpm-policy s.ctx /boot/dd/unlock"
     " && tpm2_sign -Q -c sig.ctx -g sha256 -s ecdsa -f plain -p session:s.ctx -o sig m"
 )
 target.succeed(sign)

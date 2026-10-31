@@ -109,6 +109,9 @@ let
   ovmf = pkgs.OVMF.override {
     secureBoot = true;
     msVarsTemplate = true;
+    # it measures into the TPM, as a PC's does: the join key's approver reads
+    # its event log
+    tpmSupport = true;
   };
 in
 {

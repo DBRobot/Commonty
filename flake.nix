@@ -783,16 +783,17 @@
                   ./servers/system/control/state
                   ./servers/system/control/validator
                   ./servers/system/control/wire
+                  ./servers/system/control/tpm
                   ./servers/system/control/cmd
                   # SmartBFT with the upstream fixes no release has yet (go.mod)
                   ./servers/system/control/third_party
                 ];
               };
+              vendorHash = "sha256-NLJzcqd4uHgf+2H1QVmv9PXghHbokm+MA7USa2n+hc8=";
               dd-control = pkgs.buildGoModule {
                 pname = "dd-control";
                 version = "0.1.0";
-                inherit src;
-                vendorHash = "sha256-PdyOvSGb4sSM/5lYK1O2WwwfGPpkWtGxAoJ2RfuzjRU=";
+                inherit src vendorHash;
                 # and dd-plan-check: a release's plan against what the boxes run (scripts/plan-check)
                 subPackages = [
                   "cmd/dd-control"
@@ -803,13 +804,28 @@
                 checkPhase = ''
                   runHook preCheck
                   go test ./...
+                  go test -tags testswitches ./state/... ./cmd/...
                   runHook postCheck
                 '';
+                # a box's program never reads a release's test switches
+                # (state/attest/testswitch_off.go): its build says so
+                postInstall = ''
+                  ! go version -m $out/bin/dd-control | grep -q testswitches
+                '';
+              };
+              # the join key across updates (cmd/boot-key, docs/dev/attestation.md)
+              dd-boot-key = pkgs.buildGoModule {
+                pname = "dd-boot-key";
+                version = "0.1.0";
+                inherit src vendorHash;
+                subPackages = [ "cmd/boot-key" ];
+                doCheck = false;
+                postInstall = "mv $out/bin/boot-key $out/bin/dd-boot-key";
               };
             in
             {
               configFile = pkgs.writeText "control-config.json" (builtins.toJSON config);
-              inherit dd-control;
+              inherit dd-control dd-boot-key;
               # wasm for the relay's Durable Object, from the same vendored
               # modules (buildGoModule lists packages for the build machine,
               # which leaves out a js-only one)
@@ -1127,6 +1143,7 @@
             });" > $out/placement.js
           '';
           dd-control = control.dd-control;
+          dd-boot-key = control.dd-boot-key;
           control-config = control.configFile;
           # what the control plane places from: each box's capability and
           # what the fleet wants of each service (nix/lib/placement-inputs.nix)
@@ -1581,6 +1598,7 @@
             ++ [
               lanzaboote.nixosModules.lanzaboote
               ./nix/modules/box/secure-boot.nix
+              ./nix/modules/box/boot-key.nix
               ./nix/modules/box/disk-unlock.nix
               ./nix/modules/box/control.nix
               ./nix/modules/box/placed.nix

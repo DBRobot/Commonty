@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Once per box, as root, after Secure Boot is on (PCR 7 is what the TPM
 # will hold this to):
 #   dd-unlock-enrol keys    the TPM's signing key and its half of the disk key,
@@ -46,24 +47,33 @@ case "${1:-}" in
     share=$(cat "$w/share")
     at=$(date +%s)
     printf 'commonty unlock share v1\0%s\0%s\0%s' "$BOX" "$at" "$share" >"$w/msg"
-    tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx"
-    tpm2_load -Q -C "$w/srk.ctx" -u "$DIR/sig.pub" -r "$DIR/sig.priv" -c "$w/sig.ctx"
-    tpm2_startauthsession -Q --policy-session -S "$w/s.ctx"
-    tpm2_policypcr -Q -S "$w/s.ctx" -l sha256:7
-    tpm2_sign -Q -c "$w/sig.ctx" -g sha256 -s ecdsa -f plain -p "session:$w/s.ctx" -o "$w/sig.bin" "$w/msg"
-    tpm2_flushcontext "$w/s.ctx" >/dev/null 2>&1 || true
+    # one user of the TPM at a time on the box (cmd/dd-control/tpmsign.go)
+    lock=/run/dd-tpm/lock
+    [ -r "$lock" ] || { lock="$w/lock"; : >"$lock"; }
+    {
+      flock -w 10 9 || true
+      tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx"
+      tpm2_load -Q -C "$w/srk.ctx" -u "$DIR/sig.pub" -r "$DIR/sig.priv" -c "$w/sig.ctx"
+      tpm2_startauthsession -Q --policy-session -S "$w/s.ctx"
+      dd-tpm-policy "$w/s.ctx" "$DIR"
+      tpm2_sign -Q -c "$w/sig.ctx" -g sha256 -s ecdsa -f plain -p "session:$w/s.ctx" -o "$w/sig.bin" "$w/msg"
+      tpm2_flushcontext "$w/s.ctx" >/dev/null 2>&1 || true
+    } 9<"$lock"
     sig=$(b64url <"$w/sig.bin")
     code=$(curl -sS --max-time 20 -o "$w/answer" -w '%{http_code}' -X POST "$URL/api/unlock/share" \
       -H 'content-type: application/json' \
       --data "{\"box\":\"$BOX\",\"at\":$at,\"share\":\"$share\",\"sig\":\"$sig\"}")
     [ "$code" = 200 ] || { echo "the unlock service said $code: $(cat "$w/answer")"; exit 1; }
     # the keys, now, the way the initrd will make them
-    tpm2_flushcontext -t >/dev/null 2>&1 || true
-    tpm2_load -Q -C "$w/srk.ctx" -u "$DIR/half.pub" -r "$DIR/half.priv" -c "$w/half.ctx"
-    tpm2_startauthsession -Q --policy-session -S "$w/h.ctx"
-    tpm2_policypcr -Q -S "$w/h.ctx" -l sha256:7
-    tpm2_unseal -c "$w/half.ctx" -p "session:$w/h.ctx" -o "$w/half"
-    tpm2_flushcontext "$w/h.ctx" >/dev/null 2>&1 || true
+    {
+      flock -w 10 9 || true
+      tpm2_flushcontext -t >/dev/null 2>&1 || true
+      tpm2_load -Q -C "$w/srk.ctx" -u "$DIR/half.pub" -r "$DIR/half.priv" -c "$w/half.ctx"
+      tpm2_startauthsession -Q --policy-session -S "$w/h.ctx"
+      dd-tpm-policy "$w/h.ctx" "$DIR"
+      tpm2_unseal -c "$w/half.ctx" -p "session:$w/h.ctx" -o "$w/half"
+      tpm2_flushcontext "$w/h.ctx" >/dev/null 2>&1 || true
+    } 9<"$lock"
     ikm=$( { cat "$w/half"; printf '%s=' "$share" | tr -- '-_' '+/' | base64 -d; } | od -An -v -tx1 | tr -d ' \n')
     shred -u "$w/half"
     mkdir -p /run/dd
