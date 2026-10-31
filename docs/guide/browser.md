@@ -71,7 +71,9 @@ when you close its window:
 - **On a computer**, it stays as an icon next to the clock. Click it, or
   choose **Open Commonty** from its menu, to bring the window back.
   **Quit** in the same menu stops it. It also starts by itself, without a
-  window, when you sign in to the computer. If your desktop shows no
+  window, when you sign in to the computer, and if it ever stops by
+  itself (a crash, or another program ending it) it starts again a few
+  seconds later. Only **Quit** keeps it stopped. If your desktop shows no
   icons next to the clock, open Commonty again to get its window back.
 - **On an Android phone**, it keeps running with a quiet notification,
   and starts again when the phone restarts. After a restart, tap the

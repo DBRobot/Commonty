@@ -72,6 +72,14 @@ fn links(app: &tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Windows' login entry is the keeper, which runs the app as its child
+    #[cfg(windows)]
+    if background::keep() {
+        return;
+    }
+    // on Linux the copy that runs is the unit's, which systemd restarts
+    #[cfg(target_os = "linux")]
+    background::into_unit();
     // what the Devices tab calls this device's requests
     directory::set_agent(format!(
         "Commonty-app/{} ({})",
@@ -83,7 +91,7 @@ pub fn run() {
     let builder = builder.manage(account::Keys(auth::open(SERVICE)));
     // a commonty:// link opening a second copy hands its link to this one
     // (the deep-link feature), and a plain second launch shows this window
-    #[cfg(any(target_os = "linux", windows))]
+    #[cfg(any(target_os = "linux", windows, target_os = "macos"))]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _| {
         if !argv
             .iter()
