@@ -2456,12 +2456,14 @@
   "paths": [
    "nix/tests/placement-fleet.nix",
    "nix/tests/placement-fleet/**",
+   "nix/lib/joined-own.nix",
    "nix/modules/*/needs.nix",
    "fleet/policy.json"
   ],
   "why": {
    "nix/tests/placement-fleet.nix": "the check",
    "nix/tests/placement-fleet/**": "fleet.json made-up computers",
+   "nix/lib/joined-own.nix": "whose a joined box is, for its build",
    "nix/modules/*/needs.nix": "every service's needs",
    "fleet/policy.json": "policy given to capability"
   },

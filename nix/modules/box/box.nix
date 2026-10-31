@@ -81,6 +81,11 @@
     default = null;
     description = "whose box it is (box.json owner)";
   };
+  options.dd.box.houseId = lib.mkOption {
+    type = lib.types.strMatching "[a-z0-9-]{1,64}";
+    default = "joined";
+    description = "the house a joined box says it is in when it joins: boxes of one owner on one Wi-Fi are one house; joined (place.JoinedNoHouse) names none, a house of its own";
+  };
   options.dd.box.memoryBytes = lib.mkOption {
     type = lib.types.ints.unsigned;
     default = 0;

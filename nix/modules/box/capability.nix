@@ -11,6 +11,7 @@
 dir:
 {
   config,
+  lib,
   pkgs,
   self,
   ...
@@ -18,6 +19,12 @@ dir:
 let
   pkg = self.packages.${pkgs.stdenv.hostPlatform.system};
   host = config.networking.hostName;
+  # a joined box's owner is the agreed state's (lib/joined-own.nix)
+  own =
+    if config.dd.box.joined then
+      pkgs.writeText "box.json" (builtins.toJSON (import ../../lib/joined-own.nix { inherit lib; } dir))
+    else
+      dir + "/box.json";
   judge = pkgs.writeText "capability-judge.nix" ''
     { hw }:
     let
@@ -34,7 +41,7 @@ let
       policy = lib.importJSON ${../../../fleet/policy.json};
       boxes.${host} = {
         hw = lib.importJSON hw;
-        own = lib.importJSON ${dir + "/box.json"};
+        own = lib.importJSON ${own};
       };
     }).boxes.${host}
   '';
