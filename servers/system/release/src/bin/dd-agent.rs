@@ -76,6 +76,9 @@ struct Args {
     /// built for (hardware.json, hardware-configuration.nix, box.json)
     #[arg(long, env = "DD_AGENT_JOINED_DIR", default_value = "/var/lib/dd/box")]
     joined_dir: PathBuf,
+    /// the nix that builds a joined box's system
+    #[arg(long, env = "DD_AGENT_NIX", default_value = "nix")]
+    nix: String,
     /// print the commit the current release signed and its counter, once
     /// its signature checks, and change nothing: what an installer builds
     /// a new box from, and where that box's agent starts
@@ -126,28 +129,33 @@ struct Args {
 /// signed source. Only a box the release does not list gets here: the
 /// source is set on joined boxes alone (nix/modules/box/agent.nix), and a
 /// box the release lists always takes its entry, vouched for as ever.
-fn build_joined(args: &Args, rev: &str, name: &str) -> Result<release::BoxRelease> {
+fn build_joined(args: &Args, rev: &str, name: &str) -> Result<String, (BuildFail, String)> {
     let source = args
         .joined_source
         .as_deref()
-        .context("no source to build from")?;
-    anyhow::ensure!(
-        rev.len() == 40 && rev.bytes().all(|c| c.is_ascii_hexdigit()),
-        "the release's commit is not a commit: {rev}"
-    );
-    anyhow::ensure!(
-        name.len() == 11
-            && name.starts_with('j')
-            && name[1..].bytes().all(|c| c.is_ascii_hexdigit()),
-        "not a name a box joins under: {name}"
-    );
+        .ok_or((BuildFail::Build, "no source to build from".to_string()))?;
+    if !(rev.len() == 40 && rev.bytes().all(|c| c.is_ascii_hexdigit())) {
+        return Err((
+            BuildFail::Build,
+            format!("the release's commit is not a commit: {rev}"),
+        ));
+    }
+    if !(name.len() == 11
+        && name.starts_with('j')
+        && name[1..].bytes().all(|c| c.is_ascii_hexdigit()))
+    {
+        return Err((
+            BuildFail::Build,
+            format!("not a name a box joins under: {name}"),
+        ));
+    }
     let expr = format!(
         "let f = builtins.getFlake \"{source}?rev={rev}\"; in (f.lib.joinedBox {{ name = \"{name}\"; dir = builtins.path {{ path = {dir}; name = \"box\"; }}; }}).config.system.build.toplevel",
         dir = args.joined_dir.display()
     );
-    let out = sh(
-        "nix",
-        &[
+    let kills = oom_kills();
+    let out = Command::new(&args.nix)
+        .args([
             "--extra-experimental-features",
             "nix-command flakes",
             "build",
@@ -156,14 +164,225 @@ fn build_joined(args: &Args, rev: &str, name: &str) -> Result<release::BoxReleas
             "--print-out-paths",
             "--expr",
             &expr,
-        ],
-    )
-    .context("building this box's own system")?;
-    Ok(release::BoxRelease {
-        path: out.trim().to_string(),
+        ])
+        .output()
+        .map_err(|e| (BuildFail::Build, format!("running nix: {e}")))?;
+    if out.status.success() {
+        return Ok(String::from_utf8_lossy(&out.stdout).trim().to_string());
+    }
+    use std::os::unix::process::ExitStatusExt;
+    let text = String::from_utf8_lossy(&out.stderr).into_owned();
+    let killed = out.status.signal() == Some(9) || oom_kills().unwrap_or(0) > kills.unwrap_or(0);
+    Err((build_fail_of(&text, killed), text.trim().to_string()))
+}
+
+/// Why a box's own build failed, as its heartbeat says it (`build_fail`):
+/// a number and never a line of the build's output, which stays in the
+/// box's journal. Written out in docs/dev/releases.md, read by the Devices
+/// tab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BuildFail {
+    Fetch = 1,
+    Memory = 2,
+    Disk = 3,
+    Build = 4,
+}
+
+impl BuildFail {
+    fn of_code(n: u8) -> Option<Self> {
+        match n {
+            1 => Some(Self::Fetch),
+            2 => Some(Self::Memory),
+            3 => Some(Self::Disk),
+            4 => Some(Self::Build),
+            _ => None,
+        }
+    }
+}
+
+/// Which kind of failure nix's error is. `killed`: the kernel killed
+/// something for memory during the build, or nix itself died of SIGKILL.
+/// A substituter's warning that a build then ran past is no failure to
+/// fetch, so warnings are left out.
+fn build_fail_of(stderr: &str, killed: bool) -> BuildFail {
+    let text = stderr
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("warning:"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_lowercase();
+    let has = |words: &[&str]| words.iter().any(|w| text.contains(w));
+    if killed
+        || has(&[
+            "signal 9",
+            "out of memory",
+            "cannot allocate memory",
+            "bad_alloc",
+        ])
+    {
+        BuildFail::Memory
+    } else if has(&["no space left on device", "disk quota exceeded"]) {
+        BuildFail::Disk
+    } else if has(&[
+        "could not resolve host",
+        "couldn't resolve host",
+        "temporary failure in name resolution",
+        "unable to download",
+        "unable to access",
+        "failed to connect",
+        "could not connect",
+        "couldn't connect",
+        "connection timed out",
+        "connection refused",
+        "network is unreachable",
+        "curl: (",
+    ]) {
+        BuildFail::Fetch
+    } else {
+        BuildFail::Build
+    }
+}
+
+/// How many processes the kernel has killed for memory since boot
+fn oom_kills() -> Option<u64> {
+    oom_kills_in(&fs::read_to_string("/proc/vmstat").ok()?)
+}
+
+fn oom_kills_in(vmstat: &str) -> Option<u64> {
+    vmstat
+        .lines()
+        .find_map(|l| l.strip_prefix("oom_kill "))?
+        .trim()
+        .parse()
+        .ok()
+}
+
+/// What decides what this box's own system is: the signed commit, its name
+/// and its report. The same again is the same system, and costs no
+/// evaluation, which at the minimum's memory is a good part of what the box has.
+fn build_key(args: &Args, rev: &str, name: &str) -> Result<String> {
+    use sha2::Digest as _;
+    fn walk(dir: &Path, h: &mut sha2::Sha256) -> Result<()> {
+        let mut entries: Vec<_> = fs::read_dir(dir)
+            .with_context(|| format!("{}", dir.display()))?
+            .collect::<std::io::Result<_>>()?;
+        entries.sort_by_key(|e| e.file_name());
+        for e in entries {
+            let path = e.path();
+            h.update(e.file_name().as_encoded_bytes());
+            h.update([0]);
+            if e.file_type()?.is_dir() {
+                walk(&path, h)?;
+            } else {
+                let body = fs::read(&path).with_context(|| format!("{}", path.display()))?;
+                h.update((body.len() as u64).to_le_bytes());
+                h.update(&body);
+            }
+        }
+        Ok(())
+    }
+    let mut h = sha2::Sha256::new();
+    walk(&args.joined_dir, &mut h)?;
+    let digest: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    Ok(format!("{rev} {name} {digest}"))
+}
+
+/// A build that failed is tried again after this, however often the timer
+/// runs, what it did build kept: at the minimum a build is the box's whole
+/// CPU, and one that ran out of memory will again. A failed fetch costs
+/// nothing and is tried each run.
+const BUILD_RETRY_SECS: u64 = 3600;
+
+/// What the last build of `key` left: the system it made, or why it failed
+/// and when. Lines: `built <key> <path>` or `failed <key> <code> <at>`,
+/// where a key has three words.
+#[derive(Debug, PartialEq, Eq)]
+enum LastBuild {
+    None,
+    Built(String),
+    Failed(BuildFail, u64),
+}
+
+fn last_build(text: &str, key: &str) -> LastBuild {
+    let line = text.trim();
+    if let Some(rest) = line.strip_prefix("built ")
+        && let Some(path) = rest.strip_prefix(key).and_then(|r| r.strip_prefix(' '))
+    {
+        return LastBuild::Built(path.to_string());
+    }
+    if let Some(rest) = line.strip_prefix("failed ")
+        && let Some(r) = rest.strip_prefix(key).and_then(|r| r.strip_prefix(' '))
+        && let Some((code, at)) = r.split_once(' ')
+        && let Some(fail) = code.parse().ok().and_then(BuildFail::of_code)
+        && let Ok(at) = at.parse()
+    {
+        return LastBuild::Failed(fail, at);
+    }
+    LastBuild::None
+}
+
+fn retry_now(fail: BuildFail, at: u64, now: u64) -> bool {
+    fail == BuildFail::Fetch || now.saturating_sub(at) >= BUILD_RETRY_SECS
+}
+
+/// This box's own system for the release's commit: made once for each key.
+/// Ok(None): its last try failed and is not due again. A failure says so in
+/// the heartbeat, which says why by `build_fail`, and fails the run.
+fn self_build(
+    args: &Args,
+    rev: &str,
+    name: &str,
+    last: u64,
+) -> Result<Option<release::BoxRelease>> {
+    let built = |path: String| release::BoxRelease {
+        path,
         nar_hash: String::new(),
         closure: None,
-    })
+    };
+    let key = match build_key(args, rev, name) {
+        Ok(k) => k,
+        Err(e) => {
+            record_build(args, name, last, "failed", Some(BuildFail::Build));
+            return Err(e.context("reading this box's report"));
+        }
+    };
+    let file = args.state.join("self-build");
+    let before = last_build(&fs::read_to_string(&file).unwrap_or_default(), &key);
+    let mut failed = None;
+    match before {
+        // (a collection may have taken one that never became the system)
+        LastBuild::Built(path) if Path::new(&path).exists() => return Ok(Some(built(path))),
+        LastBuild::Failed(fail, at) => {
+            if !retry_now(fail, at, release::now()) {
+                record_build(args, name, last, "failed", Some(fail));
+                return Ok(None);
+            }
+            failed = Some(fail);
+        }
+        _ => {}
+    }
+    record_build(args, name, last, "building", failed);
+    match build_joined(args, rev, name) {
+        Ok(path) => {
+            write_atomic(&file, &format!("built {key} {path}\n"))?;
+            Ok(Some(built(path)))
+        }
+        Err((fail, text)) => {
+            let _ = write_atomic(
+                &file,
+                &format!("failed {key} {} {}\n", fail as u8, release::now()),
+            );
+            record_build(args, name, last, "failed", Some(fail));
+            bail!("building this box's own system ({fail:?}): {text}");
+        }
+    }
+}
+
+fn write_atomic(path: &Path, body: &str) -> Result<()> {
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, body)?;
+    fs::rename(&tmp, path)?;
+    Ok(())
 }
 
 /// Why this box may switch to a closure on the boxes' word, or may without it.
@@ -547,10 +766,17 @@ fn run(args: &Args) -> Result<String> {
     let built;
     let mine = match signed.payload.boxes.get(&name) {
         Some(m) => m,
-        None if self_built => {
-            built = build_joined(args, &signed.payload.rev, &name)?;
-            &built
-        }
+        None if self_built => match self_build(args, &signed.payload.rev, &name, last)? {
+            Some(b) => {
+                built = b;
+                &built
+            }
+            None => {
+                return Ok(format!(
+                    "release {counter}: this box's own build failed lately; trying it again later"
+                ));
+            }
+        },
         None => {
             record(args, &name, last, "absent");
             return Ok(format!("release {counter} has nothing for {name}"));
@@ -1168,12 +1394,18 @@ fn write_applied(state: &Path, n: u64, stamp: &str) -> Result<()> {
 /// box runs, what it runs, and how the last run ended. Best effort; a
 /// metric must never fail a release.
 fn record(args: &Args, name: &str, counter: u64, result: &str) {
+    record_build(args, name, counter, result, None);
+}
+
+/// With why this box's own build last failed, if it did and has not worked
+/// since: a retry still says it
+fn record_build(args: &Args, name: &str, counter: u64, result: &str, fail: Option<BuildFail>) {
     let _ = fs::create_dir_all(&args.facts);
     let now = release::now();
     let running = fs::read_link("/run/current-system")
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let body = format!(
+    let mut body = format!(
         "# HELP dd_agent_counter The release counter this box last applied.\n\
          # TYPE dd_agent_counter gauge\n\
          dd_agent_counter{{box=\"{name}\"}} {counter}\n\
@@ -1184,6 +1416,14 @@ fn record(args: &Args, name: &str, counter: u64, result: &str) {
          # TYPE dd_agent_last_run_seconds gauge\n\
          dd_agent_last_run_seconds{{box=\"{name}\"}} {now}\n"
     );
+    if let Some(fail) = fail {
+        body.push_str(&format!(
+            "# HELP dd_agent_build_fail Why this box's own build failed: 1 fetch, 2 memory, 3 disk, 4 build.\n\
+             # TYPE dd_agent_build_fail gauge\n\
+             dd_agent_build_fail{{box=\"{name}\"}} {}\n",
+            fail as u8
+        ));
+    }
     let tmp = args.facts.join("dd_agent.prom.tmp");
     if fs::write(&tmp, body).is_ok() {
         let _ = fs::rename(tmp, args.facts.join("dd_agent.prom"));
@@ -1665,6 +1905,259 @@ fn sh(bin: &str, args: &[&str]) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_build_failure_is_told_apart_from_nixs_own_words() {
+        use super::{BuildFail::*, build_fail_of};
+        for (text, killed, want) in [
+            (
+                "error: builder for '/nix/store/a-rustc.drv' failed with exit code 1;\nerror[E0308]: mismatched types",
+                false,
+                Build,
+            ),
+            (
+                "error: builder for '/nix/store/a-rustc.drv' failed due to signal 9 (Killed)",
+                false,
+                Memory,
+            ),
+            ("error: unexpected end-of-file", true, Memory),
+            ("error: out of memory", false, Memory),
+            (
+                "terminate called after throwing an instance of 'std::bad_alloc'",
+                false,
+                Memory,
+            ),
+            (
+                "error: writing to file: No space left on device",
+                false,
+                Disk,
+            ),
+            (
+                "error: unable to download 'https://code.example/x': Could not resolve host: code.example (6)",
+                false,
+                Fetch,
+            ),
+            (
+                "fatal: unable to access 'https://code.example/x/': Failed to connect to code.example",
+                false,
+                Fetch,
+            ),
+            (
+                "error: builder for '/nix/store/s-source.drv' failed with exit code 1;\n curl: (7) Failed to connect",
+                false,
+                Fetch,
+            ),
+            // a cache that was down, and a build that then failed by itself
+            (
+                "warning: unable to download 'https://cache.nixos.org/x.narinfo': Could not resolve host; retrying\nerror: builder for '/nix/store/a.drv' failed with exit code 2",
+                false,
+                Build,
+            ),
+            ("error: something nobody has seen", false, Build),
+        ] {
+            assert_eq!(build_fail_of(text, killed), want, "{text}");
+        }
+    }
+
+    #[test]
+    fn the_kernels_kills_are_read_from_vmstat() {
+        assert_eq!(
+            super::oom_kills_in("pgfault 9\noom_kill 3\nnr_foo 1\n"),
+            Some(3)
+        );
+        assert_eq!(super::oom_kills_in("pgfault 9\n"), None);
+    }
+
+    #[test]
+    fn a_last_build_counts_only_for_its_own_key() {
+        use super::{BuildFail, LastBuild, last_build};
+        let k = "rev j0 digest";
+        assert_eq!(
+            last_build("built rev j0 digest /nix/store/x\n", k),
+            LastBuild::Built("/nix/store/x".into())
+        );
+        assert_eq!(
+            last_build("failed rev j0 digest 2 100\n", k),
+            LastBuild::Failed(BuildFail::Memory, 100)
+        );
+        assert_eq!(
+            last_build("built rev j0 other /nix/store/x\n", k),
+            LastBuild::None
+        );
+        assert_eq!(
+            last_build("failed rev j0 digest 9 100\n", k),
+            LastBuild::None
+        );
+        assert_eq!(last_build("", k), LastBuild::None);
+    }
+
+    #[test]
+    fn only_a_failed_fetch_is_tried_again_at_once() {
+        use super::{BUILD_RETRY_SECS as R, BuildFail::*, retry_now};
+        assert!(retry_now(Fetch, 100, 100));
+        assert!(!retry_now(Memory, 100, 100 + R - 1));
+        assert!(retry_now(Memory, 100, 100 + R));
+        assert!(!retry_now(Build, 100, 100));
+        assert!(!retry_now(Disk, 100, 50));
+    }
+
+    fn build_dir(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("dd-agent-build-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    // a nix that says what it is told to, counting its runs
+    fn fake_nix(dir: &std::path::Path, stderr: &str, stdout: &str, code: u8) -> String {
+        use std::os::unix::fs::PermissionsExt as _;
+        let nix = dir.join("nix");
+        std::fs::write(
+            &nix,
+            format!(
+                "#!/bin/sh\necho run >> {}/runs\necho '{stderr}' >&2\necho '{stdout}'\nexit {code}\n",
+                dir.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&nix, std::fs::Permissions::from_mode(0o755)).unwrap();
+        nix.display().to_string()
+    }
+
+    fn joined_args(d: &std::path::Path, nix: String) -> super::Args {
+        use clap::Parser as _;
+        let box_dir = d.join("box");
+        std::fs::create_dir_all(&box_dir).unwrap();
+        std::fs::write(box_dir.join("box.json"), "{}").unwrap();
+        let mut args = super::Args::parse_from([
+            "dd-agent",
+            "--url=http://127.0.0.1:9/current.json",
+            "--key-file=/nonexistent",
+        ]);
+        args.state = d.to_path_buf();
+        args.facts = d.join("facts");
+        args.joined_source = Some("git+https://code.example/r".into());
+        args.joined_dir = box_dir;
+        args.nix = nix;
+        args
+    }
+
+    const REV: &str = "0123456789012345678901234567890123456789";
+    const NAME: &str = "j0123456789";
+
+    #[test]
+    fn a_failed_build_says_so_and_why_and_waits_its_turn() {
+        let d = build_dir("fail");
+        let nix = fake_nix(
+            d.as_path(),
+            "error: writing: No space left on device",
+            "",
+            1,
+        );
+        let args = joined_args(d.as_path(), nix);
+        let err = super::self_build(&args, REV, NAME, 7).unwrap_err();
+        assert!(format!("{err:#}").contains("No space left"), "{err:#}");
+        let prom = std::fs::read_to_string(args.facts.join("dd_agent.prom")).unwrap();
+        assert!(prom.contains("result=\"failed\""), "{prom}");
+        assert!(
+            prom.contains("dd_agent_build_fail{box=\"j0123456789\"} 3"),
+            "{prom}"
+        );
+        assert!(
+            prom.contains("dd_agent_counter{box=\"j0123456789\"} 7"),
+            "{prom}"
+        );
+        // what the build printed stays here: only the code is in the file
+        assert!(!prom.contains("No space"), "{prom}");
+        // not again until its time, and it still says so
+        assert!(super::self_build(&args, REV, NAME, 7).unwrap().is_none());
+        assert_eq!(
+            std::fs::read_to_string(d.as_path().join("runs"))
+                .unwrap()
+                .lines()
+                .count(),
+            1
+        );
+        let prom = std::fs::read_to_string(args.facts.join("dd_agent.prom")).unwrap();
+        assert!(
+            prom.contains("dd_agent_build_fail{box=\"j0123456789\"} 3"),
+            "{prom}"
+        );
+        // a new commit is a new build, whenever
+        let other = "1123456789012345678901234567890123456789";
+        assert!(super::self_build(&args, other, NAME, 7).is_err());
+        assert_eq!(
+            std::fs::read_to_string(d.as_path().join("runs"))
+                .unwrap()
+                .lines()
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn a_retry_still_says_why_the_last_try_failed() {
+        let d = build_dir("retry");
+        // a nix that looks at how the box says it is while it builds
+        let args = joined_args(d.as_path(), "/nonexistent".into());
+        let key = super::build_key(&args, REV, NAME).unwrap();
+        std::fs::write(
+            d.as_path().join("self-build"),
+            format!("failed {key} 2 1\n"),
+        )
+        .unwrap();
+        let nix = d.as_path().join("nix");
+        std::fs::write(
+            &nix,
+            format!(
+                "#!/bin/sh\ncp {}/dd_agent.prom {}/while-building\necho /nix/store/made\n",
+                args.facts.display(),
+                d.as_path().display()
+            ),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&nix, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut args = args;
+        args.nix = nix.display().to_string();
+        let got = super::self_build(&args, REV, NAME, 7).unwrap().unwrap();
+        assert_eq!(got.path, "/nix/store/made");
+        let during = std::fs::read_to_string(d.as_path().join("while-building")).unwrap();
+        assert!(during.contains("result=\"building\""), "{during}");
+        assert!(
+            during.contains("dd_agent_build_fail{box=\"j0123456789\"} 2"),
+            "{during}"
+        );
+    }
+
+    #[test]
+    fn a_system_already_built_for_the_same_report_is_not_evaluated_again() {
+        let d = build_dir("again");
+        let made = d.as_path().join("made");
+        std::fs::write(&made, "").unwrap();
+        let nix = fake_nix(d.as_path(), "", made.to_str().unwrap(), 0);
+        let args = joined_args(d.as_path(), nix);
+        let runs = || {
+            std::fs::read_to_string(d.as_path().join("runs"))
+                .unwrap()
+                .lines()
+                .count()
+        };
+        let got = super::self_build(&args, REV, NAME, 7).unwrap().unwrap();
+        assert_eq!(got.path, made.display().to_string());
+        assert_eq!(runs(), 1);
+        let again = super::self_build(&args, REV, NAME, 7).unwrap().unwrap();
+        assert_eq!(again.path, got.path);
+        assert_eq!(runs(), 1, "evaluated again for nothing");
+        // its report changed (a new owner, new hardware): built again
+        std::fs::write(args.joined_dir.join("box.json"), "{\"owner\":\"a\"}").unwrap();
+        super::self_build(&args, REV, NAME, 7).unwrap();
+        assert_eq!(runs(), 2);
+        // and one a collection took is built again
+        std::fs::remove_file(&made).unwrap();
+        super::self_build(&args, REV, NAME, 7).unwrap();
+        assert_eq!(runs(), 3);
+    }
+
     #[test]
     fn a_box_not_yet_joined_takes_its_first_release_at_once() {
         // a release box, and a joined box under its key's name: they wait

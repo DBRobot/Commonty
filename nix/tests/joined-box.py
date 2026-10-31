@@ -124,6 +124,10 @@ gone = box.succeed("find /nix/.rw-store/upper -maxdepth 1 -type c | wc -l").stri
 assert gone == "0", f"nix collected garbage in the VM: {gone} store paths removed"
 assert box.succeed("cat /etc/hostname").strip() == nix["keyName"]
 assert box.succeed("readlink -f /run/current-system").strip() == named
+# it built under the work slice's limit, and a kill in the build leaves the
+# agent alive to say so
+assert "Slice=work.slice" in box.succeed("systemctl show dd-agent -p Slice")
+assert "OOMPolicy=continue" in box.succeed("systemctl show dd-agent -p OOMPolicy")
 
 
 def dump():
@@ -248,6 +252,33 @@ wait(
     fleet,
     f"curl -sf http://127.0.0.1:4191/state | jq -e '.boxes.{nix['keyName']}.facts | .gpus == 1 and .gpu_vram_bytes >= 8589934592 and .tpm_major == 2 and .uefi == 1'",
     timeout=180,
+)
+
+# a build of its own that fails says so in its heartbeats: why, by a code, and
+# nothing of what it printed. A changed report is what makes it build again
+box.succeed(
+    "printf '#!/bin/sh\\necho private-build-text: out of memory >\\&2\\nexit 1\\n' > /root/fail-nix"
+    " && chmod +x /root/fail-nix && mkdir -p /run/systemd/system/dd-agent.service.d"
+    " && printf '[Service]\\nEnvironment=DD_AGENT_NIX=/root/fail-nix\\n'"
+    " > /run/systemd/system/dd-agent.service.d/fail.conf && systemctl daemon-reload"
+    " && echo changed > /var/lib/dd/box/changed"
+)
+box.fail("systemctl start dd-agent")
+wait(
+    fleet,
+    f"curl -sf http://127.0.0.1:4191/state | jq -e '.boxes.{nix['keyName']}.facts | .build_fail == 2 and .agent_ok == 0'",
+    timeout=120,
+)
+assert "private-build-text" not in fleet.succeed("curl -sf http://127.0.0.1:4191/state")
+# and once it builds again, the failure is gone from them
+box.succeed(
+    "rm /run/systemd/system/dd-agent.service.d/fail.conf /var/lib/dd/box/changed"
+    " && systemctl daemon-reload && systemctl start dd-agent"
+)
+wait(
+    fleet,
+    f"curl -sf http://127.0.0.1:4191/state | jq -e '.boxes.{nix['keyName']}.facts | .agent_ok == 1 and (has(\"build_fail\") | not)'",
+    timeout=120,
 )
 
 # a ticket the box did not join with: the judge refuses it, and the box

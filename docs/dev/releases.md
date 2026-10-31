@@ -521,7 +521,13 @@ Each run writes `/var/lib/dd-facts/dd_agent.prom` for the node exporter:
 dd_agent_counter{box}                  the counter this box last applied
 dd_agent_info{box,path,result}         what it runs; how the last run ended:
                                        ok, rollback, refused, absent, none,
-                                       held, soaking
+                                       held, soaking; on a box that builds its
+                                       own system, building, failed
+dd_agent_build_fail{box}               why that build failed, while it has not
+                                       worked since: 1 fetch, 2 memory, 3 disk,
+                                       4 build. A number, in the heartbeat as
+                                       build_fail; the build's output stays in
+                                       the box's journal
 dd_rollout_bad{counter}                1 when the rollout it follows stopped
 dd_agent_last_run_seconds{box}         when the agent last ran
 ```
