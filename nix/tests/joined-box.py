@@ -92,7 +92,7 @@ box.succeed(
 )
 # its pool, encrypted, as the installer leaves it
 box.succeed(
-    "zpool create -f tank /dev/vdb && head -c 32 /dev/urandom > /run/k"
+    "zpool create -f -O com.sun:auto-snapshot=false tank /dev/vdb && head -c 32 /dev/urandom > /run/k"
     " && zfs create -o encryption=aes-256-gcm -o keyformat=raw -o keylocation=file:///run/k"
     " -o mountpoint=none tank/enc && systemctl restart zfs-datasets"
 )
@@ -124,6 +124,21 @@ gone = box.succeed("find /nix/.rw-store/upper -maxdepth 1 -type c | wc -l").stri
 assert gone == "0", f"nix collected garbage in the VM: {gone} store paths removed"
 assert box.succeed("cat /etc/hostname").strip() == nix["keyName"]
 assert box.succeed("readlink -f /run/current-system").strip() == named
+
+
+# its pool is scrubbed and its state snapshotted; never the store, whose
+# copies are ciphertext kept elsewhere too and whose deleted blocks would fill
+# a small disk
+box.succeed(
+    "systemctl is-active zfs-scrub.timer zfs-snapshot-frequent.timer dd-snapshot-trim.timer"
+)
+box.succeed("zfs create -o com.sun:auto-snapshot=true tank/enc/state")
+box.wait_until_succeeds(
+    "systemctl start zfs-snapshot-frequent"
+    " && zfs list -H -o name -t snapshot tank/enc/state | grep -c @zfs-auto-snap",
+    timeout=120,
+)
+assert box.succeed("zfs list -H -o name -t snapshot tank/enc/store").strip() == ""
 
 
 def dump():
