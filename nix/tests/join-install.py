@@ -53,6 +53,7 @@ blank.succeed(
     "mkdir -p /root/drive && curl -sf http://forge/ticket > /root/drive/ticket"
     " && head -c 32 /dev/urandom | base64 > /root/drive/backup.key"
     ' && echo \'{"ssid": "house", "psk": "not-a-real-psk"}\' > /root/drive/wifi.json'
+    ' && echo \'{"metered": false}\' > /root/drive/line.json'
     " && echo test > /root/drive/version"
 )
 blank.systemctl("restart dd-box-setup")
@@ -185,6 +186,8 @@ blank.fail("test -e /mnt/boot/dd/unlock/sig.priv -o -e /mnt/var/lib/dd/box-key.s
 blank.succeed("jq -e '.bootDisk' /mnt/var/lib/dd/box/hardware.json")
 blank.succeed("grep -q '^age1' /mnt/var/lib/dd/secrets-recipient")
 assert blank.succeed("jq -r .owner /mnt/var/lib/dd/box/box.json").strip() == "null"
+# its member's word on its line, from the drive
+assert blank.succeed("jq -r .internet.metered /mnt/var/lib/dd/box/box.json").strip() == "false"
 # its pool encrypted, under the key its TPM's half makes; nothing in the
 # clear but the pool itself
 assert blank.succeed("zfs get -H -o value encryption tank/enc").strip() == "aes-256-gcm"

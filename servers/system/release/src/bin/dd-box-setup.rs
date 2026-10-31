@@ -397,6 +397,10 @@ fn route(app: &Arc<App>, method: &str, path: &str, body: &Value) -> Result<Reply
             if let Some(w) = app.wifi.lock().unwrap().clone() {
                 env.push(("WIFI", w.display().to_string()));
             }
+            // its member's word on its line, when they gave one
+            if a.drive.join("line.json").exists() {
+                env.push(drive_env(a, "LINE", "line.json"));
+            }
             start(app, "install", "dd-join-install", env)?;
             Reply::Json(json!({}))
         }
