@@ -132,7 +132,9 @@ box installer (full screen)        fleet
   deletes the pending folder with the member's own token (to the images'
   trash, as any delete there).
 - **The box** is on the member's Devices tab ("Your boxes",
-  `GET /_dd/boxes/mine`), with when it last said how it is, and on their
+  `GET /_dd/boxes/mine`), with when it last said how it is, and in a sentence
+  when there is something to say (`how`, from its heartbeats: building, its
+  update failed and why, refused, out of date, not heard from), and on their
   Metrics page. Removing it is the root's `unenlist`
   (`PUT /_dd/boxes/unenlist`, signed by the passkey on the tab, or by the
   app where the main key is a device key). An entry's `removed_boxes`, from
@@ -212,6 +214,15 @@ box installer (full screen)        fleet
     with the person at the machine) the installer's half opens for anyone
     starting a system there; a copy taken then is worth nothing after the
     re-key.
+  - **A firmware update can lock it.** One that changes what Secure Boot
+    measures into PCR 7 (its keys, its forbidden list, its settings) leaves
+    the TPM refusing the half, the initrd stopped with a line on the screen
+    and the box silent. No copy of the key exists anywhere (`dd-unlock-seal`
+    makes none; a joined box has no owner in its box.json, so no paper key,
+    `dd.unlock.recovery` empty), so nothing opens it: only setting it up
+    again, which erases it. A copy lost with it is kept elsewhere; its own
+    services' state, game worlds among them, is not. The Devices tab says so
+    once it has been silent a day.
   - **Decided** (David, 2026-10-12): the box enrolls keys of its own, over
     systemd-pcrlock binding PCR 4, which needs no firmware step but moves
     the pool's key into LUKS and predicts every release's boot.

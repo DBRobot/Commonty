@@ -61,6 +61,7 @@
 .dv-name.locked { color: var(--ink-2); font-weight: 500; }
 .dv-name .lock { width: 13px; height: 13px; flex: none; }
 .dv-meta { color: var(--ink-2); font-size: 13px; margin-top: 2px; }
+.dv-meta.bad { color: var(--bk-bad); }
 .dv-badge { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ok); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); border-radius: 3px; padding: 1px 6px; }
 .dv-actions { display: flex; gap: 8px; align-items: center; }
 .dv-actions button { margin: 0; height: 34px; padding: 0 12px; font-size: 13px; }

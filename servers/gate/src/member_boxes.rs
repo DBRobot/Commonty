@@ -242,6 +242,52 @@ fn tickets_in(
     Some(enlisted?.values().map(|o| o.ticket.clone()).collect())
 }
 
+/// No heartbeat for this long: not heard from. Two a minute when it is well.
+const QUIET_MS: i64 = 10 * 60 * 1000;
+/// and for this long: more than being turned off for the evening
+const SILENT_MS: i64 = 24 * 3600 * 1000;
+
+/// The newest release the release's own boxes say they run (state.fleetRelease):
+/// a joined box's word never counts. 0, unknown.
+fn fleet_release(st: &serde_json::Value) -> f64 {
+    let joined = st["joined"].as_object();
+    st["boxes"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(name, _)| !joined.is_some_and(|j| j.contains_key(*name)))
+        .filter_map(|(_, b)| b["facts"]["release"].as_f64())
+        .fold(0.0, f64::max)
+}
+
+/// How a box is, from its own heartbeats, as one word the Devices tab says
+/// in a sentence: never a line of its logs, which stay on it.
+fn how(b: &serde_json::Value, fleet: f64, now_ms: i64) -> &'static str {
+    let f = &b["facts"];
+    let since = now_ms - b["lastSeen"].as_i64().unwrap_or(0);
+    if since >= SILENT_MS {
+        "silent"
+    } else if since >= QUIET_MS {
+        "quiet"
+    } else if f["building"].as_f64() == Some(1.0) {
+        "building"
+    } else if let Some(code) = f["build_fail"].as_f64() {
+        // dd-agent.rs BuildFail
+        match code as u8 {
+            1 => "fetch",
+            2 => "memory",
+            3 => "disk",
+            _ => "build",
+        }
+    } else if f["agent_ok"].as_f64() == Some(0.0) {
+        "refused"
+    } else if f["release"].as_f64().is_some_and(|r| r < fleet) {
+        "behind"
+    } else {
+        "ok"
+    }
+}
+
 /// GET /_dd/boxes/mine: the boxes this member set up, with how each is as
 /// its own heartbeats say (the agreed state's), for their Devices tab.
 pub(crate) async fn mine(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
@@ -249,6 +295,10 @@ pub(crate) async fn mine(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let (st, owned) = current(&app).await;
+    let fleet = fleet_release(&st);
+    let now = st["time"]
+        .as_i64()
+        .unwrap_or_else(|| identity::now() as i64 * 1000);
     let rows: Vec<serde_json::Value> = owned
         .into_iter()
         .filter(|o| o.user == user)
@@ -260,6 +310,7 @@ pub(crate) async fn mine(State(app): State<Arc<App>>, headers: HeaderMap) -> Res
                 "joined": o.at,
                 "lastSeen": b["lastSeen"],
                 "facts": b["facts"],
+                "how": how(b, fleet, now),
             })
         })
         .collect();
@@ -573,6 +624,78 @@ mod tests {
             ]
         );
         assert!(owners(&joined, &HashMap::new()).is_empty());
+    }
+
+    #[test]
+    fn a_box_says_how_it_is_from_its_heartbeats() {
+        let box_with =
+            |facts: serde_json::Value| serde_json::json!({ "lastSeen": 1000, "facts": facts });
+        let now = 1000 + 60 * 1000;
+        for (facts, want) in [
+            (serde_json::json!({ "agent_ok": 1, "release": 9 }), "ok"),
+            // the fleet's is newer, with nothing wrong said
+            (serde_json::json!({ "agent_ok": 1, "release": 8 }), "behind"),
+            (
+                serde_json::json!({ "agent_ok": 0, "release": 8 }),
+                "refused",
+            ),
+            (
+                serde_json::json!({ "building": 1, "release": 8 }),
+                "building",
+            ),
+            // trying again after a failure: building
+            (
+                serde_json::json!({ "building": 1, "build_fail": 2, "agent_ok": 0, "release": 8 }),
+                "building",
+            ),
+            (
+                serde_json::json!({ "build_fail": 1, "agent_ok": 0 }),
+                "fetch",
+            ),
+            (
+                serde_json::json!({ "build_fail": 2, "agent_ok": 0 }),
+                "memory",
+            ),
+            (
+                serde_json::json!({ "build_fail": 3, "agent_ok": 0 }),
+                "disk",
+            ),
+            (
+                serde_json::json!({ "build_fail": 4, "agent_ok": 0 }),
+                "build",
+            ),
+            // a code from a newer box than this gate
+            (
+                serde_json::json!({ "build_fail": 9, "agent_ok": 0 }),
+                "build",
+            ),
+        ] {
+            assert_eq!(how(&box_with(facts.clone()), 9.0, now), want, "{facts}");
+        }
+        // an unknown fleet says nothing of being behind
+        assert_eq!(
+            how(&box_with(serde_json::json!({ "release": 8 })), 0.0, now),
+            "ok"
+        );
+        // what it last said counts for nothing once it has gone quiet
+        let failed = box_with(serde_json::json!({ "build_fail": 2 }));
+        assert_eq!(how(&failed, 9.0, 1000 + QUIET_MS), "quiet");
+        assert_eq!(how(&failed, 9.0, 1000 + SILENT_MS), "silent");
+        assert_eq!(how(&serde_json::json!({}), 9.0, SILENT_MS), "silent");
+    }
+
+    #[test]
+    fn only_the_releases_boxes_say_what_the_release_is() {
+        let st = serde_json::json!({
+            "joined": { "jaaaaaaaaaa": {} },
+            "boxes": {
+                "node1": { "facts": { "release": 8 } },
+                "node2": { "facts": { "release": 9 } },
+                "jaaaaaaaaaa": { "facts": { "release": 99 } },
+            },
+        });
+        assert_eq!(fleet_release(&st), 9.0);
+        assert_eq!(fleet_release(&serde_json::Value::Null), 0.0);
     }
 
     #[test]
