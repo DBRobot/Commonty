@@ -58,6 +58,7 @@
   "waits",
   "switch-race",
   "work-memory",
+  "shutdown-drain",
   "site-journeys",
   "rollout",
   "placed",
@@ -1221,6 +1222,24 @@
    "nix/modules/box/logins.nix": "admin linger (user@1000 survives logins); the fix under test"
   },
   "notes": "Behaviour mostly lives in nixpkgs switch-to-configuration/logind (flake.lock, shared).",
+  "family": "vm"
+ },
+ "shutdown-drain": {
+  "paths": [
+   "nix/tests/shutdown-drain.nix",
+   "nix/tests/shutdown-drain.py",
+   "nix/modules/box/shutdown-drain.nix",
+   "nix/modules/box/shutdown-drain.sh",
+   "nix/modules/box/host.nix"
+  ],
+  "why": {
+   "nix/tests/shutdown-drain.nix": "test",
+   "nix/tests/shutdown-drain.py": "test",
+   "nix/modules/box/shutdown-drain.nix": "the unit, the delay lock, the power key",
+   "nix/modules/box/shutdown-drain.sh": "the drain itself",
+   "nix/modules/box/host.nix": "the power key every other box ignores (asserted of node1)"
+  },
+  "notes": "A stand-in answers for dd-control; the real one's draining fact is control-plane's place_test.",
   "family": "vm"
  },
  "work-memory": {

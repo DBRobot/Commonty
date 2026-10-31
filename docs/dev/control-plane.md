@@ -508,6 +508,15 @@ writes `/var/lib/dd-facts/draining.prom` (`dd_box_draining 1`), which
 `dd-control` reads with its other facts (any file saying 1 drains it) and
 carries as `draining`. `dd-drain off` removes it. It is on no page.
 
+A box that joined does the same by itself when it is shut down cleanly: its
+power button, or a shutdown it is told (`dd-shutdown-drain`,
+[`shutdown-drain.nix`](../../nix/modules/box/shutdown-drain.nix)). A delay
+lock at logind holds the shutdown while what it runs moves: at once if it runs
+nothing or the control plane does not answer, as soon as the rest has moved
+or the plan keeps it here, and 60 s at most, which logind enforces whatever
+the drain does. The next boot removes the file. The release's boxes have none
+of it, and ignore the button.
+
 `dd-control -placement` serves the plan at `127.0.0.1:4195/plan`, each
 choice with why.
 
