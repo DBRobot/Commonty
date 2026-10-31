@@ -3840,5 +3840,18 @@
    ".forgejo/workflows/entry_point.yml": "ci_ok's script is read from it"
   },
   "notes": ""
+ },
+ "computer-facts-logic": {
+  "paths": [
+   "nix/tests/computer-facts-logic.nix",
+   "nix/tests/computer-facts-logic/**",
+   "nix/modules/computers/computer-facts.sh"
+  ],
+  "why": {
+   "nix/tests/computer-facts-logic.nix": "the check",
+   "nix/tests/computer-facts-logic/**": "its cases",
+   "nix/modules/computers/computer-facts.sh": "the script under test"
+  },
+  "notes": ""
  }
 }
