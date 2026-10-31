@@ -3787,6 +3787,17 @@
   "notes": "",
   "family": "vm"
  },
+ "tang-house": {
+  "paths": [
+   "nix/tests/tang-house.nix",
+   "nix/modules/smarthome/tang.nix"
+  ],
+  "why": {
+   "nix/tests/tang-house.nix": "the check",
+   "nix/modules/smarthome/tang.nix": "the firewall rules and socket allow list it reads"
+  },
+  "notes": "No VM, seconds."
+ },
  "wired-watch-logic": {
   "paths": [
    "nix/tests/wired-watch-logic.nix",

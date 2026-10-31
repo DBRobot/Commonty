@@ -7,7 +7,8 @@
 # of no answer the adapter is reset if it is USB; if that does not bring it
 # back the wired profile goes down so the wifi carries everything, and the
 # cable is tried again until it answers. Never a reboot.
-# Environment: MAC (the wired adapter's), GATEWAY, PROFILE (house-wired),
+# Environment: MAC (the wired adapter's), GATEWAY (empty on a box on DHCP: the
+# router its links were given, remembered while they are down), PROFILE (house-wired),
 # WIFI (the wifi interface), DIR (this unit's state), FACTS (node_exporter's textfile folder), GRACE,
 # RETRY (seconds between full tries of the cable while on wifi), SYS (default
 # /sys, a test's tree).
@@ -92,6 +93,23 @@ wired_down() {
 }
 
 dev=$(iface) || dev=""
+# a house on DHCP has whatever router it has; none known yet is next time,
+# and never a cable that failed
+if [ -z "${GATEWAY:-}" ]; then
+  for link in "$dev" "$WIFI"; do
+    [ -n "$link" ] || continue
+    GATEWAY=$(ip -4 route show default dev "$link" 2>/dev/null | sed -n 's/^default via \([0-9.]*\).*/\1/p;q')
+    [ -n "$GATEWAY" ] && break
+  done
+  if [ -n "$GATEWAY" ]; then
+    echo "$GATEWAY" >"$DIR/gateway.tmp" && mv -f "$DIR/gateway.tmp" "$DIR/gateway"
+  elif [ -s "$DIR/gateway" ]; then
+    GATEWAY=$(cat "$DIR/gateway")
+  else
+    save
+    exit 0
+  fi
+fi
 wifi_answers() {
   [[ $(nmcli -t -g GENERAL.STATE device show "$WIFI" 2>/dev/null) == 100* ]] && answers "$WIFI"
 }

@@ -120,7 +120,8 @@ in
             "/dev/null";
         inherit (hw) wired;
         wifi = if config.dd.hasSecret "wifi-psk" || sealedWifi then hw.wifi else null;
-      };
+      }
+      // lib.optionalAttrs (house ? gateway) { inherit (house) gateway; };
       sops.secrets.wifi-psk = lib.mkIf (config.dd.hasSecret "wifi-psk") { };
       # the installer's: the password sealed to this box's secrets key, which
       # only its TPM opens; opened into memory before NetworkManager reads it

@@ -10,6 +10,17 @@
 { config, lib, ... }:
 let
   cfg = config.dd.tang;
+  # a box on DHCP has no fixed network to name: what is private. Those
+  # sources reach a box only from its own network; the Commonty network's
+  # are 100.64/10, and commonty0 forwards nothing
+  private = [
+    "10.0.0.0/8"
+    "172.16.0.0/12"
+    "192.168.0.0/16"
+  ];
+  houses = if cfg.house == "" then private else [ cfg.house ];
+  rule =
+    verb: a: "iptables ${verb} nixos-fw -p tcp --dport ${toString cfg.port} -s ${a} -j nixos-fw-accept";
 in
 {
   options.dd.tang = {
@@ -21,7 +32,7 @@ in
     house = lib.mkOption {
       type = lib.types.str;
       default = "192.168.1.0/24";
-      description = "the house network: the only addresses Tang answers";
+      description = "the house network: the only addresses Tang answers. Empty on a box with no fixed address: the private ranges";
     };
   };
 
@@ -30,17 +41,14 @@ in
       enable = true;
       listenStream = [ (toString cfg.port) ];
       # and the box itself, where tang-show-keys reads the thumbprint
-      ipAddressAllow = [
-        cfg.house
-        "127.0.0.1/32"
-      ];
+      ipAddressAllow = houses ++ [ "127.0.0.1/32" ];
     };
-    networking.firewall.extraCommands = ''
-      iptables -D nixos-fw -p tcp --dport ${toString cfg.port} -s ${cfg.house} -j nixos-fw-accept 2>/dev/null || true
-      iptables -I nixos-fw -p tcp --dport ${toString cfg.port} -s ${cfg.house} -j nixos-fw-accept
-    '';
-    networking.firewall.extraStopCommands = ''
-      iptables -D nixos-fw -p tcp --dport ${toString cfg.port} -s ${cfg.house} -j nixos-fw-accept 2>/dev/null || true
-    '';
+    networking.firewall.extraCommands = lib.concatMapStrings (a: ''
+      ${rule "-D" a} 2>/dev/null || true
+      ${rule "-I" a}
+    '') houses;
+    networking.firewall.extraStopCommands = lib.concatMapStrings (a: ''
+      ${rule "-D" a} 2>/dev/null || true
+    '') houses;
   };
 }

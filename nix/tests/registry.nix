@@ -66,6 +66,7 @@
     # the wired watchdog's fallback, choice by choice
     "wired-watch-logic"
     # a box's room for computers, from its services' measured memory
+    "tang-house"
     "computer-facts-logic"
     # anything deleted is gone from every box and backup within 90 days
     "retention"
@@ -128,6 +129,7 @@
     "work-memory-sizes"
     "net-report"
     "wired-watch-logic"
+    "tang-house"
     "garage-setup-pipe"
     "computer-facts-logic"
     "ci-resume"

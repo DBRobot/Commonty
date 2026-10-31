@@ -25,7 +25,9 @@ X
 # ping over one link: the cable answers only with its profile up
 cat >"$t/bin/ping" <<'X'
 #!/usr/bin/env bash
-while [ $# -gt 0 ]; do [ "$1" = -I ] && dev=$2; shift; done
+while [ $# -gt 0 ]; do [ "$1" = -I ] && dev=$2; to=$1; shift; done
+# a router that is not where a house on DHCP has it does not answer
+if [ -s "$T/router" ] && [ "$to" != "$(cat "$T/router")" ]; then exit 1; fi
 case "$dev" in
   wifi0) [ -e "$T/wifi-ok" ] ;;
   *) [ -e "$T/cable-ok" ] && [ "$(cat "$T/profile")" = up ] ;;
@@ -37,7 +39,14 @@ cat >"$t/bin/arping" <<'X'
 if [ -e "$T/cable-ok" ]; then echo "Received 1 response(s)"; exit 1; fi
 echo "Received 0 response(s)"
 X
-printf '#!/bin/sh\nexit 0\n' >"$t/bin/ip"
+# the default route each link was given, where the test says it has one
+cat >"$t/bin/ip" <<'X'
+#!/usr/bin/env bash
+case "$*" in
+  "-4 route show default dev "*) [ -s "$T/route" ] && echo "default via $(cat "$T/route") dev ${*: -1} proto dhcp" ;;
+esac
+exit 0
+X
 printf '#!/bin/sh\ncat "$T/now"\n' >"$t/bin/date"
 # the sleep inside a USB reset (authorized 0): the reset mends the cable
 # where the test says it does
@@ -52,7 +61,7 @@ chmod +x "$t/bin"/*
 mac=00:E0:4C:3A:46:58
 # a box: its cable adapter on usb (or pci), and its state cleared
 box() { # usb|pci
-  rm -rf "$t/sys" "$t/run" "$t/facts" "$t/calls" "$t"/cable-ok "$t"/wifi-ok "$t"/wifi-on "$t"/reset-mends "$t"/nm-down
+  rm -rf "$t/sys" "$t/run" "$t/facts" "$t/calls" "$t/route" "$t/router" "$t"/cable-ok "$t"/wifi-ok "$t"/wifi-on "$t"/reset-mends "$t"/nm-down
   mkdir -p "$t/sys/class/net/enx0" "$t/sys/bus/usb" "$t/sys/bus/pci" "$t/run" "$t/facts"
   echo "${mac,,}" >"$t/sys/class/net/enx0/address"
   if [ "$1" = usb ]; then
@@ -72,7 +81,7 @@ box() { # usb|pci
 # one run at a time: it must always exit 0
 at() { # seconds
   echo "$1" >"$t/now"
-  T=$t PATH="$t/bin:$PATH" SYS="$t/sys" MAC=$mac GATEWAY=192.168.1.1 PROFILE=house-wired \
+  T=$t PATH="$t/bin:$PATH" SYS="$t/sys" MAC=$mac GATEWAY=${GW-192.168.1.1} PROFILE=house-wired \
     WIFI=wifi0 DIR="$t/run" FACTS="$t/facts" GRACE=90 RETRY=600 \
     bash "$watch" >>"$t/log" 2>&1 || { cat "$t/log"; echo "FAIL: a run at $1 exited non-zero"; exit 1; }
 }
@@ -179,5 +188,21 @@ touch "$t/nm-down"
 at 1000
 at 1200
 is "NetworkManager down: nothing done" "$(ls "$t/run") $(tr -d '\n' <"$t/calls")" " "
+
+# a house not on 192.168.1.x, on DHCP: its router is what its links were given
+GW=""
+box pci
+echo 10.77.0.1 >"$t/router"
+at 1000
+at 1200
+is "no router known yet: no failing, nothing done" "$(state) $(tr -d '\n' <"$t/calls")" "0 "
+echo 10.77.0.1 >"$t/route"
+at 1300
+is "its router answers: the cable is fine" "$(state) $(cat "$t/run/gateway")" "0 10.77.0.1"
+rm "$t/cable-ok" "$t/route"
+at 1400
+at 1520
+is "the cable goes quiet: on the wifi, by the router it remembered" "$(state) $(profile)" "2 down"
+GW=192.168.1.1
 
 [ "$fails" = 0 ] || { echo "--- the watchdog's lines"; cat "$t/log"; exit 1; }

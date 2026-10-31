@@ -31,7 +31,16 @@ in
     };
     gateway = lib.mkOption {
       type = lib.types.str;
-      default = "192.168.1.1";
+      # .1 of a fixed address's network, or box.json house.gateway; with no
+      # fixed address, none: the router is whichever the house's DHCP gave
+      default =
+        if cfg.address == "" then
+          ""
+        else
+          lib.concatStringsSep "." (
+            lib.take 3 (lib.splitString "." (lib.head (lib.splitString "/" cfg.address))) ++ [ "1" ]
+          );
+      description = "the router on the house network; empty on a box that asks DHCP for its address";
     };
     wired = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
