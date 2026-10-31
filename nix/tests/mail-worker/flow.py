@@ -182,6 +182,9 @@ with sync_playwright() as p:
         "send it again sends again",
     )
     ok(not errs, f"no errors on the pages {errs}")
+    # off the change page: it polls, and once the address is confirmed it
+    # moves on by itself, which aborts a goto that happens to land with it
+    pg.goto("about:blank")
     # the API refuses what it should
     import urllib.error
 
