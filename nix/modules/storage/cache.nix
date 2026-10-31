@@ -208,8 +208,8 @@ in
 
     # The cache is held to what is still wanted, or it grows for good (95G
     # in its first two weeks): the closures of the last ten releases, and
-    # anything a week old or newer. Run where the forge is, which has the
-    # releases branch to say what each release was.
+    # anything a week old or newer. The forge's public door has the releases
+    # branch to say what each release was, wherever the forge is.
     systemd.services.dd-cache-gc = lib.mkIf config.services.forgejo.enable {
       description = "Let go of what no recent release wants from the nix cache";
       path = [
@@ -224,7 +224,7 @@ in
         HOME = "/root";
         AWS_SHARED_CREDENTIALS_FILE = cfg.credentialsFile;
         AWS_DEFAULT_REGION = "us-east-1";
-        REPO = "${config.services.forgejo.repositoryRoot}/${config.dd.repo}.git";
+        SOURCE = "https://code.${config.dd.domain}/${config.dd.repo}";
         KEEP = "10";
         # CI uploads 6-21 thousand objects a day: a week of them held ~58G on
         # each box (2026-10-24); two days still covers a run and its release
@@ -232,12 +232,6 @@ in
         CACHE = url;
         BUCKET = "nix-cache";
         ENDPOINT = endpoint;
-      };
-      # with failover every box able to hold the forge has it, but only the
-      # holder's releases branch is current: a box that held it once keeps a
-      # stale copy, whose older releases would let go of what is wanted now
-      unitConfig = lib.mkIf (config.dd.failover or false) {
-        ConditionPathExists = "/run/dd-placed/forgejo";
       };
       serviceConfig = {
         Type = "oneshot";
