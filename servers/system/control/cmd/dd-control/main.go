@@ -1085,6 +1085,7 @@ func main() {
 			return place.Decide(i, s, cfg.Rules.GoneAfter, boxOwners(ids, s))
 		}
 		placed.limits = cfg.Computers
+		placed.noLeases = *joinKey != ""
 		placed.agreed = func(s *state.State) (map[string]*computers.Listed, error) {
 			if rc == nil {
 				return nil, errors.New("the release has no rules for computers")
