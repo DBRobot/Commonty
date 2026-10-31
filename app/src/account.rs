@@ -355,6 +355,7 @@ pub fn forget(keys: State<'_, Keys>) -> Result<(), String> {
     crate::local::forget_browsers();
     // the photo password, and the root this device vouched for, went with
     // the name they were for
+    crate::photos::forget_session();
     let _ = keys.0.clear(crate::photos::KEY);
     let _ = keys.0.clear(crate::photos::LEGACY);
     let _ = keys.0.clear(account::ROOT_PIN);

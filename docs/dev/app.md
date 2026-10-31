@@ -227,7 +227,8 @@ the browser ─ POST /_dd/app/pair/finish {verifier} ─▶ the hash matches and
                  a page that goes on by itself (so the next request is same-site)
             ─ /_dd/app/resume?service=photos ─▶ a door into Photos the same way,
               http://p-<own>.localhost:41661/_dd/app/enter?k=…, its own cookie
-            ─ /_dd/photos: POST /_dd/app/photos-key, the password once
+            ─ /_dd/photos: POST /_dd/app/photos-key, once: the session the
+              app opened (packaged.md#sign-in), or the password
             ─ Ente's client, signed in
 ```
 
@@ -347,9 +348,12 @@ a remembered browser after a        still let in, at the same name; a new device
 an open redirect through the path   a path on the service's own origin, in a short safe
                                     alphabet (then_is_a_path_on_this_origin_only,
                                     the_door_page_goes_on_to_its_path_and_nowhere_else)
-the Photos password in history      in no address: the page asks for it once, within
-  or synced history                 60 s of its door, same-origin, with its browser's
+the Photos password or session      in no address: the page asks for it once, within
+  in history or synced history      60 s of its door, same-origin, with its browser's
                                     cookie (the_photos_password_is_handed_once_...)
+the Photos session the app keeps    memory only, for the member and password it was
+                                    opened with; gone at sign-out, checked with museum
+                                    before each hand-off (photos.rs, session)
 a key asked of a browser no one      the library, the archive and Photos' password are
   let in                            behind Serve: the browser's cookie, given after the
                                     member's click (keys_are_served_only_to_a_browser_the_member_let_in)
@@ -414,7 +418,8 @@ app/src/      the window and its commands
                 key pages), served to the window and the browser
   handoff.rs    pairing a browser, the browsers it remembers, names, links, admit
   account.rs    sign-up, recovery, joining by code, a browser passkey
-  photos.rs     Photos' password: made here, shared signed, the move
+  photos.rs     Photos' password: made here, shared signed, the move; the
+                account opened once for every Photos page
   export.rs     the Leave tab's zips: every photo, made here; a library's,
                 made in the page and carried to a download or a file
   zip.rs        a zip written as it goes

@@ -744,8 +744,10 @@ table below says who.
 Ente's client and the photo account's password are the member's app's
 ([app.md](app.md)); a browser at `/_dd/photos` gets the page that hands it
 to the app (`use_app`). `/_dd/photos/config` (a session, or a device
-token) gives the app's Photos page museum's address and the person's ente
-address (`<user><VERIFY_PHOTOS_SUFFIX>`); the demo also gets its password.
+token) gives the app's Photos page, and the app itself when it opens the
+account for its pages ([packaged.md](packaged.md#sign-in)), museum's
+address and the person's ente address (`<user><VERIFY_PHOTOS_SUFFIX>`);
+the demo also gets its password.
 The two museum calls that need the fleet's verification code
 (`verify-email`, `change-email`) go through `/_dd/photos/museum/{op}`, by
 session or device token: the gate checks the address is the caller's own

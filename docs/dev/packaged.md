@@ -195,22 +195,46 @@ the app's Photos page (its window, or a      the app                    gate / m
  browser it let in, port 41661)
  POST /_dd/photos/config ─────────────────────────────────────────────▶ api, accountApi, email
  POST /_dd/app/photos-key ──────────────────▶ once per door:
-                                              {pw}            the account's
+                                              {session}       the account's, opened by
+                                                              the app (below)
+                                              {pw}            the app could not open it:
+                                                              the page does (ente_login)
                                               {pw, fresh}     none yet: make it
                                               {pw, next}      a passkey's: move it
- ente_login (SRP, our wasm) ──────────────────────────────────────────▶ api.<domain>
-   fresh, no account: ente_create ─▶ /_dd/museum ─▶ the app, with its token ─▶ photos.<domain>
-     users/verify-email ─▶ gate adds the code ─────────────────────────▶ museum
+   fresh: ente_login (SRP, our wasm) ─────────────────────────────────▶ api.<domain>
+     no account: ente_create ─▶ /_dd/museum ─▶ the app, with its token ─▶ photos.<domain>
+       users/verify-email ─▶ gate adds the code ───────────────────────▶ museum
    next: ente_rekey(pw → next) ────────────────────────────────────────▶ api.<domain>
  POST /_dd/app/photos-keyed {pw} ───────────▶ that password is the account's:
                                               keyring, dd-photos.json
  session written where Ente's app reads it, then /gallery
 ```
 
-- [app/web/photos-open.js](../../app/web/photos-open.js) runs it, with our
-  Rust in the browser ([client/web/src/lib.rs](../../client/web/src/lib.rs):
-  `ente_login`, `ente_create`, `ente_rekey`). The master key never leaves
-  the page.
+- [app/web/photos-open.js](../../app/web/photos-open.js) runs it. Making
+  and moving an account it does with our Rust in the browser
+  ([client/web/src/lib.rs](../../client/web/src/lib.rs): `ente_create`,
+  `ente_rekey`, and `ente_login` when the app hands it a bare `{pw}`).
+- **An account that only needs opening, the app opens** (`handed` and
+  `session` in [app/src/photos.rs](../../app/src/photos.rs)), natively,
+  with the same Ente crates (`ente::Session`,
+  [client/ente/src/session.rs](../../client/ente/src/session.rs)). The
+  key derivation is Argon2id at 256 MiB and 16 passes, which takes about
+  2.8 s natively and about 5.8 s in the page's wasm, and every new tab used
+  to pay it: Ente's client keeps its key in sessionStorage, which is per
+  tab. The app opens the account once, keeps the session (user id, email,
+  token, key attributes and the master key) in memory and nowhere else, and
+  hands each page the same session with the master key sealed under a key
+  made for that tab, through the same one-time `photos-key` hand-off. It
+  starts the sign-in when it makes the door, so the first page waits less.
+  The session is for the member signed in and the password it was opened
+  with; it goes at sign-out (`forget_session`, from `account::forget`) and
+  when either changes. Before handing it again the app asks museum whether
+  the token still holds (`/users/session-validity/v2`) and whether the key
+  attributes are as they were (a password changed on another device);
+  if not, or if museum does not answer, it signs in again. Every tab shares
+  the token, so signing out of Ente's own menu in one tab signs the others
+  out too; the next tab opened signs in afresh. If the app cannot sign in,
+  it hands the page `{pw}` and the page signs in itself.
 - Museum makes accounts under `@users.<domain>` with a fixed verification
   code instead of a mail (`internal.hardcoded-ott`), which it honours
   because the module runs it as `ENVIRONMENT=local`. That code would let
@@ -312,7 +336,8 @@ database.
    again.
 4. Move `ente-accounts` and `ente-core` in both Cargo files to the matching
    commit, and check `seed()` in [photos-open.js](../../app/web/photos-open.js)
-   still writes the session in the shape the new app reads (`user`,
+   and `Session::seed` in [session.rs](../../client/ente/src/session.rs)
+   still write the session in the shape the new app reads (`user`,
    `keyAttributes`, `encryptionKey`, the `kv` IndexedDB token).
 5. Check by hand: a new account made by the app, an existing one opening,
    the move off a passkey's password, an upload, "Confirm it's you", the recovery key,

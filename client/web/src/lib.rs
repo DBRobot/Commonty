@@ -11,7 +11,6 @@ use ente_accounts::flow::{
     AuthFlow, AuthFlowUi, AuthenticatedAccount, ChangePasswordParams, CreateAccountParams,
     LoginParams, OtpPurpose, SecondFactorMethod, TotpPurpose,
 };
-use ente_accounts::types::AccountsClientConfig;
 use ente_core::b64;
 use ente_core::crypto;
 use wasm_bindgen::prelude::*;
@@ -50,54 +49,15 @@ impl AuthFlowUi for NoUi {
     }
 }
 
-/// What ente's web app needs in its storage to be signed in, in the shapes
-/// it reads: `user` and `keyAttributes` in localStorage, the token in its
-/// kv store, and the master key in sessionStorage sealed with a key that
-/// lives only in that tab.
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Session {
-    user_id: i64,
-    email: String,
-    token: String,
-    key_attributes: serde_json::Value,
-    session_key: SessionKey,
-}
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SessionKey {
-    encrypted_data: String,
-    key: String,
-    nonce: String,
-}
-
 fn client(origin: &str) -> Result<AccountsClient> {
-    AccountsClient::new(AccountsClientConfig {
-        origin: origin.trim_end_matches('/').to_string(),
-        auth_token: None,
-        client_package: "io.ente.photos.web".into(),
-        client_version: None,
-        user_agent: None,
-    })
+    ente::session::web_client(origin)
 }
 
+/// What ente's web app needs in its storage to be signed in, in the shapes
+/// it reads (ente::Session): the same the app hands its pages when it
+/// signs in itself (app/src/photos.rs)
 fn session(email: &str, account: AuthenticatedAccount) -> Result<String> {
-    let key = crypto::Key::generate();
-    let sealed = crypto::secretbox::encrypt(&account.secrets.master_key, &key);
-    let s = Session {
-        user_id: account.user_id,
-        email: email.to_string(),
-        // url-safe with padding: what ente web keeps and museum decodes
-        token: b64::encode_url_safe(&account.secrets.token),
-        key_attributes: serde_json::to_value(&account.key_attributes)?,
-        session_key: SessionKey {
-            encrypted_data: b64::encode(&sealed.encrypted_data),
-            key: b64::encode(key.as_bytes()),
-            nonce: b64::encode(sealed.nonce.as_bytes()),
-        },
-    };
-    Ok(serde_json::to_string(&s)?)
+    Ok(ente::Session::new(email, &account)?.seed().to_string())
 }
 
 fn js(e: Error) -> JsValue {
