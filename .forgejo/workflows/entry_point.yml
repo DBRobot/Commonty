@@ -484,6 +484,8 @@ jobs:
   # files it changes (.forgejo/checks/style.py). Every finding blocks.
 
   style:
+    # a pull request's title, body and commits: main's full run has none
+    if: ${{ github.event_name == 'pull_request' }}
     runs-on: nix
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
@@ -506,7 +508,8 @@ jobs:
   # blocks, the rest is a yellow lint/warnings status that blocks nothing.
   lint:
     needs: files_modified
-    if: ${{ needs.files_modified.outputs.proven != 'true' }}
+    # what a pull request changed: main's full run has no base to compare
+    if: ${{ github.event_name == 'pull_request' && needs.files_modified.outputs.proven != 'true' }}
     runs-on: nix
     steps:
       - uses: https://github.com/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0, pinned: a tag can be moved
