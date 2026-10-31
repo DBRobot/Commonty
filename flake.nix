@@ -1401,10 +1401,12 @@
               doInstallCargoArtifacts = false;
             }
           );
-          # the app's network engine: go vet, and its tests (app/net/*_test.go)
+          # the app's network engine: go vet, and its tests (app/net/*_test.go),
+          # one of them against a real Headscale
           net-check = appNet.overrideAttrs (_: {
             pname = "commonty-net-check";
             doCheck = true;
+            nativeCheckInputs = [ pkgs.headscale ];
             checkPhase = ''
               runHook preCheck
               go vet ./...
