@@ -11,7 +11,6 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use auth::KeyStore as _;
 use base64::Engine as _;
@@ -26,8 +25,6 @@ use crate::writer;
 pub const LABEL: &str = "boxsetup";
 /// the installer's name in app.json: commonty-box-installer-<version>.img.zst
 const IMAGE: &str = "commonty-box-installer-";
-/// a ticket is good for a week: the drive may sit in a drawer a while
-const TICKET_TTL: Duration = Duration::from_secs(7 * 24 * 3600);
 /// what the pending backup's password is sealed to the devices as
 const SEALED_AS: &str = "join backup";
 
@@ -321,7 +318,7 @@ async fn made<R: Runtime>(
     let kp = auth::device::load(&keys.0)
         .map_err(|e| e.to_string())?
         .ok_or("this device has no key")?;
-    let (ticket, ticket_id) = mint_join_ticket(&kp, &user, TICKET_TTL)?;
+    let (ticket, ticket_id) = drive_ticket(&kp, &user)?;
     let mut raw = Zeroizing::new([0u8; 32]);
     getrandom::fill(&mut raw[..]).map_err(|e| e.to_string())?;
     let backup_key =
@@ -354,25 +351,14 @@ async fn made<R: Runtime>(
     })
 }
 
-/// A join ticket: this device's token for the member, good for a week and
-/// for joining alone, and its id.
-// STUB until member-join lands: auth::device::mint_join_ticket binds the id
-// into the token (ticket(<id>)); this one carries purpose("join") only. Swap
-// the body for that call; the signature is the same.
-fn mint_join_ticket(
+/// A join ticket for the drive: this device's, for the member, good for a
+/// week and for joining alone, and its id.
+fn drive_ticket(
     kp: &auth::device::KeyPair,
     user: &str,
-    ttl: Duration,
 ) -> Result<(Zeroizing<String>, String), String> {
-    let mut id = [0u8; 16];
-    getrandom::fill(&mut id).map_err(|e| e.to_string())?;
-    let id = hex(&id);
-    let t = auth::device::mint_for(kp, user, ttl, Some("join")).map_err(|e| e.to_string())?;
+    let (t, id) = auth::device::mint_join_ticket(kp, user).map_err(|e| e.to_string())?;
     Ok((Zeroizing::new(t), id))
-}
-
-fn hex(b: &[u8]) -> String {
-    b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
 fn images_url() -> Result<String, String> {
@@ -685,6 +671,19 @@ mod tests {
         assert_eq!(f.url, "https://x/b.img.zst");
         let none = serde_json::json!({"files": {"commonty-home-controller-1.img.zst": {"url": "https://x", "sha256": "a".repeat(64)}}});
         assert!(installer::pick(&none, IMAGE).is_err());
+    }
+
+    // the box's own reader (dd-box-setup --ticket-id, which backup.sh runs)
+    // on the ticket `made` writes: with no id here the backup has no folder
+    // and dd-control has no claim to join with
+    #[test]
+    fn the_drives_ticket_names_its_id_as_the_box_reads_it() {
+        let kp = auth::device::generate();
+        let (t, id) = drive_ticket(&kp, "ann").unwrap();
+        assert_eq!(id.len(), 32);
+        assert_eq!(release::setup::ticket_id(&t).as_deref(), Some(&*id));
+        let (_, other) = drive_ticket(&kp, "ann").unwrap();
+        assert_ne!(other, id);
     }
 
     #[test]
