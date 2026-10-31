@@ -1,3 +1,23 @@
+diff --git a/apps/photos/src/components/app-lock/LockScreenContents.tsx b/apps/photos/src/components/app-lock/LockScreenContents.tsx
+index ed93406..3559aaf 100644
+--- a/apps/photos/src/components/app-lock/LockScreenContents.tsx
++++ b/apps/photos/src/components/app-lock/LockScreenContents.tsx
+@@ -1,5 +1,5 @@
+ import { Box } from "@mui/material";
+-import { EnteLogo } from "ente-base/components/EnteLogo";
++import { CommontyMark } from "ente-base/components/CommontyMark";
+ import { FocusVisibleButton } from "ente-base/components/mui/FocusVisibleButton";
+ import { AppLockPrompt } from "ente-new/photos/components/app-lock/AppLockPrompt";
+ import { t } from "i18next";
+@@ -34,7 +34,7 @@ export const LockScreenContents = () => {
+                             p: 3,
+                         }}
+                     >
+-                        <EnteLogo />
++                        <CommontyMark />
+                         {!showLogoutConfirm && (
+                             <FocusVisibleButton
+                                 variant="text"
 diff --git a/apps/photos/src/pages/_app.tsx b/apps/photos/src/pages/_app.tsx
 index 6f90d1b..4d12493 100644
 --- a/apps/photos/src/pages/_app.tsx
@@ -13,45 +33,28 @@ index 6f90d1b..4d12493 100644
      return (
          <ThemeProvider theme={photosTheme}>
 diff --git a/apps/photos/src/pages/index.tsx b/apps/photos/src/pages/index.tsx
-index f8a909d..ee148a7 100644
+index f8a909d..c474418 100644
 --- a/apps/photos/src/pages/index.tsx
 +++ b/apps/photos/src/pages/index.tsx
-@@ -2,7 +2,6 @@ import { Box, Stack, Typography, styled } from "@mui/material";
+@@ -1,8 +1,8 @@
+ import { Box, Stack, Typography, styled } from "@mui/material";
  import { LoginContents } from "ente-accounts/components/LoginContents";
  import { SignUpContents } from "ente-accounts/components/SignUpContents";
++import { CommontyMark } from "ente-base/components/CommontyMark";
  import { CenteredFill, CenteredRow } from "ente-base/components/containers";
 -import { EnteLogo } from "ente-base/components/EnteLogo";
  import { ActivityIndicator } from "ente-base/components/mui/ActivityIndicator";
  import { FocusVisibleButton } from "ente-base/components/mui/FocusVisibleButton";
  import { useBaseContext } from "ente-base/context";
-@@ -136,7 +135,7 @@ const Page: React.FC = () => {
+@@ -136,7 +136,7 @@ const Page: React.FC = () => {
                  <>
                      <SlideshowPanel>
                          <Logo_>
 -                            <EnteLogo height={24} />
-+                            <CommontyMark />
++                            <CommontyMark height={24} />
                          </Logo_>
                          <Slideshow />
                      </SlideshowPanel>
-@@ -280,6 +279,18 @@ const SlideshowPanel = styled("div")`
-     }
- `;
- 
-+/** Commonty: the site's mark where Ente's wordmark was. */
-+const CommontyMark: React.FC = () => (
-+    <svg height={24} viewBox="0 0 22 22" aria-label="Commonty">
-+        <g fill="none" stroke="currentColor" strokeWidth="1.6">
-+            <rect x="1" y="1" width="9" height="9" />
-+            <rect x="12" y="1" width="9" height="9" />
-+            <rect x="1" y="12" width="9" height="9" />
-+        </g>
-+        <rect x="12" y="12" width="9" height="9" fill="currentColor" />
-+    </svg>
-+);
-+
- const Logo_ = styled("div")`
-     /* Bias towards the left for better visual alignment with the slides. */
-     padding-inline-end: 1rem;
 diff --git a/packages/base/app.ts b/packages/base/app.ts
 index 0556caa..01bb068 100644
 --- a/packages/base/app.ts
@@ -65,6 +68,25 @@ index 0556caa..01bb068 100644
      // Ensu (chat) web app.
      ensu: "Ensu",
      locker: "Ente Locker",
+diff --git a/packages/base/components/CommontyMark.tsx b/packages/base/components/CommontyMark.tsx
+new file mode 100644
+index 0000000..6aeb405
+--- /dev/null
++++ b/packages/base/components/CommontyMark.tsx
+@@ -0,0 +1,13 @@
++import React from "react";
++
++/** Commonty: the site's mark, where Ente's wordmark was. */
++export const CommontyMark: React.FC<{ height?: number }> = ({ height }) => (
++    <svg height={height ?? 18} viewBox="0 0 22 22" aria-label="Commonty">
++        <g fill="none" stroke="currentColor" strokeWidth="1.6">
++            <rect x="1" y="1" width="9" height="9" />
++            <rect x="12" y="1" width="9" height="9" />
++            <rect x="1" y="12" width="9" height="9" />
++        </g>
++        <rect x="12" y="12" width="9" height="9" fill="currentColor" />
++    </svg>
++);
 diff --git a/packages/base/components/Head.tsx b/packages/base/components/Head.tsx
 index 3317e5c..0ae8ded 100644
 --- a/packages/base/components/Head.tsx
@@ -79,3 +101,59 @@ index 3317e5c..0ae8ded 100644
          <meta
              name="description"
              content="Ente - end-to-end encrypted cloud with open-source apps"
+diff --git a/packages/new/photos/components/SearchBar.tsx b/packages/new/photos/components/SearchBar.tsx
+index 96b20e7..50e8e4c 100644
+--- a/packages/new/photos/components/SearchBar.tsx
++++ b/packages/new/photos/components/SearchBar.tsx
+@@ -16,7 +16,8 @@ import {
+     useTheme,
+     type Theme,
+ } from "@mui/material";
+-import { EnteLogo, EnteLogoBox } from "ente-base/components/EnteLogo";
++import { CommontyMark } from "ente-base/components/CommontyMark";
++import { EnteLogoBox } from "ente-base/components/EnteLogo";
+ import type { ButtonishProps } from "ente-base/components/mui";
+ import { useIsSmallWidth } from "ente-base/components/utils/hooks";
+ import {
+@@ -146,7 +147,7 @@ const MobileSearchArea: React.FC<MobileSearchAreaProps> = ({ onSearch }) => (
+                 pl: "24px",
+             }}
+         >
+-            <EnteLogo height={15} />
++            <CommontyMark height={15} />
+         </EnteLogoBox>
+         <IconButton onClick={onSearch}>
+             <HugeiconsIcon icon={Search01Icon} />
+diff --git a/packages/new/photos/components/gallery/index.tsx b/packages/new/photos/components/gallery/index.tsx
+index 22f2de3..8ef2cfb 100644
+--- a/packages/new/photos/components/gallery/index.tsx
++++ b/packages/new/photos/components/gallery/index.tsx
+@@ -21,7 +21,6 @@ import {
+     Typography,
+ } from "@mui/material";
+ import { CenteredFill, SpacedRow } from "ente-base/components/containers";
+-import { EnteLogo } from "ente-base/components/EnteLogo";
+ import { FocusVisibleButton } from "ente-base/components/mui/FocusVisibleButton";
+ import { OverflowMenuOption } from "ente-base/components/OverflowMenu";
+ import { useModalVisibility } from "ente-base/components/utils/modal";
+@@ -29,7 +28,6 @@ import { type UploadTypeSelectorIntent } from "ente-gallery/components/Upload";
+ import type { SearchSuggestion } from "ente-new/photos/services/search/types";
+ import { t } from "i18next";
+ import React, { useRef, useState } from "react";
+-import { Trans } from "react-i18next";
+ import { enableML } from "../../services/ml";
+ import { EnableML, FaceConsent } from "../sidebar/MLSettings";
+ import { useMLStatusSnapshot } from "../utils/use-snapshot";
+@@ -251,10 +249,8 @@ export const GalleryEmptyState: React.FC<GalleryEmptyStateProps> = ({
+                     },
+                 }}
+             >
+-                <Trans
+-                    i18nKey="welcome_to_ente_title"
+-                    components={{ a: <EnteLogo /> }}
+-                />
++                {/* Commonty: no Ente wordmark */}
++                Welcome to Photos
+             </Typography>
+             <Typography variant="h2">
+                 {t("welcome_to_ente_subtitle")}

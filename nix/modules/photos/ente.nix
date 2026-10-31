@@ -142,8 +142,9 @@ in
                   ../../../servers/photos/ente-web-commonty-menu.patch
                   # pictures on screen fetched first, those flung past not at all
                   ../../../servers/photos/ente-web-commonty-thumbs.patch
-                  # the tab says Photos with the site's icon, and the page shown
-                  # while it loads has the site's mark, not Ente's
+                  # the tab says Photos with the site's icon, and the site's mark
+                  # where Ente's was (loading page, phone bar, lock screen, empty
+                  # gallery)
                   ../../../servers/photos/ente-web-commonty-brand.patch
                 ];
               # Next names each build at random, and every page carries the
