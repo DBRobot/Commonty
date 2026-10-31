@@ -371,50 +371,9 @@ with sync_playwright() as p:
         and '"tester"' in (page.goto(home_me) and page.content()),
     )
 
-    # its page asks home's challenge of the passkey: the browser allows it, the
-    # relying party being the domain, and says where it was asked
-    def ask_gate(path, body=None, headers=None):
-        r = urllib.request.Request(
-            GATE + path,
-            data=json.dumps(body).encode() if body is not None else None,
-            method="POST",
-            headers={
-                "host": "home.commonty.test",
-                "x-original-host": "home.commonty.test",
-                "content-type": "application/json",
-                **(headers or {}),
-            },
-        )
-        try:
-            x = urllib.request.urlopen(r)
-            return x.status, x.headers.get("set-cookie") or "", x.read()
-        except urllib.error.HTTPError as e:
-            return e.code, e.headers.get("set-cookie") or "", e.read()
-
-    code, _, start = ask_gate("/_dd/login/start", {"username": "tester"})
-    start = json.loads(start)
-    answer = sign(start["publicKey"]["challenge"], origin=f"https://{JOINED}")
-    code, cookie, _ = ask_gate(
-        "/_dd/login/finish",
-        {
-            "id": CRED_ID,
-            "rawId": CRED_ID,
-            "type": "public-key",
-            "extensions": {},
-            "response": {
-                "authenticatorData": answer["authenticatorData"],
-                "clientDataJSON": answer["clientDataJSON"],
-                "signature": answer["signature"],
-                "userHandle": None,
-            },
-        },
-        {"x-dd-ceremony": start["ceremony"]},
-    )
-    check(
-        f"a sign-in its page got from the passkey opens nothing here ({code})",
-        code >= 400 and not cookie,
-    )
-
+    # (its page answering this box's own ceremony is the dd end to end's: this
+    # member's passkey is no webauthn-rs credential, so that ceremony has none to
+    # start. `login_in_browser_at` there)
     # and a delegation of its own, to a key it holds, the passkey asked on its page
     key = ec.generate_private_key(ec.SECP256R1())
     spki = b64u(
