@@ -9,6 +9,7 @@
       "headscale"
       "headscale-seed"
       "headscale-snapshot"
+      "headscale-plan" # the plan's rules and names, for the boxes that joined
       "dd-headscale-copy" # its database, sealed, into the store (follow.nix)
       "dd-headscale-handover" # the same, handed over: fails when it did not copy (follow.nix)
     ];

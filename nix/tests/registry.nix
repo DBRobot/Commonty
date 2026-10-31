@@ -31,6 +31,7 @@
     "joined-box"
     "joined-serves"
     "joined-games"
+    "joined-reach"
     "photos"
     "llm"
     "vault"

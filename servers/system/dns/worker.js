@@ -305,10 +305,12 @@ export async function converge(env) {
   // the boxes a name may go to: a service under a lease, its holder alone
   // (a lapsed lease is no one's, and the name stays the gateway's); a
   // placed one, the boxes the agreed plan gives it, the gateway's first
-  // (no name moves while it is one of them). Each with an address
+  // (no name moves while it is one of them), then a box of the release's
+  // before one that joined. Each with an address
   const placedOn = (svc) => {
     const on = (held && has(held.placed, svc) ? held.placed[svc] : []).filter((b) => releaseAddress(b) || joinedAddress(b));
-    return on.includes(gateway) ? [gateway, ...on.filter((b) => b !== gateway)] : on;
+    const first = on.includes(gateway) ? gateway : on.find(releaseAddress);
+    return first ? [first, ...on.filter((b) => b !== first)] : on;
   };
   const candidates = (h) => {
     if (!held || !has(follow, h)) return [];

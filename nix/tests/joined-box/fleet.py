@@ -137,7 +137,10 @@ open("w/.dev.vars", "w").write(
     + "\n"
 )
 json.dump(
-    {
+    # a test's own inputs (joined-reach), or none
+    json.load(open(os.environ["FLEET_PLACEMENT"]))
+    if os.environ.get("FLEET_PLACEMENT")
+    else {
         "boxes": {},
         "services": {},
         "damping": {"base": 0.3, "perGiB": 0.01},
@@ -283,6 +286,14 @@ for i in (1, 2, 3):
             VERIFY_HEADSCALE_KEY_FILE=f"{T}/headscale.key",
             VERIFY_HEADSCALE_URL="https://net.commonty.test",
         )
+        # a real headscale on this machine (joined-reach): the devices it
+        # holds stay, whoever they are, for the test to reach with
+        if os.environ.get("FLEET_HEADSCALE"):
+            env.update(
+                VERIFY_HEADSCALE_API=os.environ["FLEET_HEADSCALE"],
+                VERIFY_HEADSCALE_KEY_FILE=os.environ["FLEET_HEADSCALE_KEY"],
+                VERIFY_REAP_GRACE_SECS="864000",
+            )
     os.makedirs(f"g{i}/keys", exist_ok=True)
     subprocess.Popen(
         ["./verify"], env=env, stdout=log(f"g{i}"), stderr=subprocess.STDOUT

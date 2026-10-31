@@ -1,0 +1,19 @@
+{
+  "owner": null,
+  "house": {
+    "ssid": "",
+    "address": "192.168.1.50/24"
+  },
+  "encrypted": true,
+  "unlock": "tpm",
+  "extraPools": [],
+  "internet": {
+    "metered": false
+  },
+  "datasets": {
+    "tank/enc/games": {
+      "note": "members' game servers",
+      "mountpoint": "/var/lib/dd-games"
+    }
+  }
+}

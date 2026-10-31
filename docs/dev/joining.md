@@ -31,7 +31,9 @@ anyone needs to trust it with.
   never pushes out a box of the release.
 - **The network**: the gate hands it a key tagged `tag:joined`. A joined box
   reaches the other boxes' stores on port 3443 and nothing else. The
-  boxes' gates, services and pages, all on 443, are out of its reach.
+  boxes' gates, services and pages, all on 443, are out of its reach. Nobody's
+  device reaches it, until the agreed plan gives it a service and a member
+  has enlisted it ([below](#reaching-a-service-on-a-box-that-joined)).
 - **Its address** on the network is the one headscale gave it, said into
   the agreed state by the box running headscale (`netaddr`), never by the
   joined box itself. The DNS Worker points `*.<its name>.<domain>` there,
@@ -43,14 +45,38 @@ anyone needs to trust it with.
   fleet, 8 joining at once at the relay. One unheard for 30 days is
   dropped from the agreed state.
 
+## Reaching a service on a box that joined
+
+All of this follows the agreed state and the release's rules. What the box
+says of itself opens nothing.
+
+- **Its front door** (443): its owner's devices, once a member has enlisted it
+  and the plan gives it a placed service. No other member's.
+  [`headscale-plan`](../../nix/modules/net/headscale-plan.sh), on the box
+  running the network's control server, adds the rule to the release's and
+  takes it away with the enlistment or the plan.
+- **Its game ports**: any member's devices at the network, as on a box of the
+  release, where the plan gives it the games and a member has enlisted it. Its
+  firewall then keeps each server to its invited players
+  (`games-access`). It has no network door of its own, so it asks the fleet's
+  gate (`POST /_dd/network/games`, signed): the answer covers only servers of
+  the member who enlisted it.
+- **The names.** The DNS Worker and the app's DNS point a name of a service at
+  a joined box only when the plan gives that service no box of the release's.
+  A public name never goes to one: it has no tunnel. Nor does a name
+  under a lease.
+- **Certificates**: a joined box gets none from the DNS Worker.
+- **Mail** stays with the release's boxes (`send.js`): a joined box can't send
+  as the domain.
+
 ## What a stranger can do
 
 Hold ciphertext it can't read, and fail to keep it: the box writing a
 bucket reads a copy back, and a copy found missing counts for nothing.
 Waste a copy slot that a box with more room would have had.
 
-What it can't do: run anything, see any plaintext, reach any service, take
-another box's name, or change what the plan does with the release's boxes.
+What it can't do: run anything, see any plaintext, reach any service, be
+reached by anyone's device, get a certificate, take a public name, or change what the plan does with the release's boxes.
 
 ## As a member's box (being built)
 

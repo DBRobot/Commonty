@@ -524,6 +524,14 @@ check(
     names().get("llm.commonty.test"),
     [("A", "100.64.0.7", False)],
 )
+joineda = {"j00000000aa": {"ipv4": ipj}}
+placed_control({"llama-swap": ["box2", "j00000000aa"]}, joined=joineda)
+converge(8789)
+check(
+    "placed: given a box of the release's too, not one that joined first by name",
+    names().get("llm.commonty.test"),
+    [("A", "100.64.0.5", False)],
+)
 placed_control({"llama-swap": ["nobody"]})
 converge(8789)
 check(
@@ -589,6 +597,20 @@ check(
     names().get("*.j0123456789.commonty.test"),
     None,
 )
+
+# a box that joined on its own key has no tunnel, and moves no names
+J = "j00000000bb"
+keys[J] = ec.generate_private_key(ec.SECP256R1())
+secret = "A" * 43 + "="
+for what, extra, parts in (
+    ("tunnel", {"secret": secret}, (secret,)),
+    ("converge", None, ()),
+):
+    check(
+        "joined: no %s for a box the release does not list" % what,
+        door(what, J, extra, parts)[0],
+        403,
+    )
 
 # box1's own door, as its helper asks: a tunnel with a secret it made, kept
 # in its credentials; asked again with them there, nothing is asked
