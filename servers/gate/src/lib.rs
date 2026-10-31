@@ -12,6 +12,7 @@
 
 pub mod adblock;
 mod adddevice;
+mod app_signin;
 mod computers;
 mod controller;
 mod demo_photos;
@@ -2978,6 +2979,9 @@ async fn logout(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
         };
         to = format!("{id}/out?then={}", urlencode(&then));
     }
+    // a browser the member's app signed in here: through the app on the
+    // way, which signs it out of every name it signed it in to
+    let to = app_signin::out_via(&*app, &headers, &to);
     let mut r = Redirect::to(&to).into_response();
     for c in app.sessions.clear_all() {
         r.headers_mut()
@@ -3570,26 +3574,47 @@ pub async fn start(
             .route("/health", get(|| async { "ok" }))
             .route(
                 "/_dd/login",
-                get(|State(a): State<Arc<App>>, Query(q): Query<HashMap<String, String>>| async move {
-                    let rd = q.get("rd").map(String::as_str).unwrap_or("/");
-                    match a.id_origin {
-                        Some(_) => Redirect::to(&format!("/_dd/sso/start?rd={}", urlencode(&sso::local_path(rd)))).into_response(),
-                        None => StatusCode::NOT_FOUND.into_response(),
-                    }
-                }),
+                get(
+                    |State(a): State<Arc<App>>,
+                     headers: HeaderMap,
+                     Query(q): Query<HashMap<String, String>>| async move {
+                        let rd = q.get("rd").map(String::as_str).unwrap_or("/");
+                        if let Some(r) = app_signin::first(&*a, &headers, rd) {
+                            return r;
+                        }
+                        match a.id_origin {
+                            Some(_) => Redirect::to(&format!(
+                                "/_dd/sso/start?rd={}",
+                                urlencode(&sso::local_path(rd))
+                            ))
+                            .into_response(),
+                            None => StatusCode::NOT_FOUND.into_response(),
+                        }
+                    },
+                ),
             )
             .route("/_dd/sso/start", get(sso::start))
             .route("/_dd/sso/creds", get(sso::creds))
             .route("/_dd/sso", post(sso::finish))
             .route("/_dd/sso/names", get(sso::names))
             .route("/_dd/sso/out", post(sso::out))
+            .route(
+                "/_dd/app-signin",
+                get(app_signin::route).post(app_signin::revoke),
+            )
             .route("/_dd/back", get(back))
             .route("/_dd/logout", post(logout))
-            .layer(axum::middleware::from_fn_with_state(app.clone(), no_session_for_a_page_below))
+            .layer(axum::middleware::from_fn_with_state(
+                app.clone(),
+                no_session_for_a_page_below,
+            ))
             .with_state(app)
             .merge(home::dir_router(house))
             .merge(leaving::router(leave.clone()))
-            .merge(leaving::internal_router(leave).route_layer(axum::middleware::from_fn(this_box_only)))
+            .merge(
+                leaving::internal_router(leave)
+                    .route_layer(axum::middleware::from_fn(this_box_only)),
+            )
             .merge(directory::router(directory));
         eprintln!("verify (this box's pages) listening on {addr}");
         let task = tokio::spawn(async move {
@@ -3611,13 +3636,19 @@ pub async fn start(
         .route(
             "/_dd/login",
             get(
-                |State(a): State<Arc<App>>, Query(q): Query<HashMap<String, String>>| async move {
+                |State(a): State<Arc<App>>,
+                 headers: HeaderMap,
+                 Query(q): Query<HashMap<String, String>>| async move {
                     // sign-in is the id Worker's: there and back, with a
                     // challenge. ?here is this box's own page, for a house
                     // cut off from the Worker: what it signs in is this box
                     // alone, on a page only this box's pages' origins pass
                     if a.sessions.cookies() == session::Cookies::Host && !q.contains_key("here") {
                         let rd = q.get("rd").map(String::as_str).unwrap_or("/");
+                        // a browser the member's app let in: the app signs it in
+                        if let Some(r) = app_signin::first(&*a, &headers, rd) {
+                            return r;
+                        }
                         return Redirect::to(&format!(
                             "/_dd/sso/start?rd={}",
                             urlencode(&sso::local_path(rd))
@@ -3633,6 +3664,10 @@ pub async fn start(
         .route("/_dd/sso", post(sso::finish))
         .route("/_dd/sso/names", get(sso::names))
         .route("/_dd/sso/out", post(sso::out))
+        .route(
+            "/_dd/app-signin",
+            get(app_signin::route).post(app_signin::revoke),
+        )
         .route("/_dd/login/start", post(login_start))
         .route("/_dd/login/finish", post(login_finish))
         .route(

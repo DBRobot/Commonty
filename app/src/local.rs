@@ -163,11 +163,91 @@ pub fn browsers(app: AppHandle) -> Vec<serde_json::Value> {
 /// A browser forgotten from the app's own screen: it asks again next time
 #[tauri::command]
 pub fn browser_forget(app: AppHandle, id: String) -> bool {
-    with_browsers(&app, |b| {
-        let gone = b.forget(&id);
-        (gone, gone)
+    forget_browser(&app, &id)
+}
+
+/// A browser forgotten: what the app signed it in to on the boxes ends too
+fn forget_browser<R: Runtime>(app: &AppHandle<R>, id: &str) -> bool {
+    let (ended, gone) = with_browsers(app, |b| {
+        let ended = b.sign_out(id);
+        let gone = b.forget(id);
+        ((ended, gone), gone)
     })
-    .unwrap_or(false)
+    .unwrap_or((None, false));
+    if let Some((sid, hosts)) = ended {
+        end_sessions(app, sid, hosts);
+    }
+    gone
+}
+
+/// The sessions the app signed one browser in to, ended on every box name
+/// it granted, by a call of this device's own to each (the gate's
+/// app_signin::revoke). In the background: the browser goes on at once.
+fn end_sessions<R: Runtime>(app: &AppHandle<R>, sid: String, hosts: Vec<String>) {
+    use auth::KeyStore as _;
+    let keys = app.state::<crate::account::Keys>();
+    let (Ok(Some(kp)), Ok(Some(user))) = (
+        auth::device::load(&keys.0),
+        keys.0.get(crate::account::USER),
+    ) else {
+        return;
+    };
+    let mut calls = vec![];
+    for host in hosts {
+        let Ok(token) = auth::device::mint_at(
+            &kp,
+            &user,
+            Duration::from_secs(60),
+            Some(auth::device::SIGNOUT),
+            Some(&host),
+        ) else {
+            continue;
+        };
+        calls.push((host, token));
+    }
+    tauri::async_runtime::spawn(async move {
+        network_ready().await;
+        let Ok(client) = http() else { return };
+        for (host, token) in calls {
+            let out = client
+                .post(format!("https://{host}/_dd/app-signin"))
+                .bearer_auth(token)
+                .json(&serde_json::json!({ "sid": sid }));
+            match send(out).await {
+                Ok(r) if r.status().is_success() => {}
+                Ok(r) => eprintln!("local: ending the sign-in on {host}: {}", r.status()),
+                Err(e) => eprintln!("local: ending the sign-in on {host}: {e}"),
+            }
+        }
+    });
+}
+
+/// A browser the app signed in to a box, signing out there: the app grants
+/// nothing more for it until a click on one of its pages, ends every
+/// session it signed it in to, and the browser goes on to the id page's
+/// out. Only from the app's own page with the browser's cookie, as a
+/// sign-in; without one, the browser just goes on.
+fn sign_out<R: Runtime>(
+    app: &AppHandle<R>,
+    query: &str,
+    from: handoff::SigninFrom,
+    who: Option<&str>,
+) -> Response {
+    use handoff::SigninFrom;
+    let Some(then) = handoff::out_then(query, &crate::account::domain()) else {
+        return plain(StatusCode::BAD_REQUEST, "not one of the fleet's pages");
+    };
+    match (from, who) {
+        (SigninFrom::Bounce, _) => go_on(&format!("{}?{query}", handoff::OUT)),
+        (SigninFrom::Known, Some(id)) => {
+            if let Some((sid, hosts)) = with_browsers(app, |b| (b.sign_out(id), true)).flatten() {
+                end_sessions(app, sid, hosts);
+            }
+            see_other(&then)
+        }
+        (SigninFrom::Refuse, _) => plain(StatusCode::FORBIDDEN, "not this page's own request"),
+        _ => see_other(&then),
+    }
 }
 
 /// Signing out on this device: every browser it let in goes with it
@@ -484,6 +564,26 @@ async fn handle<R: Runtime>(State(site): State<Arc<Site<R>>>, req: Request) -> R
         )
         .await;
     }
+    if via == Via::Browser && site.which == Which::Site && path == handoff::SIGNIN {
+        let q = req.uri().query().unwrap_or("").to_string();
+        let from = handoff::signin_from(who.is_some(), header_str(h, "sec-fetch-site"), nav);
+        return signin(&site.app, &q, from, who.as_deref());
+    }
+    if via == Via::Browser && site.which == Which::Site && path == handoff::OUT {
+        let q = req.uri().query().unwrap_or("").to_string();
+        let from = handoff::signin_from(who.is_some(), header_str(h, "sec-fetch-site"), nav);
+        return sign_out(&site.app, &q, from, who.as_deref());
+    }
+    // a link on this browser's own page here to a box's page (admitted
+    // above: from this origin, with its cookie)
+    if let (Via::Browser, Which::Site, handoff::TO_BOX, Some(id)) =
+        (&via, site.which, path.as_str(), who.as_deref())
+        && nav
+    {
+        let q = req.uri().query().unwrap_or("").to_string();
+        let host = header_str(h, "host").unwrap_or_default().to_string();
+        return to_box(&site.app, &q, &host, id);
+    }
     // a browser's or the window's own asks, the same on every server
     match (method.as_str(), path.as_str()) {
         ("POST", "/_dd/app/door") => return door_for(&site, &via, who.as_deref(), req).await,
@@ -515,10 +615,7 @@ async fn handle<R: Runtime>(State(site): State<Arc<Site<R>>>, req: Request) -> R
         // asked again next time
         ("POST", "/_dd/app/leave") => {
             if let Some(id) = &who {
-                with_browsers(&site.app, |b| {
-                    let gone = b.forget(id);
-                    (gone, gone)
-                });
+                forget_browser(&site.app, id);
             }
             return json(StatusCode::OK, serde_json::json!({}));
         }
@@ -605,6 +702,96 @@ async fn resume<R: Runtime>(
         Ok(go) => see_other(&go),
         Err((status, why)) => plain(status, &why),
     }
+}
+
+/// A box asks this app to sign in the browser it sent here, which has no
+/// session there (servers/gate/src/app_signin.rs). Signed only for a
+/// browser the member let in - its cookie says so, on a request from this
+/// page of the app's own, so from no other page and no other program - and
+/// only when the box holds the ticket this app gave it for that browser
+/// (`to_box`, or the sign-in before). The app signs a grant for that box's
+/// name alone and the challenge the box gave, and sends the browser back
+/// with it and the box's next ticket; the box makes it a session of its
+/// own. No key leaves the app, and the grant is only the box's, once.
+fn signin<R: Runtime>(
+    app: &AppHandle<R>,
+    query: &str,
+    from: handoff::SigninFrom,
+    who: Option<&str>,
+) -> Response {
+    use handoff::SigninFrom;
+    let Some((host, nonce, ticket)) = handoff::signin_ask(query, &crate::account::domain()) else {
+        return plain(StatusCode::BAD_REQUEST, "not a sign-in of the fleet's");
+    };
+    let id = match (from, who) {
+        (SigninFrom::Bounce, _) => return go_on(&format!("{}?{query}", handoff::SIGNIN)),
+        (SigninFrom::Known, Some(id)) => id,
+        (SigninFrom::Refuse, _) => {
+            return plain(StatusCode::FORBIDDEN, "not this page's own request");
+        }
+        _ => return see_other(&handoff::signin_back(&host, &nonce, None)),
+    };
+    // signed out in this browser: nothing, and its ticket is not spent
+    let next = with_browsers(app, |b| match b.grant_sid(id, &host) {
+        Some(sid) if b.spend(id, &host, &ticket) => (b.ticket(id, &host).map(|t| (t, sid)), true),
+        _ => (None, false),
+    })
+    .flatten();
+    let Some((next, sid)) = next else {
+        eprintln!("local: {host} asked for a browser signed out, or with no ticket of its");
+        return see_other(&handoff::signin_back(&host, &nonce, None));
+    };
+    match grant(app, &host, &nonce, &sid) {
+        Ok(g) => see_other(&handoff::signin_back(&host, &nonce, Some((&g, &next)))),
+        Err(e) => {
+            eprintln!("local: sign-in for {host}: {e}");
+            see_other(&handoff::signin_back(&host, &nonce, None))
+        }
+    }
+}
+
+/// The member's click on one of this browser's pages here, to a box's
+/// page: that box is given a ticket to ask this app with for this browser,
+/// and the browser goes there. The page's key says the click was on one of
+/// the app's pages, which nothing on another site can read. An old page
+/// (from before the app started again) just goes to the box's page.
+fn to_box<R: Runtime>(app: &AppHandle<R>, query: &str, own_host: &str, id: &str) -> Response {
+    let Some((host, rd, k)) = handoff::to_box_ask(query, &crate::account::domain()) else {
+        return plain(StatusCode::BAD_REQUEST, "not one of the fleet's pages");
+    };
+    let t = with_browsers(app, |b| {
+        if b.link_ok(id, &k) {
+            // a click on its own page: a sign-in asked for again
+            b.signed_in_again(id);
+            (b.ticket(id, &host), true)
+        } else {
+            (None, false)
+        }
+    })
+    .flatten();
+    match t {
+        Some(t) => see_other(&handoff::box_start(&host, own_host, &t, &rd)),
+        None => see_other(&format!("https://{host}{rd}")),
+    }
+}
+
+fn grant<R: Runtime>(
+    app: &AppHandle<R>,
+    host: &str,
+    nonce: &str,
+    sid: &str,
+) -> Result<String, String> {
+    use auth::KeyStore as _;
+    let keys = app.state::<crate::account::Keys>();
+    let kp = auth::device::load(&keys.0)
+        .map_err(|e| e.to_string())?
+        .ok_or("no device key here")?;
+    let user = keys
+        .0
+        .get(crate::account::USER)
+        .map_err(|e| e.to_string())?
+        .ok_or("no name on this device")?;
+    auth::device::mint_signin(&kp, &user, host, nonce, sid).map_err(|e| e.to_string())
 }
 
 fn see_other(to: &str) -> Response {
@@ -1001,6 +1188,11 @@ async fn site_pages<R: Runtime>(
     who: Option<&str>,
 ) -> Response {
     if let Some(p) = crate::site::page_for(path) {
+        // the key its links to a box's pages carry (to_box)
+        let link = who
+            .and_then(|id| with_browsers(&site.app, |b| (b.link_key(id), false)).flatten())
+            .map(|k| format!("<meta name=\"dd-app-link\" content=\"{k}\">"))
+            .unwrap_or_default();
         return match crate::site::carried(&site.app, &format!("_dd/pages/{p}.html")) {
             Some(a) => Response::builder()
                 .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
@@ -1011,7 +1203,7 @@ async fn site_pages<R: Runtime>(
                 .header("content-security-policy", PAGE_POLICY)
                 .body(Body::from(String::from_utf8_lossy(&a.bytes).replacen(
                     "</head>",
-                    &format!("{}</head>", crate::site::domain_meta()),
+                    &format!("{}{link}</head>", crate::site::domain_meta()),
                     1,
                 )))
                 .unwrap_or_default(),
