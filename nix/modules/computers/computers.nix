@@ -282,15 +282,20 @@ let
     }
     tmp=$(mktemp)
     trap 'rm -f "$tmp"' EXIT
-    if ${control}/bin/dd-control -box ${config.networking.hostName} -sign-computer-join "$id" \
-      | curl -fsS --max-time 30 -H 'content-type: application/json' --data-binary @- ${cfg.networkDoor} \
-      | age -d -i /var/lib/dd/secrets-key.txt > "$tmp" \
-      && jq -e '(.key | type) == "string" and (.control_url | startswith("https://")) and (.hostname | test("^computer-[0-9a-f]{16}$"))' "$tmp" >/dev/null; then
-      as sh -c 'umask 077 && cat > "$1.new" && mv "$1.new" "$1"' - "$share"/net.json < "$tmp"
-      echo "computer-$id: a key to the Commonty network handed in"
-    else
-      echo "computer-$id: no key to the Commonty network this time"
-    fi
+    # the door or the TPM can be busy a moment (a release switching): a few
+    # tries before the computer starts without one
+    for try in 1 2 3 4 5; do
+      if ${control}/bin/dd-control -box ${config.networking.hostName} -sign-computer-join "$id" \
+        | curl -fsS --max-time 30 -H 'content-type: application/json' --data-binary @- ${cfg.networkDoor} \
+        | age -d -i /var/lib/dd/secrets-key.txt > "$tmp" \
+        && jq -e '(.key | type) == "string" and (.control_url | startswith("https://")) and (.hostname | test("^computer-[0-9a-f]{16}$"))' "$tmp" >/dev/null \
+        && as ${pkgs.runtimeShell} -c 'umask 077 && cat > "$1.new" && mv "$1.new" "$1"' - "$share"/net.json < "$tmp"; then
+        echo "computer-$id: a key to the Commonty network handed in"
+        exit 0
+      fi
+      [ "$try" = 5 ] || sleep 10
+    done
+    echo "computer-$id: no key to the Commonty network this time"
   '';
   # Whose it is, from the agreed state, into a file of root's outside its
   # directory: the usage count is by this, never by what the computer's
@@ -424,6 +429,10 @@ in
         # computer starts
         ExecStartPost = [ "+${noteOwner} %i" ] ++ lib.optional cfg.network "-+${netJoin} %i";
         PrivateDevices = true;
+        # the device policy is the cgroup's, so it holds for the "+" steps
+        # too: netJoin signs with the TPM. root's alone by its mode; the
+        # computer's own user never sees it in its private /dev
+        DeviceAllow = lib.optional cfg.network "/dev/tpmrm0 rw";
         RestrictAddressFamilies = [
           "AF_INET"
           "AF_INET6"
