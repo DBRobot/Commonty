@@ -296,6 +296,86 @@ already this person's, it marks that session fresh and keeps it. Sign out
 the real gate and Worker in a browser at their https names, the passkey
 answered by the test member.
 
+### A browser the app let in: signed in by the app
+
+A browser the member linked to their app ([app.md](app.md), "The site's
+key pages") is signed in to a box by that app, with no passkey
+([app_signin.rs](../../servers/gate/src/app_signin.rs)). Only where sign-in
+is the Worker's and sessions are this name's alone (`Cookies::Host`,
+`__Host-dd`); otherwise the route answers 404, and a session that would
+come out domain-wide is refused rather than set.
+
+    first, a click on one of the app's pages (Games, Metrics, Git):
+      app /_dd/app/to-box ─► GET https://<host>/_dd/app-signin?at=&ticket=&rd=
+    then, and every time after, with no session here:
+      /_dd/login ─► /_dd/app-signin?rd=   (dd_app_linked)
+    either way
+      ─► a one-off challenge (60 s), its other half in __Host-dd-app-bind
+      ─► http://<at>/_dd/app/signin?host=<this name>&nonce=&ticket=
+    the app, by the browser's own cookie there and this name's ticket,
+    signs a grant and gives the next ticket
+      ─► GET https://<host>/_dd/app-signin?nonce=&grant=&ticket=<next>
+    this gate: the challenge spent only by the browser holding its other
+    half (compared in constant time, before anything is spent), the grant
+    checked ─► __Host-dd for this name, dd_app_at=<at>~<next ticket> and
+    dd_app_linked=1 kept, back to rd
+
+The grant is a device token (`auth::device::mint_signin`) checked by
+`verify_device_token_at` for the operation `browser-signin`, at this name:
+signed by a device in the member's entry as this box's directory has it
+(a removed device signs nothing), with `audience` this name and a
+`check if here` and `check if operation` of its own, so an access token is
+no grant and a grant is no access token. The block the device signed names
+the challenge (`nonce`) and the app's sign-in id for that browser (`sid`),
+and its end is a minute off (two at most). The person must be a member
+here and not the demo. Then the same as a passkey's: `no_new_session`, the
+session through `app.sessions.issue_as`, and `signins.saw(..., Some(device))`,
+so removing the device ends the session. Its id is
+`sso::session_id(user, "app:" + sid)`, as a fleet sign-in's is made from
+its own: one id for that browser's sign-in on every name of every box.
+
+What each part stands against:
+
+- **The bind cookie**: someone who starts a sign-in, has their own app
+  sign it and sends another browser to the answer gets nothing - that
+  browser holds no half of their challenge - and the challenge is not
+  spent by the try.
+- **The ticket**: the app signs only for a box holding the ticket it gave
+  that box for that browser, one at a time, each spent on use. A web page
+  that sends the browser to the app's address with a box's name and a
+  challenge it got there has no ticket, so nothing is signed. A name gets
+  its first ticket only from a click on one of the app's own pages.
+- **What is kept here** is this name's alone: `dd_app_at` is HttpOnly and
+  sent to `/_dd/app-signin` alone (Path), so no page reads the app's
+  address and no service behind the gate is sent it or the ticket.
+  `dd_app_linked=1` says no more than that there is one, for the pages.
+- **Nothing is kept from a link alone**: a click's address and ticket are
+  kept only once the app has taken that ticket and granted, so a link
+  someone else made cannot overwrite what a name keeps.
+- **Signing out is the app's to keep**, never a cookie for the whole
+  domain, which any name under it could write or clear. `/_dd/logout` on a
+  name the app signed this browser in to (`dd_app_linked`) sends it through
+  `/_dd/app-signin?out=<the id page's out>`, which forgets what was kept
+  and goes on to the app's `/_dd/app/out`. The app marks the browser
+  signed out, grants nothing for it until a click on one of its pages,
+  spends its tickets, and ends its sign-in on every name it granted:
+  `POST /_dd/app-signin {sid}` to each, with a device token for
+  `browser-signout` at that name. The gate ends
+  `session_id(user, "app:" + sid)` there (`signins.end`), so a device ends
+  only its own person's sessions. Then on to the id page's out. If the app
+  is not running at that moment, the sessions on the other names last
+  until they run out (8 h).
+- **Challenges waiting** are at most 4096; past that a new one is refused
+  (429) and none waiting is pushed out, so asking for many cannot undo
+  someone else's sign-in.
+- **Back without a grant** (`?nonce=` alone: the app does not take this
+  browser or the ticket) goes to the id page and forgets what was kept.
+  **Back with nothing** (no app answered, the back button) finds
+  `__Host-dd-app-tried` and goes to the id page too.
+- `?open=<site|photos|vault>&path=` sends the browser to the app's copy of
+  a page it carries, by the kept address; with nothing kept, to the page
+  here, and `dd_app_linked` is forgotten.
+
 ### A box's own sign-in
 
 Passkeys are WebAuthn (webauthn-rs). The relying party is the bare

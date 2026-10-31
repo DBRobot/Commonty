@@ -402,8 +402,62 @@ cookie, and on the pairing page's origin the device's own name (pair.js,
   Files, Movies & TV, Chat and Mail show the handoff page rather than the
   box's sign-in. It holds nothing and lets nothing in: anything that can
   set it (any page on the domain) only makes a page fire the app's own
-  link, which the system hands to the installed app alone. The page never
-  sends a tab to a port itself.
+  link, which the system hands to the installed app alone. The sign-in
+  below is what sends a tab to the port, and only by what a box keeps for
+  that browser after a click on the app's page.
+
+### Signed in to the boxes, by the app
+
+A linked browser does not meet a box's sign-in: a box sends it to the app,
+and the app signs it in ([gate.md](gate.md), "A browser the app let in").
+The app's half is two routes on the site's server, this device's own name
+(`local::to_box`, `local::signin`, rules in `handoff.rs`):
+
+- **`/_dd/app/to-box?host=&rd=&k=`**: a link on one of the app's pages to
+  a box's page (shell.js `served`). Admitted only from this origin with the
+  browser's cookie, and `k` must be the key the app wrote into that
+  browser's pages this run (`dd-app-link`), which no other site can read:
+  so a click on the app's page, not a link from anywhere. The box is given
+  a fresh ticket for this browser (kept as a hash in browsers.json, one per
+  box name, spent on use) and the browser goes to it. A page from before the
+  app restarted just goes to the box's page.
+- **`/_dd/app/signin?host=&nonce=&ticket=`**: from the box, cross-site,
+  without the Strict cookie, it is only the page that opens itself again.
+  From that page with a let-in browser's cookie, and the box's ticket for
+  that browser, the app mints a grant with this device's key for `host`
+  alone and the box's `nonce`, for a minute, gives the box its next ticket,
+  and sends the browser to `https://<host>/_dd/app-signin` with both.
+  Without the cookie or the ticket it goes back with nothing, and the box
+  forgets what it kept. A fetch, a frame, another page of the site or
+  another port is refused. A browser signed out (below) is granted nothing,
+  and its ticket is not spent.
+- **`/_dd/app/out?then=`**: a box sends a browser here as it signs out
+  there ([gate.md](gate.md), "A browser the app let in"). From the app's
+  own page with the browser's cookie, the browser is marked signed out
+  (kept in browsers.json, so across restarts), its tickets go, and the
+  app's sign-in id for it (`sid`, which every grant names) is ended on
+  every box name it was granted on, by a device-signed call to each, in
+  the background. A new id is made at the next grant. Only a click on one
+  of the app's pages (`to-box`) signs it in again. **Forget** and signing
+  out in a browser the app serves end its sessions the same way. `then` is
+  an https address on one of the fleet's names.
+- `host` is the fleet's domain or one name under it, nothing deeper, so
+  nothing is ever signed for another site.
+
+Why a web page cannot use it: it cannot get the cookie sent (Strict, and
+the own-request checks), nor read the page key, nor a box's ticket (an
+HttpOnly cookie that box sends only to its sign-in route). The grant goes
+in an address only that box receives, is for that box's name and
+challenge alone, is good in the browser the box gave the challenge to,
+and makes a session there and nowhere else. A box that is not to be
+trusted gets a grant for itself, which no other box takes. No key goes to
+the browser. **Forget** on the browser ends its tickets with it.
+
+What it adds to [what being remembered costs](#remembered-and-what-that-costs):
+boxes now send the browser to the app's port by themselves, so a program
+that took the port while the app was closed would be sent the browser,
+and a box's ticket, more often than before. Hence the app runs always
+([above](#it-keeps-running)).
 
 ## Where things are
 

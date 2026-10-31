@@ -134,6 +134,51 @@ pub fn mint_at(
     token.build(kp).map_err(err)?.to_base64().map_err(err)
 }
 
+/// What a browser's sign-in grant is for: a box takes it for a session and
+/// for nothing else, and takes nothing else for one
+pub const SIGNIN: &str = "browser-signin";
+/// how long a grant lives: the browser carries it straight to the box
+pub const SIGNIN_TTL: Duration = Duration::from_secs(60);
+/// What the call that ends a browser's sessions on a box is for
+pub const SIGNOUT: &str = "browser-signout";
+
+/// A sign-in grant for a browser this device let in (the app, local.rs):
+/// good at `host` alone, for SIGNIN alone, for a minute, and naming the
+/// one-time `nonce` that box gave the browser, which it spends on taking
+/// it. It makes a session there, as a passkey sign-in would, and opens
+/// nothing itself. `sid` is this device's sign-in id for that browser: the
+/// box's session is made from it, so ending it (SIGNOUT) ends them all.
+pub fn mint_signin(kp: &KeyPair, user: &str, host: &str, nonce: &str, sid: &str) -> Result<String> {
+    let exp = (SystemTime::now() + SIGNIN_TTL)
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let err = |e: biscuit_auth::error::Token| crate::Error::Token(format!("mint: {e}"));
+    Biscuit::builder()
+        .fact(format!("user({user:?})").as_str())
+        .map_err(err)?
+        .fact(format!("device({:?})", fingerprint(kp)).as_str())
+        .map_err(err)?
+        .fact(format!("purpose({SIGNIN:?})").as_str())
+        .map_err(err)?
+        .fact(format!("audience({host:?})").as_str())
+        .map_err(err)?
+        .fact(format!("nonce({nonce:?})").as_str())
+        .map_err(err)?
+        .fact(format!("sid({sid:?})").as_str())
+        .map_err(err)?
+        .check(format!("check if time($t), $t < {exp}").as_str())
+        .map_err(err)?
+        .check(format!("check if here({host:?})").as_str())
+        .map_err(err)?
+        .check(format!("check if operation({SIGNIN:?})").as_str())
+        .map_err(err)?
+        .build(kp)
+        .map_err(err)?
+        .to_base64()
+        .map_err(err)
+}
+
 /// How long a join ticket is good for: the drive it is written to can sit
 /// a week before the box is set up.
 pub const JOIN_TICKET_TTL: Duration = Duration::from_secs(7 * 24 * 3600);
@@ -184,6 +229,42 @@ pub fn fingerprint(kp: &KeyPair) -> String {
 #[cfg(test)]
 mod join_ticket_tests {
     use super::*;
+
+    #[test]
+    fn a_signin_grant_names_its_box_its_challenge_and_its_minute() {
+        let kp = generate();
+        let t = mint_signin(&kp, "ann", "files.example", "n0nce", "s1d").unwrap();
+        let src = biscuit_auth::UnverifiedBiscuit::from_base64(&t)
+            .unwrap()
+            .print_block_source(0)
+            .unwrap();
+        for want in [
+            "user(\"ann\");",
+            "purpose(\"browser-signin\");",
+            "audience(\"files.example\");",
+            "nonce(\"n0nce\");",
+            "sid(\"s1d\");",
+            "check if here(\"files.example\");",
+            "check if operation(\"browser-signin\");",
+        ] {
+            assert!(src.lines().any(|l| l.trim() == want), "{want} not in {src}");
+        }
+        let exp: u64 = src
+            .lines()
+            .find_map(|l| {
+                l.trim()
+                    .strip_prefix("check if time($t), $t < ")?
+                    .strip_suffix(';')?
+                    .parse()
+                    .ok()
+            })
+            .unwrap();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        assert!(exp > now && exp <= now + 61, "{exp} {now}");
+    }
 
     #[test]
     fn a_join_ticket_names_its_member_its_id_and_join_alone() {

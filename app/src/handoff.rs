@@ -229,7 +229,124 @@ pub fn way_in(w: Which, via: &Via, method: &str, path: &str) -> bool {
     *via == Via::Browser
         && method == "GET"
         && (matches!(path, "/_dd/app/enter" | "/_dd/app/resume")
+            || (w == Which::Site && matches!(path, SIGNIN | OUT))
             || (w == Which::Vault && path == "/sso-connector.html"))
+}
+
+/// Where a box sends a browser with no session there, to be signed in by
+/// this app (`local::signin`): the site's server, this device's own name
+pub const SIGNIN: &str = "/_dd/app/signin";
+/// Where a box sends a browser the app signed in there that is signing out
+/// (`local::sign_out`), on its way to the id page
+pub const OUT: &str = "/_dd/app/out";
+/// Where a link on one of the app's own pages to a box's page goes first
+/// (`local::to_box`): the click that lets that box ask the app at all
+pub const TO_BOX: &str = "/_dd/app/to-box";
+
+/// One of the fleet's names the app signs a browser in to: the domain
+/// itself, or one name under it (home., files., metrics., a box's own),
+/// and nothing deeper or anywhere else
+pub fn fleet_box(host: &str, domain: &str) -> bool {
+    let label = host.strip_suffix(domain).map(|r| r.strip_suffix('.'));
+    !domain.is_empty()
+        && match label {
+            Some(None) => host == domain,
+            Some(Some(l)) => {
+                !l.is_empty()
+                    && l.len() <= 63
+                    && !l.starts_with('-')
+                    && l.bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+            }
+            None => false,
+        }
+}
+
+/// Where a sign-out goes on to after the app: an https address on one of
+/// the fleet's names (the id page's out), and nowhere else
+pub fn out_then(q: &str, domain: &str) -> Option<String> {
+    let then = dec(query(q, "then")?);
+    let rest = then.strip_prefix("https://")?;
+    let host = rest.split(['/', '?', '#']).next()?;
+    let ok = fleet_box(host, domain)
+        && then.len() <= 2048
+        && !then
+            .bytes()
+            .any(|b| b.is_ascii_control() || b == b'\\' || b == b' ');
+    ok.then_some(then)
+}
+
+/// a ticket this app gave a box for one browser: 64 hex
+pub fn valid_ticket(t: &str) -> bool {
+    t.len() == 64 && t.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// A box's ask to sign this browser in: its own name, the challenge it
+/// gave the browser, and the ticket this app gave it for that browser
+pub fn signin_ask(q: &str, domain: &str) -> Option<(String, String, String)> {
+    let host = dec(query(q, "host")?);
+    let nonce = dec(query(q, "nonce")?);
+    let ticket = dec(query(q, "ticket")?);
+    let nonce_ok = (16..=64).contains(&nonce.len())
+        && nonce
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    (fleet_box(&host, domain) && nonce_ok && valid_ticket(&ticket)).then_some((host, nonce, ticket))
+}
+
+/// A click on one of the app's pages to a box's page: the box, the page
+/// there, and the key the app put in that page (`link_key`)
+pub fn to_box_ask(q: &str, domain: &str) -> Option<(String, String, String)> {
+    let host = dec(query(q, "host")?);
+    let rd = dec(query(q, "rd").unwrap_or("%2F"));
+    let k = dec(query(q, "k")?);
+    (fleet_box(&host, domain) && safe_then(&rd).is_some() && !k.is_empty()).then_some((host, rd, k))
+}
+
+/// Back to the box: with the grant and the app's next ticket for this
+/// browser there, or with nothing when the app does not take this browser
+/// or its ticket, which that box then forgets
+pub fn signin_back(host: &str, nonce: &str, granted: Option<(&str, &str)>) -> String {
+    let mut u = format!("https://{host}/_dd/app-signin?nonce={}", enc(nonce));
+    if let Some((g, next)) = granted {
+        u.push_str(&format!("&grant={}&ticket={next}", enc(g)));
+    }
+    u
+}
+
+/// to the box from the click: where the app answers this browser (`at`,
+/// this device's own name for it) and the ticket for that box
+pub fn box_start(host: &str, at: &str, ticket: &str, rd: &str) -> String {
+    format!(
+        "https://{host}/_dd/app-signin?at={}&ticket={ticket}&rd={}",
+        enc(at),
+        enc(rd)
+    )
+}
+
+/// What the app does with a sign-in's ask, by what the browser says of it
+#[derive(Debug, PartialEq, Eq)]
+pub enum SigninFrom {
+    /// from the box, so without the Strict cookie yet: a page that opens
+    /// itself again from here, and nothing signed
+    Bounce,
+    /// from that page, with a let-in browser's cookie: its ticket decides
+    Known,
+    /// from that page, and no browser this app let in: back, ungranted
+    Unknown,
+    /// a frame, a script, a fetch, or another page of the site
+    Refuse,
+}
+
+pub fn signin_from(known: bool, fetch_site: Option<&str>, nav: bool) -> SigninFrom {
+    let here = fetch_site == Some("same-origin");
+    match (nav, known, here) {
+        (false, _, _) => SigninFrom::Refuse,
+        (true, true, true) => SigninFrom::Known,
+        (true, true, false) => SigninFrom::Refuse,
+        (true, false, false) => SigninFrom::Bounce,
+        (true, false, true) => SigninFrom::Unknown,
+    }
 }
 
 /// What a server of the app does with a request, before anything is read
@@ -632,6 +749,21 @@ pub struct Browser {
     pub seen: u64,
     #[serde(default)]
     secrets: HashMap<String, String>,
+    /// the ticket each box holds for this browser, by its name: the hash of
+    /// the one the app gave it last, spent when the box asks with it
+    #[serde(default)]
+    tickets: HashMap<String, String>,
+    /// signed out in the browser: nothing is granted for it until a click
+    /// on one of the app's pages (to-box)
+    #[serde(default)]
+    out: bool,
+    /// the app's sign-in id for it, which every grant names and the boxes
+    /// make its sessions from; new after each sign-out
+    #[serde(default)]
+    sid: String,
+    /// the boxes' names granted under that id, for ending it on all of them
+    #[serde(default)]
+    granted: Vec<String>,
 }
 
 /// A door: once, for a minute, into one service for one browser
@@ -660,6 +792,9 @@ pub struct Browsers {
     keys: HashMap<(String, &'static str), Once>,
     /// where a browser just let in goes once its site cookie is set
     pending: HashMap<(String, &'static str), (String, Instant)>,
+    /// the key in each browser's pages for their links to a box (TO_BOX),
+    /// for this run of the app
+    link_keys: HashMap<String, String>,
 }
 
 fn secret_hash(s: &str) -> String {
@@ -722,6 +857,10 @@ impl Browsers {
             made: now,
             seen: now,
             secrets: HashMap::new(),
+            tickets: HashMap::new(),
+            out: false,
+            sid: String::new(),
+            granted: vec![],
         });
         id
     }
@@ -819,6 +958,84 @@ impl Browsers {
         (now.duration_since(made) < DOOR_LIFE).then_some(then)
     }
 
+    /// A ticket for box `host` to ask for this browser with, once; the one
+    /// before it is no more
+    pub fn ticket(&mut self, id: &str, host: &str) -> Option<String> {
+        let b = self.list.iter_mut().find(|b| b.id == id)?;
+        let t = random_hex(32);
+        b.tickets.insert(host.to_string(), secret_hash(&t));
+        Some(t)
+    }
+
+    /// box `host`'s ticket for this browser, spent if it is the one given
+    pub fn spend(&mut self, id: &str, host: &str, t: &str) -> bool {
+        let Some(b) = self.list.iter_mut().find(|b| b.id == id) else {
+            return false;
+        };
+        let ok = b
+            .tickets
+            .get(host)
+            .is_some_and(|h| same(h, &secret_hash(t)));
+        if ok {
+            b.tickets.remove(host);
+        }
+        ok
+    }
+
+    /// The sign-in id to grant `host` under for this browser, and `host`
+    /// noted beside it; none while it is signed out
+    pub fn grant_sid(&mut self, id: &str, host: &str) -> Option<String> {
+        let b = self.list.iter_mut().find(|b| b.id == id)?;
+        if b.out {
+            return None;
+        }
+        if b.sid.is_empty() {
+            b.sid = random_hex(16);
+        }
+        if !b.granted.iter().any(|h| h == host) {
+            if b.granted.len() >= 256 {
+                b.granted.remove(0);
+            }
+            b.granted.push(host.to_string());
+        }
+        Some(b.sid.clone())
+    }
+
+    /// Signed out in that browser: nothing granted until a click, and the
+    /// sign-in id and the names it was granted on, for ending it there
+    pub fn sign_out(&mut self, id: &str) -> Option<(String, Vec<String>)> {
+        let b = self.list.iter_mut().find(|b| b.id == id)?;
+        b.out = true;
+        b.tickets.clear();
+        let granted = std::mem::take(&mut b.granted);
+        let sid = std::mem::take(&mut b.sid);
+        (!sid.is_empty()).then_some((sid, granted))
+    }
+
+    /// a click on one of its pages to a box: a sign-in asked for
+    pub fn signed_in_again(&mut self, id: &str) {
+        if let Some(b) = self.list.iter_mut().find(|b| b.id == id) {
+            b.out = false;
+        }
+    }
+
+    /// what this browser's pages carry for their links to a box
+    pub fn link_key(&mut self, id: &str) -> Option<String> {
+        if !self.list.iter().any(|b| b.id == id) {
+            return None;
+        }
+        Some(
+            self.link_keys
+                .entry(id.to_string())
+                .or_insert_with(|| random_hex(32))
+                .clone(),
+        )
+    }
+
+    pub fn link_ok(&self, id: &str, k: &str) -> bool {
+        self.link_keys.get(id).is_some_and(|want| same(want, k))
+    }
+
     /// forgotten: its cookies open nothing from now on
     pub fn forget(&mut self, id: &str) -> bool {
         let before = self.list.len();
@@ -826,6 +1043,7 @@ impl Browsers {
         self.keys.retain(|(i, _), _| i != id);
         self.pending.retain(|(i, _), _| i != id);
         self.doors.retain(|_, d| d.id != id);
+        self.link_keys.remove(id);
         self.list.len() != before
     }
 }
@@ -950,6 +1168,213 @@ mod tests {
             ),
             None
         );
+    }
+
+    const T: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    #[test]
+    fn a_signin_is_asked_for_by_one_of_the_fleets_names_with_a_ticket() {
+        let n = "AbCdEfGhIjKlMnOpQrStUvWx";
+        let ok = |q: &str| signin_ask(q, "commonty.test");
+        assert_eq!(
+            ok(&format!("host=files.commonty.test&nonce={n}&ticket={T}")),
+            Some(("files.commonty.test".into(), n.into(), T.into()))
+        );
+        assert!(ok(&format!("host=commonty.test&nonce={n}&ticket={T}")).is_some());
+        for bad in [
+            format!("host=evil.example&nonce={n}&ticket={T}"),
+            format!("host=commonty.test.evil.example&nonce={n}&ticket={T}"),
+            format!("host=evilcommonty.test&nonce={n}&ticket={T}"),
+            format!("host=a.b.commonty.test&nonce={n}&ticket={T}"),
+            format!("host=Files.commonty.test&nonce={n}&ticket={T}"),
+            format!("host=files.commonty.test%2Fx&nonce={n}&ticket={T}"),
+            format!("host=files.commonty.test:8443&nonce={n}&ticket={T}"),
+            format!("host=.commonty.test&nonce={n}&ticket={T}"),
+            format!("host=files.commonty.test&nonce=short&ticket={T}"),
+            format!("host=files.commonty.test&nonce=AbCdEfGhIjKlMnOp%22x&ticket={T}"),
+            // from a cross-site start, nothing is signed without the ticket
+            format!("host=files.commonty.test&nonce={n}"),
+            format!("host=files.commonty.test&nonce={n}&ticket=abc"),
+            format!("nonce={n}&ticket={T}"),
+        ] {
+            assert_eq!(ok(&bad), None, "{bad}");
+        }
+        assert_eq!(
+            signin_ask(&format!("host=x&nonce={n}&ticket={T}"), ""),
+            None,
+            "no fleet yet"
+        );
+    }
+
+    #[test]
+    fn a_click_to_a_box_names_one_of_the_fleets_and_a_path_there() {
+        let ok = |q: &str| to_box_ask(q, "commonty.test");
+        assert_eq!(
+            ok("host=games.commonty.test&rd=%2Fx%3Fy%3D1&k=key"),
+            Some(("games.commonty.test".into(), "/x?y=1".into(), "key".into()))
+        );
+        assert_eq!(
+            ok("host=games.commonty.test&k=key").map(|x| x.1),
+            Some("/".into())
+        );
+        for bad in [
+            "host=evil.example&rd=%2F&k=key",
+            "host=games.commonty.test&rd=%2F%2Fevil.example&k=key",
+            "host=games.commonty.test&rd=https%3A%2F%2Fevil.example&k=key",
+            "host=games.commonty.test&rd=%2F",
+        ] {
+            assert_eq!(ok(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_grant_goes_back_to_the_box_that_asked_and_nowhere_else() {
+        assert_eq!(
+            signin_back("files.commonty.test", "n_1", Some(("g+/=", T))),
+            format!(
+                "https://files.commonty.test/_dd/app-signin?nonce=n_1&grant=g%2B%2F%3D&ticket={T}"
+            )
+        );
+        assert_eq!(
+            signin_back("files.commonty.test", "n_1", None),
+            "https://files.commonty.test/_dd/app-signin?nonce=n_1"
+        );
+        let at = "s-0123456789abcdef0123456789abcdef.localhost:41660";
+        assert_eq!(
+            box_start("games.commonty.test", at, T, "/x?y=1"),
+            format!(
+                "https://games.commonty.test/_dd/app-signin?at={}&ticket={T}&rd=%2Fx%3Fy%3D1",
+                enc(at)
+            )
+        );
+    }
+
+    #[test]
+    fn only_the_apps_own_page_with_the_browsers_cookie_signs() {
+        // the box's redirect: cross-site, no Strict cookie, a tab
+        assert_eq!(
+            signin_from(false, Some("cross-site"), true),
+            SigninFrom::Bounce
+        );
+        assert_eq!(signin_from(false, None, true), SigninFrom::Bounce);
+        // the page that opened itself again: from here, with the cookie
+        assert_eq!(
+            signin_from(true, Some("same-origin"), true),
+            SigninFrom::Known
+        );
+        // from here, and no let-in browser: back to the box, with nothing
+        assert_eq!(
+            signin_from(false, Some("same-origin"), true),
+            SigninFrom::Unknown
+        );
+        // the cookie, but sent from another page of the same site
+        assert_eq!(
+            signin_from(true, Some("same-site"), true),
+            SigninFrom::Refuse
+        );
+        assert_eq!(
+            signin_from(true, Some("cross-site"), true),
+            SigninFrom::Refuse
+        );
+        // a fetch, a frame or a script: never, cookie or not
+        for known in [true, false] {
+            for site in [Some("same-origin"), Some("cross-site"), None] {
+                assert_eq!(signin_from(known, site, false), SigninFrom::Refuse);
+            }
+        }
+        // and the way in is a GET of the site's server on this device's own name
+        assert!(way_in(Which::Site, &Via::Browser, "GET", SIGNIN));
+        assert!(!way_in(Which::Site, &Via::Browser, "POST", SIGNIN));
+        assert!(!way_in(Which::Site, &Via::Pair, "GET", SIGNIN));
+        assert!(!way_in(Which::Photos, &Via::Browser, "GET", SIGNIN));
+        // the click is no way in: from anywhere else it is only opened again
+        assert!(!way_in(Which::Site, &Via::Browser, "GET", TO_BOX));
+    }
+
+    #[test]
+    fn a_browser_signed_out_is_granted_nothing_until_a_click_and_its_sessions_end() {
+        let mut b = Browsers::from_json("dev", "");
+        let ann = b.add("Chrome on Linux", 1);
+        let sid = b.grant_sid(&ann, "files.commonty.test").unwrap();
+        assert_eq!(sid.len(), 32);
+        assert_eq!(
+            b.grant_sid(&ann, "git.commonty.test").as_ref(),
+            Some(&sid),
+            "one sign-in"
+        );
+        let t = b.ticket(&ann, "files.commonty.test").unwrap();
+        // signing out: the id and every name it was granted on, to end there
+        let (gone, hosts) = b.sign_out(&ann).unwrap();
+        assert_eq!(gone, sid);
+        assert_eq!(hosts, ["files.commonty.test", "git.commonty.test"]);
+        // nothing granted now, and the boxes' tickets are spent
+        assert_eq!(b.grant_sid(&ann, "files.commonty.test"), None);
+        assert!(!b.spend(&ann, "files.commonty.test", &t));
+        // kept so across the app's restarts
+        let mut again = Browsers::from_json("dev", &b.to_json());
+        assert_eq!(again.grant_sid(&ann, "files.commonty.test"), None);
+        // a click on its pages: a new sign-in, under a new id
+        again.signed_in_again(&ann);
+        let new = again.grant_sid(&ann, "files.commonty.test").unwrap();
+        assert_ne!(new, sid);
+        assert!(b.sign_out("no such browser").is_none());
+    }
+
+    #[test]
+    fn a_sign_out_goes_on_to_one_of_the_fleets_names_alone() {
+        let ok = |q: &str| out_then(q, "commonty.test");
+        assert_eq!(
+            ok("then=https%3A%2F%2Fid.commonty.test%2Fout%3Fthen%3Dx").as_deref(),
+            Some("https://id.commonty.test/out?then=x")
+        );
+        for bad in [
+            "then=https%3A%2F%2Fevil.example%2F",
+            "then=http%3A%2F%2Fid.commonty.test%2Fout",
+            "then=https%3A%2F%2Fid.commonty.test.evil.example%2F",
+            "then=%2F_dd%2Fhome",
+            "then=https%3A%2F%2Fid.commonty.test%2F%0d%0ax",
+            "",
+        ] {
+            assert_eq!(ok(bad), None, "{bad}");
+        }
+        assert!(way_in(Which::Site, &Via::Browser, "GET", OUT));
+    }
+
+    #[test]
+    fn a_boxs_ticket_is_one_browsers_for_one_name_and_good_once() {
+        let mut b = Browsers::from_json("dev", "");
+        let ann = b.add("Chrome on Linux", 1);
+        let other = b.add("Firefox on Linux", 1);
+        let t = b.ticket(&ann, "files.commonty.test").unwrap();
+        assert!(valid_ticket(&t));
+        assert!(
+            !b.spend(&other, "files.commonty.test", &t),
+            "another browser's"
+        );
+        assert!(!b.spend(&ann, "games.commonty.test", &t), "another name's");
+        assert!(
+            !b.spend(&ann, "files.commonty.test", T),
+            "not the one given"
+        );
+        assert!(b.spend(&ann, "files.commonty.test", &t));
+        assert!(!b.spend(&ann, "files.commonty.test", &t), "once");
+        // a new one replaces the one before, and it is kept with the browser
+        let old = b.ticket(&ann, "files.commonty.test").unwrap();
+        let new = b.ticket(&ann, "files.commonty.test").unwrap();
+        assert!(!b.spend(&ann, "files.commonty.test", &old));
+        let mut again = Browsers::from_json("dev", &b.to_json());
+        assert!(!b.to_json().contains(&new), "kept as a hash");
+        assert!(again.spend(&ann, "files.commonty.test", &new));
+        // forgotten, its tickets go with it
+        let t = b.ticket(&other, "files.commonty.test").unwrap();
+        b.forget(&other);
+        assert!(!b.spend(&other, "files.commonty.test", &t));
+        assert!(b.ticket("no such browser", "files.commonty.test").is_none());
+        // the key for its pages' links is its own and this run's
+        let k = b.link_key(&ann).unwrap();
+        assert!(b.link_ok(&ann, &k));
+        assert!(!b.link_ok(&other, &k));
+        assert!(!b.link_ok(&ann, ""));
     }
 
     #[test]
