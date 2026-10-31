@@ -13,12 +13,21 @@
 # DISK (to name the disk when there is more than one; it is wiped),
 # Secure Boot in setup mode (its keys cleared at the firmware's screen),
 # WIFI ({ssid, psk}, a file) and TICKET (the member's join ticket, a file),
-# both from the drive's commonty/ (docs/dev/joining.md).
+# both from the drive's commonty/ (docs/dev/joining.md), BUILD_LOG_FORMAT (nix's,
+# for the screen to read). --tidy: only what a failed install left is undone.
 set -euo pipefail
 say() { echo "== $*"; }
 no() { echo "not installing: $*" >&2; exit 1; }
 # a step that fails says which, never a silent stop
 trap 'echo "failed: line $LINENO: $BASH_COMMAND" >&2' ERR
+# what a failed install leaves, so the disk can be chosen again with no
+# restart: the screen runs this too, for a run killed before its own trap
+tidy() {
+  if mountpoint -q /mnt; then umount -R /mnt 2>/dev/null || umount -Rl /mnt; fi
+  zpool export -f tank 2>/dev/null || true
+  rm -f /dev/dd-target /run/dd/disk.key
+}
+if [ "${1:-}" = --tidy ]; then tidy; exit 0; fi
 
 [ -e /dev/tpmrm0 ] || no "this machine has no TPM 2.0: a box's keys live in its TPM"
 [ -d /sys/firmware/efi ] || no "this machine did not boot by UEFI"
@@ -54,7 +63,14 @@ read -r rev counter < <(dd-agent --url "$RELEASE_URL" --key-file "$RELEASE_KEY" 
 say "the fleet's release is commit $rev"
 
 w=$(mktemp -d)
-trap 'rm -rf "$w"' EXIT
+wiping=""
+# shellcheck disable=SC2329 # run by the trap
+finish() {
+  code=$?
+  rm -rf "$w"
+  [ "$code" = 0 ] || [ -z "$wiping" ] || tidy
+}
+trap finish EXIT
 
 # the half its disk key comes from at its first boot, in its TPM, made
 # before anything is wiped. It is held under no PCR: this boot's PCR 7 is
@@ -91,6 +107,7 @@ for d in "${disks[@]}"; do
     && no "$d holds an old box's disk: take it out, or wipe it first"
 done
 ln -sfn "$disk" /dev/dd-target
+wiping=1
 /etc/dd/wipe --yes-wipe-all-disks
 shred -u /run/dd/disk.key
 
@@ -122,8 +139,19 @@ jq -n --arg ssid "$ssid" '{owner: null, house: {ssid: $ssid, address: "", sealed
 
 # its system, built here from that commit and its report, onto the disk:
 # the installer's own store is memory. What it already has is taken from it
+# Its temporary files on that disk too: /tmp is memory, half of it at most,
+# and a compiler's scratch would take what the compilers need. As many builds
+# at once as there is memory for (rustc peaks near 1 GB a job, nix's own
+# evaluation near 3 GB): one at a time on 8 GB, each with every thread
+export TMPDIR=/mnt/var/tmp/dd-build XDG_CACHE_HOME=/mnt/var/tmp/dd-build/cache
+install -d -m 0700 "$TMPDIR"
+threads=$(nproc)
+jobs=$(( $(awk '/^MemTotal/ { print int($2 / 1048576) }' /proc/meminfo) / 4 ))
+[ "$jobs" -ge 1 ] || jobs=1
+[ "$jobs" -le "$threads" ] || jobs=$threads
 say "building its system from $rev"
 sys=$(nix --extra-experimental-features "nix-command flakes" build --impure --no-link --print-out-paths \
+  --max-jobs "$jobs" --cores $(( threads / jobs )) ${BUILD_LOG_FORMAT:+--log-format "$BUILD_LOG_FORMAT"} \
   --store /mnt --extra-substituters 'daemon?trusted=true' --expr "let f = builtins.getFlake \"$SOURCE?rev=$rev\"; in (f.lib.joinedBox { name = \"$name\"; dir = builtins.path { path = /mnt/var/lib/dd/box; name = \"box\"; }; }).config.system.build.toplevel")
 # its Secure Boot keys, on its encrypted disk (/var/lib/sbctl, where
 # lanzaboote signs every release's boot with them), made before the
@@ -133,6 +161,9 @@ printf 'keydir: /mnt/var/lib/sbctl/keys\nguid: /mnt/var/lib/sbctl/GUID\nfiles_db
   "$w/sbctl" "$w/sbctl" > "$w/sbctl.conf"
 sbctl --config "$w/sbctl.conf" --disable-landlock create-keys
 nixos-install --root /mnt --system "$sys" --no-root-passwd --no-channel-copy
+cd /
+rm -rf /mnt/var/tmp/dd-build
+unset TMPDIR XDG_CACHE_HOME
 # and enrolled, with Microsoft's beside them as node1's and node2's are:
 # firmware drivers on cards (graphics, network) are signed by Microsoft,
 # and without its keys some machines start with no screen. A system

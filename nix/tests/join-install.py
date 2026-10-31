@@ -96,11 +96,11 @@ assert (
 )
 
 
-def finish(kind):
+def finish(kind, want="done"):
     for _ in range(900):
         j = api("job")
         if j["kind"] == kind and j["state"] != "running":
-            assert j["state"] == "done", j
+            assert j["state"] == want, j
             return j
         blank.sleep(1)
     raise AssertionError(f"{kind} did not finish")
@@ -166,6 +166,23 @@ forge.succeed(f"echo '{key}' > /root/bk")
 listing = forge.succeed(f"restic -r /srv/gate/{tid} --password-file /root/bk ls latest")
 assert "letter.txt" in listing, listing
 forge.fail(f"grep -rq 'a letter' /srv/gate/{tid}")
+
+# ZFS's cache held down, and memory compressed, for the build
+assert blank.succeed(
+    "modprobe zfs; cat /sys/module/zfs/parameters/zfs_arc_max"
+).strip() == str(1 << 30)
+blank.succeed("swapon --show=NAME --noheadings | grep -c zram")
+
+# an install that fails half way (the wipe done, its commit not to be had)
+# leaves the disk to be chosen again, with no restart
+forge.succeed("mv /srv/flake.git /srv/flake.git.away")
+api("install", {"disk": "/dev/vdb"})
+failed = finish("install", "failed")
+assert any("flake.git" in s or "failed:" in s for s in failed["said"]), failed
+assert "/mnt" not in blank.succeed("findmnt -rno TARGET")
+blank.fail("zpool list tank")
+assert [d["name"] for d in api("disks")["disks"]] == ["/dev/vdb", "/dev/vdc"]
+forge.succeed("mv /srv/flake.git.away /srv/flake.git")
 
 # installed through the screen: that disk wiped and installed to, the
 # other not, with the drive's Wi-Fi and the member's ticket

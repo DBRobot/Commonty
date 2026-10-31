@@ -370,7 +370,12 @@ firmware   UEFI, TPM 2.0, Secure Boot in setup mode, disks seen (not behind RAID
 network    a cable, else the drive's Wi-Fi, else a network picked here
 disk       internal, not removable, nothing of it mounted
 back up    optional: dd-box-backup (backup.sh)
-install    dd-join-install (join-install.sh), with the ticket and the Wi-Fi
+install    dd-join-install (join-install.sh), with the ticket and the Wi-Fi.
+           Its build's temporary files are on the new disk, not /tmp (memory),
+           with one build at a time on 8 GB and ZFS's cache held to 1 GiB. The
+           screen shows what is built of how many, and the time left once it
+           can say. An install that fails leaves the disk unmounted and its
+           pool exported, so Erase and install works again with no restart
 done       take the drive out, restart
 ```
 

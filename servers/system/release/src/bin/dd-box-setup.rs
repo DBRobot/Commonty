@@ -60,9 +60,26 @@ struct Job {
     eta: Option<u64>,
     // its "== " lines: the install's stages
     stages: Vec<String>,
-    // the rest it said, for when it stops
+    // the rest it said, for when it stops: the last of it
     said: Vec<String>,
     started: Option<Instant>,
+    // an install's build, and when its stage began
+    build: setup::Build,
+    building_since: Option<Instant>,
+}
+
+impl Job {
+    fn install_progress(&mut self) {
+        let share = self.build.share();
+        // nix finds more to do as it goes: the bar never goes back
+        self.done = self
+            .done
+            .max(setup::install_share(self.stages.len(), share));
+        self.eta = self
+            .building_since
+            .filter(|_| self.stages.len() == 3)
+            .and_then(|s| setup::eta(s.elapsed().as_secs(), share));
+    }
 }
 
 struct App {
@@ -397,6 +414,7 @@ fn route(app: &Arc<App>, method: &str, path: &str, body: &Value) -> Result<Reply
             if let Some(w) = app.wifi.lock().unwrap().clone() {
                 env.push(("WIFI", w.display().to_string()));
             }
+            env.push(("BUILD_LOG_FORMAT", "internal-json".to_string()));
             start(app, "install", "dd-join-install", env)?;
             Reply::Json(json!({}))
         }
@@ -408,6 +426,7 @@ fn route(app: &Arc<App>, method: &str, path: &str, body: &Value) -> Result<Reply
                 "done": j.done,
                 "eta": j.eta,
                 "stages": j.stages,
+                "build": j.build,
                 "said": j.said.iter().rev().take(6).rev().collect::<Vec<_>>(),
                 "seconds": j.started.map(|s| s.elapsed().as_secs()),
             }))
@@ -526,30 +545,46 @@ fn start(app: &Arc<App>, kind: &str, prog: &str, env: Vec<(&'static str, String)
     let (app, mine) = (app.clone(), app.clone());
     let errs = std::thread::spawn(move || {
         for l in BufReader::new(err).lines().map_while(Result::ok) {
-            mine.job.lock().unwrap().said.push(l);
+            let mut j = mine.job.lock().unwrap();
+            if let Some(said) = j.build.line(&l) {
+                if j.said.len() >= 200 {
+                    j.said.remove(0);
+                }
+                j.said.push(said);
+            } else if j.kind == "install" {
+                j.install_progress();
+            }
         }
     });
+    let prog = prog.to_string();
     std::thread::spawn(move || {
-        let stages: f64 = 5.0;
-        let mut seen: f64 = 0.0;
         for l in BufReader::new(out).lines().map_while(Result::ok) {
             let mut j = app.job.lock().unwrap();
             if let Some((d, eta)) = setup::restic_progress(&l) {
                 j.done = d;
                 j.eta = eta;
             } else if let Some(s) = l.strip_prefix("== ") {
-                seen += 1.0;
-                j.done = (seen / stages).min(0.95);
                 j.stages.push(s.to_string());
+                if j.stages.len() == 3 {
+                    j.building_since = Some(Instant::now());
+                }
+                j.install_progress();
             }
         }
         let _ = errs.join();
         let ok = child.wait().map(|s| s.success()).unwrap_or(false);
+        // the disk free again before the page can offer it again, however
+        // the run ended
+        if !ok && app.job.lock().unwrap().kind == "install" {
+            let _ = Command::new(&prog).arg("--tidy").status();
+        }
         let mut j = app.job.lock().unwrap();
         j.state = if ok { "done" } else { "failed" }.into();
         if ok {
             j.done = 1.0;
             j.eta = Some(0);
+        } else {
+            j.eta = None;
         }
     });
     Ok(())
