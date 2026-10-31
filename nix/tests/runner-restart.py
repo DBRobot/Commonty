@@ -131,11 +131,11 @@ in_job = f"docker exec $({jobs}) "
 
 
 # main is protected (forgejo-protection): each job is a push to a branch
-def push(name, job=job):
+def push(name, job=job, workflow=None):
     content = base64.b64encode(job.encode()).decode()
     box.succeed(
         f'{as_owner} -X POST -d \'{{"branch":"main","new_branch":"{name}","content":"{content}"}}\' '
-        f"{api}/contents/.forgejo/workflows/{name}.yml >/dev/null"
+        f"{api}/contents/.forgejo/workflows/{workflow or name + '.yml'} >/dev/null"
     )
 
 
@@ -325,6 +325,9 @@ assert "restarting" not in said and "draining" not in said, said
 # with the jobs that need it after it; the run passes. The CI identity may
 # write to the repository once forgejo-admin has run since it was made.
 start_fresh(box, "forgejo-admin.service")
+# the test's own passes below are the ones it reads: a timer's pass between
+# the forge's failure mark and the test's would take the rerun first
+box.succeed("systemctl stop dd-ci-resume.timer")
 lost_job = (
     "on: pull_request\n"
     "jobs:\n"
@@ -348,7 +351,9 @@ lost_job = (
     '          echo "long: ${{ needs.long.result }}, after: ${{ needs.after.result }}"\n'
     '          [ "${{ needs.long.result }}" = success ] && [ "${{ needs.after.result }}" = success ]\n'
 )
-push("lost", lost_job)
+# in the CI workflow's own file: ci-resume reruns that one alone, never a
+# member's own (a lost.yml run was never looked at, 2026-10-27 and run 971)
+push("lost", lost_job, "entry_point.yml")
 box.succeed(
     f'{as_owner} -X POST -d \'{{"head":"lost","base":"main","title":"lost"}}\' {api}/pulls >/dev/null'
 )
