@@ -114,7 +114,43 @@ let
     "pihole: mains before battery"
     "members-runner best on the most threads"
   ];
-  failed = lib.concatLists (lib.zipListsWith (ok: n: lib.optional (!ok) n) expect names);
+  # whose box it is: the same computer under other people's word
+  rawNeeds = import ../lib/needs.nix { inherit lib; };
+  judgedAs =
+    own:
+    (import ../lib/capability.nix {
+      inherit lib;
+      needs = rawNeeds // {
+        mine = rawNeeds.pihole // {
+          trust = "own";
+          base = rawNeeds.pihole.base // {
+            requires = removeAttrs rawNeeds.pihole.base.requires [ "place" ];
+          };
+        };
+      };
+      policy = lib.importJSON ../../fleet/policy.json;
+      boxes.b = sim.diy-nas // {
+        own = sim.diy-nas.own // own;
+      };
+    }).boxes.b;
+  ownership = {
+    "a household's box runs what serves it" = (judgedAs { }).can ? pihole;
+    "a box nobody owns does not, whoever it says lives there" = !((judgedAs { owner = null; }).can ? pihole);
+    "nor one whose owner does not live with that household" =
+      !((judgedAs { owner = "stranger"; }).can ? pihole);
+    "the fleet owner's box does, whoever lives there" =
+      (judgedAs {
+        owner = (lib.importJSON ../../fleet/policy.json).owner;
+        house = sim.diy-nas.own.house // {
+          household = [ "friend" ];
+        };
+      }).can ? pihole;
+    "what is its owner's runs on a box somebody owns" = (judgedAs { }).can ? mine;
+    "and not on a box nobody owns" = !((judgedAs { owner = null; }).can ? mine);
+  };
+  failed =
+    lib.concatLists (lib.zipListsWith (ok: n: lib.optional (!ok) n) expect names)
+    ++ builtins.attrNames (lib.filterAttrs (_: ok: !ok) ownership);
 in
 assert builtins.length expect == builtins.length names;
 if failed == [ ] then
