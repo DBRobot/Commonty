@@ -84,12 +84,42 @@ async function signIn(user, asking) {
 // --- a box's hand-off: its name and its challenge, signed with the key, and
 // posted to that name (never anywhere a parameter says: the signature names
 // the host, and only that host may receive it)
+const handed = async (me, host, nonce) => ({
+  d: b64u(enc.encode(JSON.stringify(me.d))),
+  sig: b64u(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, me.keys.privateKey, enc.encode(`commonty handoff v1\0${host}\0${nonce}`))),
+  nonce,
+});
+
+// The box's other names, all at once and in the background, so that going to
+// one finds a session there. Never holds the browser up for long, and a name
+// that does not answer (off the network from here) makes its own trip later.
+const WARM_MS = 700;
+async function warm(me, host) {
+  const stop = AbortSignal.timeout(WARM_MS);
+  const done = new Set(me.hosts || []);
+  const tried = new Set(me.tried || []);
+  const r = await fetch(`https://${host}/_dd/sso/names`, { credentials: 'omit', signal: stop });
+  const { names } = r.ok ? await r.json() : { names: [] };
+  const fresh = names.filter((n) => ours(n.host) && !done.has(n.host) && !tried.has(n.host));
+  // once for each sign-in: one out of reach from here should not cost this wait again
+  me.tried = [...tried, ...fresh.map((n) => n.host)];
+  await Promise.allSettled(fresh.map(async (n) => {
+    const body = new URLSearchParams({ ...(await handed(me, n.host, n.nonce)), warm: 'true' });
+    await fetch(`https://${n.host}/_dd/sso`, { method: 'POST', mode: 'no-cors', credentials: 'include', keepalive: true, body, signal: stop });
+    done.add(n.host);
+  }));
+  me.hosts = [...done];
+}
+
 async function handOff(me, host, nonce) {
-  const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, me.keys.privateKey, enc.encode(`commonty handoff v1\0${host}\0${nonce}`));
+  await warm(me, host).catch(() => {});
+  // the names it holds a session on, for signing out of them
+  me.hosts = [...new Set([...(me.hosts || []), host])];
+  await keep(me).catch(() => {});
   const f = document.createElement('form');
   f.method = 'POST';
   f.action = `https://${host}/_dd/sso`;
-  for (const [k, v] of Object.entries({ d: b64u(enc.encode(JSON.stringify(me.d))), sig: b64u(sig), nonce })) {
+  for (const [k, v] of Object.entries(await handed(me, host, nonce))) {
     const i = document.createElement('input');
     i.type = 'hidden';
     i.name = k;
@@ -112,6 +142,9 @@ async function main() {
   try { $('u').value = localStorage.getItem('dd_user') || ''; } catch {}
 
   if (location.pathname === '/out') {
+    const hosts = (await kept())?.hosts || [];
+    const stop = AbortSignal.timeout(1000);
+    await Promise.allSettled(hosts.map((h) => fetch(`https://${h}/_dd/sso/out`, { method: 'POST', mode: 'no-cors', credentials: 'include', signal: stop })));
     await forget();
     const then = q.get('then') || '';
     let to = null;
@@ -126,17 +159,19 @@ async function main() {
   const handing = location.pathname === '/go' && ours(host) && /^[A-Za-z0-9_-]{8,64}$/.test(nonce);
 
   const me = await current();
-  if (handing && me) {
+  // again: the box would not take the sign-in kept here (ended, or a passkey
+  // it no longer holds), so it does not get the same one
+  if (handing && me && q.get('again') !== '1') {
     show('busy');
     return handOff(me, host, nonce);
   }
-  if (me) {
+  if (me && !handing) {
     $('who').textContent = me.d.user;
     show('done');
   } else {
     show('signin');
   }
-  $('out').onclick = async () => { await forget(); show('gone'); };
+  $('out').onclick = async () => { location.href = '/out'; };
   $('go').onclick = async () => {
     const user = $('u').value.trim().toLowerCase();
     if (!user) return say('Your username, please.');

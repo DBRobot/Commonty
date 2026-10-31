@@ -33,7 +33,7 @@ fleet/
   mail.json               where the mail Worker is (dd mail setup)
   dns-worker.json         where the DNS Worker is (dd dns setup); with it,
                           the zone is the Worker's: names and certificates
-  id-worker.json          where the id Worker is (dd id setup); with it,
+  id-worker.json          where the id Worker is (dd id setup); at stage on,
                           sign-in is there, once for every box
   layout.nix              the one disk layout every box gets
 ```

@@ -23,6 +23,7 @@ let
   # (gate/public.nix) is the full gate already
   on =
     config.dd.idWorker != ""
+    && config.dd.idWorkerStage == "on"
     && config.dd.dnsWorker != ""
     && !(options.dd ? public)
     && config.dd.thanos.sidecars == [ ];

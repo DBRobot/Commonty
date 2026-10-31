@@ -21,6 +21,8 @@ use crate::{App, session, urlencode, valid_user};
 
 /// how long a box's challenge waits for the id page to answer it
 const WAIT: Duration = Duration::from_secs(300);
+/// a flood of challenges costs this many, not the box's memory
+const MOST_WAITING: usize = 20_000;
 
 /// A challenge this box gave out: for which of its names, and where the
 /// browser was going.
@@ -60,19 +62,9 @@ pub(crate) async fn start(
     if host.is_empty() {
         return (StatusCode::BAD_REQUEST, "not one of this box's names").into_response();
     }
-    let nonce = session::random_id();
-    {
-        let mut w = app.sso.lock().unwrap();
-        w.retain(|_, v: &mut Waiting| v.at.elapsed() < WAIT);
-        w.insert(
-            nonce.clone(),
-            Waiting {
-                at: Instant::now(),
-                host: host.clone(),
-                rd: local_path(&q.rd),
-            },
-        );
-    }
+    let Some(nonce) = challenge(&app, &host, &local_path(&q.rd)) else {
+        return StatusCode::TOO_MANY_REQUESTS.into_response();
+    };
     Redirect::to(&format!(
         "{id}/go?host={}&nonce={}",
         urlencode(&host),
@@ -121,6 +113,9 @@ pub(crate) struct Back {
     /// the browser key's signature over this name and the challenge
     sig: String,
     nonce: String,
+    /// from the id page in the background (`names`): nothing to go back to
+    #[serde(default)]
+    warm: bool,
 }
 
 /// POST /_dd/sso: the id page's answer. A session for this name, or nothing.
@@ -138,10 +133,10 @@ pub(crate) async fn finish(
     }
     let host = app.directory.here(&headers);
     let Some(w) = app.sso.lock().unwrap().remove(&b.nonce) else {
-        return start_over("/");
+        return if b.warm { nothing() } else { start_over("/") };
     };
     if w.at.elapsed() > WAIT || w.host != host || host.is_empty() {
-        return start_over(&w.rd);
+        return if b.warm { nothing() } else { start_over(&w.rd) };
     }
     let Some(d) = B64_URL
         .decode(b.d.as_bytes())
@@ -164,11 +159,19 @@ pub(crate) async fn finish(
         });
     if let Err(why) = checked {
         eprintln!("sso: {}: refused: {why}", d.user);
-        return (
-            StatusCode::UNAUTHORIZED,
-            "That sign-in was not accepted here. Sign in again.",
-        )
-            .into_response();
+        if b.warm {
+            return StatusCode::UNAUTHORIZED.into_response();
+        }
+        // the id page would hand the same sign-in over again: it asks instead
+        return match challenge(&app, &host, &w.rd) {
+            Some(nonce) => Redirect::to(&format!(
+                "{id}/go?host={}&nonce={}&again=1",
+                urlencode(&host),
+                urlencode(&nonce)
+            ))
+            .into_response(),
+            None => StatusCode::UNAUTHORIZED.into_response(),
+        };
     }
     let agent = headers
         .get("user-agent")
@@ -189,9 +192,92 @@ pub(crate) async fn finish(
     if now.saturating_sub(d.iat) < 300 {
         app.saw_passkey(&id);
     }
-    let mut r = Redirect::to(&w.rd).into_response();
+    let mut r = if b.warm {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        Redirect::to(&w.rd).into_response()
+    };
     r.headers_mut()
         .insert("set-cookie", HeaderValue::from_str(&set).unwrap());
+    r
+}
+
+fn nothing() -> Response {
+    StatusCode::NO_CONTENT.into_response()
+}
+
+/// A challenge for one of this box's names, unless too many are waiting.
+fn challenge(app: &App, host: &str, rd: &str) -> Option<String> {
+    let nonce = session::random_id();
+    let mut w = app.sso.lock().unwrap();
+    w.retain(|_, v: &mut Waiting| v.at.elapsed() < WAIT);
+    if w.len() >= MOST_WAITING {
+        return None;
+    }
+    w.insert(
+        nonce.clone(),
+        Waiting {
+            at: Instant::now(),
+            host: host.to_string(),
+            rd: rd.to_string(),
+        },
+    );
+    Some(nonce)
+}
+
+/// GET /_dd/sso/names: this box's other names and a challenge for each, for
+/// the id page to hand the sign-in to all at once: so a member's first click
+/// to another of them does not make the trip, and a page's read of another
+/// name finds a session there. Each goes to its own name as a hand-off does.
+pub(crate) async fn names(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    let Some(id) = app.id_origin.as_deref() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let here = app.directory.here(&headers);
+    let names: Vec<serde_json::Value> = if here.is_empty() {
+        vec![]
+    } else {
+        app.directory
+            .names()
+            .iter()
+            .filter(|n| **n != here && n.as_str() != app.domain)
+            .filter_map(|n| {
+                challenge(&app, n, "/").map(|c| serde_json::json!({ "host": n, "nonce": c }))
+            })
+            .collect()
+    };
+    let mut r = axum::Json(serde_json::json!({ "names": names })).into_response();
+    let h = r.headers_mut();
+    h.insert(
+        "access-control-allow-origin",
+        HeaderValue::from_str(id).unwrap(),
+    );
+    h.insert("vary", HeaderValue::from_static("origin"));
+    h.insert("cache-control", HeaderValue::from_static("no-store"));
+    r
+}
+
+/// POST /_dd/sso/out, from the id page and nothing else: this browser's
+/// sign-out reaches this name, whichever name it was asked on. The cookie
+/// says which session; it ends here, on every name of this box.
+pub(crate) async fn out(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    let Some(id) = app.id_origin.as_deref() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if headers.get("origin").and_then(|v| v.to_str().ok()) != Some(id) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
+    if let Some((_, sid, _)) = app.sessions.session(cookie)
+        && !sid.is_empty()
+    {
+        app.signins.end(&sid);
+    }
+    let mut r = nothing();
+    for c in app.sessions.clear_all() {
+        r.headers_mut()
+            .append("set-cookie", HeaderValue::from_str(&c).unwrap());
+    }
     r
 }
 

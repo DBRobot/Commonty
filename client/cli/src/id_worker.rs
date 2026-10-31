@@ -20,6 +20,9 @@ pub struct Setup {
     pub account: String,
     pub zone: String,
     pub script: String,
+    /// "try": nobody's sign-in changes until it says "on" (dd.idWorkerStage)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<String>,
 }
 
 fn read_setup(root: &Path) -> Result<Option<Setup>> {
@@ -112,8 +115,8 @@ pub async fn deploy(root: &Path, keys: &impl auth::KeyStore, r#ref: &str) -> Res
 }
 
 /// Once: the first upload and the name id.<domain>, then
-/// fleet/id-worker.json - committed and released, that moves every box's
-/// sign-in onto the Worker.
+/// fleet/id-worker.json - committed and released, that lets the Worker be
+/// tried; its stage "on" moves every box's sign-in onto it.
 pub async fn setup(root: &Path, keys: &impl auth::KeyStore, domain: &str) -> Result<()> {
     let token = token(keys)?;
     let http = reqwest::Client::new();
@@ -139,6 +142,7 @@ pub async fn setup(root: &Path, keys: &impl auth::KeyStore, domain: &str) -> Res
         account: account.clone(),
         zone: zone_id.clone(),
         script: SCRIPT.into(),
+        stage: Some("try".into()),
     };
     let dir = bundle(&format!("path:{}", root.display()))?;
     upload(&http, &token, &s, &dir).await?;
@@ -163,7 +167,7 @@ pub async fn setup(root: &Path, keys: &impl auth::KeyStore, domain: &str) -> Res
     )?;
     eprintln!("== wrote fleet/id-worker.json");
     eprintln!(
-        "Left: commit fleet/id-worker.json and release; every box's sign-in is then at id.{domain}."
+        "Left: commit fleet/id-worker.json and release; a sign-in is then there to try at https://home.{domain}/_dd/sso/start. Setting its stage to \"on\" and releasing moves every sign-in there, and ends sessions held today."
     );
     Ok(())
 }

@@ -1515,6 +1515,40 @@ fn routed_path(uri: &str) -> String {
 /// calls answer the demo alone, as /verify does for everything behind
 /// nginx: a member's session there is sent back to the service's own name,
 /// and a stranger without one is started in the demo.
+/// A cookie for one name still goes along with a request a page of another
+/// name makes: the browser counts every name of the domain as the same site.
+/// So a change asked by a page on a name below the fleet's own (a box's, or
+/// a box someone else runs), of a name that is not itself, is asked by
+/// nobody. Reads answer no such page: no CORS lets one read them.
+async fn no_session_for_a_page_below(
+    State(app): State<Arc<App>>,
+    mut req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let headers = req.headers();
+    // nginx asks /verify with a GET whatever the browser asked
+    let method = headers
+        .get("x-original-method")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or(req.method().as_str());
+    let origin = headers.get("origin").and_then(|v| v.to_str().ok());
+    if !matches!(method, "GET" | "HEAD" | "OPTIONS")
+        && origin.is_some_and(|o| page_below(&app.domain, o, &asked_host(headers)))
+    {
+        req.headers_mut().remove("cookie");
+    }
+    next.run(req).await
+}
+
+/// `origin` is a page on a name more than one label below `domain`, not `asked`.
+fn page_below(domain: &str, origin: &str, asked: &str) -> bool {
+    origin
+        .strip_prefix("https://")
+        .filter(|h| *h != asked)
+        .and_then(|h| h.strip_suffix(&format!(".{domain}")))
+        .is_some_and(|below| below.contains('.'))
+}
+
 async fn demo_door(
     State(app): State<Arc<App>>,
     req: axum::extract::Request,
@@ -2081,9 +2115,11 @@ fn from_our_site(domain: &str, headers: &HeaderMap) -> bool {
     }
     match headers.get("origin").map(|v| v.to_str()) {
         None => true,
-        Some(Ok(o)) => o
-            .strip_prefix("https://")
-            .is_some_and(|h| fleet_host(domain, h)),
+        Some(Ok(o)) => {
+            o.strip_prefix("https://")
+                .is_some_and(|h| fleet_host(domain, h))
+                && !page_below(domain, o, &asked_host(headers))
+        }
         Some(Err(_)) => false,
     }
 }
@@ -3331,11 +3367,16 @@ pub async fn start(
         m: cfg.members.clone(),
         demo: cfg.demo_library.as_ref().map(|(id, _)| id.clone()),
     });
+    // with sign-in at the id Worker, a cookie for each name alone: one sent
+    // to every name of the domain would reach every box's
+    let cookies = match (&cfg.id_origin, std::env::var("VERIFY_ID_STAGE").as_deref()) {
+        (None, _) => session::Cookies::Domain,
+        (Some(_), Ok("try")) => session::Cookies::Trying,
+        (Some(_), _) => session::Cookies::Host,
+    };
     let app = Arc::new(App {
         directory: directory.clone(),
-        // with sign-in at the id Worker, a cookie for each name alone: one
-        // sent to every name of the domain would reach every box's
-        sessions: session::Sessions::open(&state_dir, &domain, cfg.id_origin.is_some())?,
+        sessions: session::Sessions::open(&state_dir, &domain, cookies)?,
         signins: signins::SignIns::open(Some(state_dir.join("signins.json"))),
         state_dir: state_dir.clone(),
         adding: Default::default(),
@@ -3540,8 +3581,11 @@ pub async fn start(
             .route("/_dd/sso/start", get(sso::start))
             .route("/_dd/sso/creds", get(sso::creds))
             .route("/_dd/sso", post(sso::finish))
+            .route("/_dd/sso/names", get(sso::names))
+            .route("/_dd/sso/out", post(sso::out))
             .route("/_dd/back", get(back))
             .route("/_dd/logout", post(logout))
+            .layer(axum::middleware::from_fn_with_state(app.clone(), no_session_for_a_page_below))
             .with_state(app)
             .merge(home::dir_router(house))
             .merge(leaving::router(leave.clone()))
@@ -3568,8 +3612,11 @@ pub async fn start(
             "/_dd/login",
             get(
                 |State(a): State<Arc<App>>, Query(q): Query<HashMap<String, String>>| async move {
-                    // sign-in is the id Worker's: there and back, with a challenge
-                    if a.id_origin.is_some() {
+                    // sign-in is the id Worker's: there and back, with a
+                    // challenge. ?here is this box's own page, for a house
+                    // cut off from the Worker: what it signs in is this box
+                    // alone, on a page only this box's pages' origins pass
+                    if a.sessions.cookies() == session::Cookies::Host && !q.contains_key("here") {
                         let rd = q.get("rd").map(String::as_str).unwrap_or("/");
                         return Redirect::to(&format!(
                             "/_dd/sso/start?rd={}",
@@ -3584,6 +3631,8 @@ pub async fn start(
         .route("/_dd/sso/start", get(sso::start))
         .route("/_dd/sso/creds", get(sso::creds))
         .route("/_dd/sso", post(sso::finish))
+        .route("/_dd/sso/names", get(sso::names))
+        .route("/_dd/sso/out", post(sso::out))
         .route("/_dd/login/start", post(login_start))
         .route("/_dd/login/finish", post(login_finish))
         .route(
@@ -3855,6 +3904,10 @@ pub async fn start(
                 .route_layer(axum::middleware::from_fn(this_box_only)),
         )
         .layer(axum::middleware::from_fn_with_state(app.clone(), demo_door))
+        .layer(axum::middleware::from_fn_with_state(
+            app.clone(),
+            no_session_for_a_page_below,
+        ))
         .with_state(app)
         .merge(leaving::router(leave))
         .merge(directory::router(directory));
@@ -3868,6 +3921,25 @@ pub async fn start(
         .map_err(Into::into)
     });
     Ok((addr, task))
+}
+
+#[cfg(test)]
+mod page_below_tests {
+    #[test]
+    fn a_page_below_the_fleets_names_is_not_ours() {
+        let below = |o, asked| super::page_below("c.org", o, asked);
+        assert!(below("https://x.j0123456789.c.org", "home.c.org"));
+        assert!(below("https://metrics.node2.c.org", "home.c.org"));
+        // its own name, and the fleet's first level, as before
+        assert!(!below("https://metrics.node2.c.org", "metrics.node2.c.org"));
+        assert!(!below("https://files.c.org", "home.c.org"));
+        assert!(!below("https://id.c.org", "home.c.org"));
+        assert!(!below("https://c.org", "home.c.org"));
+        // anywhere else is not same-site: the browser sends no cookie, and
+        // the app's own origins go on as they did
+        assert!(!below("https://evil.example", "home.c.org"));
+        assert!(!below("commonty://localhost", "home.c.org"));
+    }
 }
 
 #[cfg(test)]
@@ -4440,7 +4512,7 @@ mod tests {
         })
         .await
         .unwrap();
-        let sessions = session::Sessions::open(&d, DOMAIN, false).unwrap();
+        let sessions = session::Sessions::open(&d, DOMAIN, session::Cookies::Domain).unwrap();
         (format!("http://{addr}"), sessions)
     }
 
