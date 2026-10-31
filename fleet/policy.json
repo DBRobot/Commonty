@@ -11,7 +11,8 @@
   "people": {
     "david": {
       "ssh": [
-        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKOR0kI8YSFB9JwqTJJMB+h4EJCSscpdnnGGGaBNRqXj david-bascom@david-bascom-Legion-Pro-5-16ADR10"
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKOR0kI8YSFB9JwqTJJMB+h4EJCSscpdnnGGGaBNRqXj david-bascom@david-bascom-Legion-Pro-5-16ADR10",
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIECVycMtOw4tyLOD+qNVage+0INr8csoGhMn8hpICr4f david@claude-computer"
       ],
       "paperKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIL/mxoTUtKHXC9Agc7bupMcFzsalpVweep3E76AhudEC david-paper-key"
     }
