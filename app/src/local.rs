@@ -1354,11 +1354,12 @@ fn tag(carried: &str) -> Option<String> {
     ))
 }
 
-/// If-None-Match against the one tag: a list, a weak form, or any
+/// If-None-Match against the one tag, exactly (in a list, or weak); never
+/// `*`: the tag checks the browser's copy, not only saves a download
 fn matches(seen: &str, tag: &str) -> bool {
     seen.split(',')
         .map(|t| t.trim().trim_start_matches("W/"))
-        .any(|t| t == tag || t == "*")
+        .any(|t| t == tag)
 }
 
 /// A file of the client's, never outside its root: no `..`, no hidden names.
@@ -1679,7 +1680,7 @@ mod tests {
         assert_eq!(tag("_clients/photos/gallery"), None);
         assert!(matches(&t, &t));
         assert!(matches(&format!("\"x\", W/{t}"), &t));
-        assert!(matches("*", &t));
+        assert!(!matches("*", &t));
         assert!(!matches("\"x\"", &t));
         assert!(!matches("", &t));
     }
