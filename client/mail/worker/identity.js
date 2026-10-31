@@ -27,8 +27,9 @@ export async function agreedMember(env, name) {
   if (r.status === 404) return null;
   if (!r.ok) throw new Error(`the agreed identity did not answer: ${r.status}`);
   const v = await r.json();
-  // one member, or the whole state with them in it
-  const m = v && v.members ? v.members[name] : v;
+  // ?name= answers {height, time, changed, name, member} (state/ident
+  // serve.go); the whole state has them under members
+  const m = v && (v.member ?? (v.members ? v.members[name] : null));
   return m && typeof m === 'object' && !Array.isArray(m) ? m : null;
 }
 

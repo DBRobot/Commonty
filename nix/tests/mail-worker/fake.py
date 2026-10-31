@@ -100,23 +100,30 @@ class H(BaseHTTPRequestHandler):
                 self.send(state["entry"]) if p == "/dir/tester" else self.send({}, 404)
             )
         # the control relay's /identity, one name at a time: tester as the
-        # test has set it, nobody else
+        # test has set it, nobody else, in the shape state/ident/serve.go
+        # answers a name with
         if p == "/identity":
             q = dict(x.split("=", 1) for x in self.path.split("?", 1)[1].split("&"))
             if q.get("name") != "tester":
-                return self.send({}, 404)
+                return self.send({"error": "no such name"}, 404)
             i = state["identity"]
             return self.send(
                 {
-                    "id": "ea292baabb9406356e3e0af160bf0705bd376b2bd98529cae0c4f20f0cb9a179",
-                    "ids": [
-                        "ea292baabb9406356e3e0af160bf0705bd376b2bd98529cae0c4f20f0cb9a179"
-                    ],
-                    "root": i["entry"]["entry"]["root"],
-                    "kind": "ed25519",
-                    "status": i["status"],
-                    "left": i["left"],
-                    "item": {"entry": i["entry"]},
+                    "height": 100,
+                    "time": 1792270000000,
+                    "changed": 90,
+                    "name": "tester",
+                    "member": {
+                        "id": "ea292baabb9406356e3e0af160bf0705bd376b2bd98529cae0c4f20f0cb9a179",
+                        "ids": [
+                            "ea292baabb9406356e3e0af160bf0705bd376b2bd98529cae0c4f20f0cb9a179"
+                        ],
+                        "root": i["entry"]["entry"]["root"],
+                        "kind": "ed25519",
+                        "status": i["status"],
+                        "left": i["left"],
+                        "item": {"entry": i["entry"]},
+                    },
                 }
             )
         if p == "/client/v4/zones":

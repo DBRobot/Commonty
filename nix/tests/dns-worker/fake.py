@@ -91,15 +91,22 @@ class H(BaseHTTPRequestHandler):
         if u.path == "/identity":
             name = parse_qs(u.query).get("name", [""])[0]
             if not TESTER or name != "tester":
-                return self.reply(404, {})
+                return self.reply(404, {"error": "no such name"})
             e = TESTER["v3"]
+            # as state/ident/serve.go answers a name
             return self.reply(
                 200,
                 {
-                    "root": e["entry"]["root"],
-                    "kind": "ed25519",
-                    "status": identity["status"],
-                    "item": {"entry": e},
+                    "height": 100,
+                    "time": 1792270000000,
+                    "changed": 90,
+                    "name": "tester",
+                    "member": {
+                        "root": e["entry"]["root"],
+                        "kind": "ed25519",
+                        "status": identity["status"],
+                        "item": {"entry": e},
+                    },
                 },
             )
         if u.path == TUNNELS:
