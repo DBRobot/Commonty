@@ -69,6 +69,9 @@ in
     {
       dd.box.bulkPool = (box.pools or { }).bulk or "tank";
       dd.box.owner = box.owner or null;
+      dd.box.houseId = lib.mkIf ((house.ssid or "") != "") (
+        "w" + lib.substring 0 16 (builtins.hashString "sha256" house.ssid)
+      );
       dd.box.threads = hw.cpu.threads;
       dd.box.memoryBytes = hw.memoryBytes;
       # a line its owner has not said is flat counts as metered

@@ -142,13 +142,19 @@ let
   joined =
     { dir, name }:
     let
-      tier = s: builtins.elem s (inputs.joined.services ++ inputs.joined.named ++ inputs.joined.own);
+      # what its tier gives it; the fleet owner's own box, by the file its
+      # dd-control writes from the agreed state, what its capability says.
+      # The plan only ever narrows this (place.Decide)
+      tier =
+        s:
+        builtins.elem s (inputs.joined.services ++ inputs.joined.named ++ inputs.joined.own)
+        || cap.owner == policy.owner;
       cap =
         (import ./capability.nix {
           inherit lib needs policy;
           boxes.${name} = {
             hw = lib.importJSON (dir + "/hardware.json");
-            own = lib.importJSON (dir + "/box.json");
+            own = import ./joined-own.nix { inherit lib; } dir;
             site = "joined";
             region = "joined";
           };

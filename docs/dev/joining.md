@@ -301,6 +301,16 @@ replaying the directory serves its replay, which knows invites only).
   the fleet's owner enlisted is theirs like a box of the release, leases
   aside. A stranger runs nothing. A ban, leaving or an unenlist takes it all
   out of the next plan.
+- **What it is built with**: its dd-control writes whose it is, as the agreed
+  state says, to `/var/lib/dd/box/enlisted.json`, and its agent's next run
+  builds from that (`nix/lib/joined-own.nix`, never box.json's own word), so a
+  gain arrives within a run or two. The file decides only what is built: the
+  plan reads the agreed state, so a box lying in it builds more and is given
+  no more, and a loss needs no rebuild to take effect. It gives nobody a login
+  (`dd.box.owner` stays empty on a joined box).
+- **Which house**: boxes of one owner set up on one Wi-Fi say one house (a
+  hash of its name, in the agreed state); a box set up by cable names none and
+  is a house of its own.
 
 ## Hardware
 

@@ -160,8 +160,20 @@ let
           };
         }).cannot.computers;
   };
+  # a joined box's owner comes from what its dd-control read of the agreed
+  # state, not from what its box.json says
+  joinedOwn = import ../lib/joined-own.nix { inherit lib; };
+  never = joinedOwn ./placement-fleet/joined-never;
+  enlisted = joinedOwn ./placement-fleet/joined-enlisted;
+  built = {
+    "box.json's own word is no owner" = never.owner == null;
+    "enlisted.json says whose it is" = enlisted.owner == "ann";
+    "and it serves its owner's household" = enlisted.house.household == [ "ann" ];
+    "the rest of box.json stands" = enlisted.house.ssid == "w";
+  };
   failed =
-    lib.concatLists (lib.zipListsWith (ok: n: lib.optional (!ok) n) expect names)
+    builtins.attrNames (lib.filterAttrs (_: ok: !ok) built)
+    ++ lib.concatLists (lib.zipListsWith (ok: n: lib.optional (!ok) n) expect names)
     ++ builtins.attrNames (lib.filterAttrs (_: ok: !ok) ownership);
 in
 assert builtins.length expect == builtins.length names;

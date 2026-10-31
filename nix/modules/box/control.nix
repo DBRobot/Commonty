@@ -100,7 +100,7 @@ in
           "-builds /run/dd-control/built.sock"
           # a box the release does not list joins on its own key: the one
           # its TPM holds, and its secrets key's recipient (dd-join-prepare)
-          (lib.optionalString config.dd.box.joined "-join-key /var/lib/dd/box-key.spki -join-recipient-file /var/lib/dd/secrets-recipient -join-house joined -join-ticket-file /var/lib/dd/join-ticket")
+          (lib.optionalString config.dd.box.joined "-join-key /var/lib/dd/box-key.spki -join-recipient-file /var/lib/dd/secrets-recipient -join-house ${config.dd.box.houseId} -join-ticket-file /var/lib/dd/join-ticket -enlisted-file /var/lib/dd/box/enlisted.json")
           # dd-agent begins a release's rollout and gives its verdicts here
           "-rollouts /run/dd-control/rollout.sock"
           # a validator's height and self-heals, for node_exporter and the
@@ -126,7 +126,9 @@ in
           "-/run/dd-tpm"
           # -metrics, where node_exporter reads (observe/metrics.nix)
           "-/var/lib/dd-facts"
-        ];
+        ]
+        # whose it is, for its next build (nix/lib/joined-own.nix)
+        ++ lib.optional config.dd.box.joined "/var/lib/dd/box";
         ProtectHome = true;
         PrivateTmp = true;
         NoNewPrivileges = true;
