@@ -239,7 +239,7 @@ in
         limit_req_zone $binary_remote_addr zone=dd_ceremony:1m rate=1r/s;
         # the directory asked with no credential at all: counted by address,
         # as a ceremony is (trying names); with one, not counted here
-        map "$cookie_dd_session$http_authorization$http_x_dd_key_proof" $dd_anonymous {
+        map "$cookie_dd_session$dd_cookie_host$http_authorization$http_x_dd_key_proof" $dd_anonymous {
           "" $binary_remote_addr;
           default "";
         }

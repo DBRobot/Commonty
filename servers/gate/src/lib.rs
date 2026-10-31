@@ -564,10 +564,7 @@ impl App {
                 let this = headers
                     .get("cookie")
                     .and_then(|v| v.to_str().ok())
-                    .and_then(|c| {
-                        c.split(';')
-                            .find_map(|p| p.trim().strip_prefix(&format!("{}=", session::COOKIE)))
-                    })
+                    .and_then(|c| self.sessions.raw(c))
                     .unwrap_or_default();
                 let hour = session::now() / 3600;
                 let mut m = self.demo_rate.lock().unwrap();

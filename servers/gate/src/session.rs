@@ -113,6 +113,17 @@ impl Sessions {
         }
     }
 
+    /// The value of the cookie this box's sessions go by, as the browser sent
+    /// it: checked by `session`, which is what says whose it is.
+    pub fn raw<'a>(&self, header: &'a str) -> Option<&'a str> {
+        let name = if self.host_only { HOST_COOKIE } else { COOKIE };
+        header
+            .split(';')
+            .map(str::trim)
+            .find_map(|c| c.strip_prefix(name)?.strip_prefix('='))
+            .filter(|v| !v.is_empty())
+    }
+
     /// The user a Cookie header names, if the session is ours and unexpired.
     /// The user, the session's own id ("" for one from before ids) and when
     /// it runs out - of a cookie this box made and that has not.
@@ -121,19 +132,7 @@ impl Sessions {
     /// box someone else runs - can set one of those in a browser, its owner's
     /// own session included, and sign the browser in as them.
     pub fn session(&self, cookie_header: Option<&str>) -> Option<(String, String, u64)> {
-        let header = cookie_header?;
-        let named = |name: &str| {
-            header
-                .split(';')
-                .map(str::trim)
-                .find_map(|c| c.strip_prefix(&format!("{name}=")))
-                .filter(|v| !v.is_empty())
-        };
-        let raw = if self.host_only {
-            named(HOST_COOKIE)
-        } else {
-            named(COOKIE)
-        }?;
+        let raw = self.raw(cookie_header?)?;
         let mut parts = raw.rsplitn(3, '.');
         let mac = parts.next()?;
         let exp: u64 = parts.next()?.parse().ok()?;
@@ -256,6 +255,10 @@ mod tests {
         };
         let set = s.issue_as("tom", "sid-sid-sid-sid-1", now() + 60);
         assert!(set.starts_with("__Host-dd="), "{set}");
+        assert_eq!(
+            s.raw(&format!("a=1; {}", value(&set))),
+            value(&set).strip_prefix("__Host-dd=")
+        );
         assert!(!set.contains("Domain="), "for this name alone: {set}");
         let (user, id, _) = s.session(Some(&value(&set))).unwrap();
         assert_eq!((user.as_str(), id.as_str()), ("tom", "sid-sid-sid-sid-1"));

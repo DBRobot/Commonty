@@ -1,5 +1,5 @@
-# Our session cookie reaches the gate and no one else (verify.nix has the
-# map that takes it out). Every nginx location that proxies anywhere but the
+# Our session cookie, under either name, reaches the gate and no one else
+# (verify.nix has the maps that take it out). Every nginx location that proxies anywhere but the
 # gate forwards the request without it - Forgejo, Headscale, Thanos, Garage,
 # Photos, whatever a module adds next - so a backend that is compromised
 # never holds a member's live session.

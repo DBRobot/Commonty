@@ -323,9 +323,32 @@ def check_cookies(s, fail):
                 fail(
                     f"{d}{path}{' as ' + who if who else ''}{' outside' if outside else ''}: sets {[c.split('=')[0] for c in r.all('set-cookie')]}"
                 )
+    # both of a session's names, anywhere in the header, stay at the gate and
+    # the rest of the header goes on
+    mark = len(s.seen)
+    jar = f"a=1; __Host-dd=x~y.1.z; {s.cookie('mia')}; b=2"
+    s.get("git", "/api/v1/version", who="mia", headers={"cookie": jar})
+    rows = s.seen.since(mark)
+    if not rows:
+        fail("the jar with both session names reached no service")
+    for row in rows:
+        c = row[4].get("cookie", "")
+        if "a=1" not in c or "b=2" not in c:
+            fail(f"{row[0]} lost a service's own cookies: {c!r}")
+    # a session under its __Host- name counts as a credential at the flood
+    # limits, not as a stranger at the directory's one a second
+    limited = [
+        s.get(
+            "home", "/_dd/directory/nobody", headers={"cookie": "__Host-dd=x~y.1.z"}
+        ).status
+        for _ in range(30)
+    ]
+    if 429 in limited or 503 in limited:
+        fail(f"a __Host-dd browser was limited as a stranger: {limited}")
     # and a session never reaches a service behind the gate (strip-cookie.nix)
     for row in s.seen.since(0):
-        if "dd_session=" in row[4].get("cookie", ""):
+        c = row[4].get("cookie", "")
+        if "dd_session=" in c or "__Host-dd=" in c:
             fail(f"the session cookie reached {row[0]} for {row[2]}{row[3]}")
 
 

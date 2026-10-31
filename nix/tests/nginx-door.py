@@ -167,7 +167,7 @@ def ask(method, path, host=door, headers=(), body=None, outsider=True):
 
 # what a stranger's browser or git might send, hoping to be someone
 SNEAKY = [
-    "Cookie: dd_session=david~x.1.y; i_like_gitea=abc",
+    "Cookie: dd_session=david~x.1.y; __Host-dd=david~x.1.y; i_like_gitea=abc",
     "Authorization: token 0123456789abcdef",
     "X-WEBAUTH-USER: david",
     "Sudo: david",
