@@ -444,3 +444,63 @@ func TestTheFactsKeptForAccessAreTheOnesItReads(t *testing.T) {
 		t.Fatal("an item that kept no boxes knows some")
 	}
 }
+
+func TestEndedIsOnlyWhatASignedWordEnded(t *testing.T) {
+	f := newFleet(t)
+	ann := f.person("ann", 1)
+	bea := f.person("bea", 10)
+	cat := f.person("cat", 20)
+	dan := f.person("dan", 30)
+	view := func() *View {
+		return f.s.View(f.cfg, 1, int64(f.at)*1000, func(n string) (BoxInfo, bool) { i, ok := f.boxes[n]; return i, ok })
+	}
+	a, b, c, d := f.box(ann, 1, computeBox), f.box(bea, 2, computeBox), f.box(cat, 3, computeBox), f.box(dan, 4, computeBox)
+	if e := view().Ended; len(e) != 0 {
+		t.Fatalf("enlisted, and ended: %+v", e)
+	}
+
+	// their own word, and only for that box
+	f.unenlist(ann, a)
+	at := int64(f.at) * 1000
+	if e := view().Ended[a]; e == nil || e.Member != "ann" || e.Why != "unenlisted" || e.At > at || e.At == 0 {
+		t.Fatalf("%+v", e)
+	}
+	if len(view().Ended) != 1 {
+		t.Fatalf("%+v", view().Ended)
+	}
+
+	// their leaving, and their coming back takes it away
+	f.must("leaves", f.put(seal(t, "leave", jsonBody(t, Leave{Name: "bea", Root: pub(bea.root), At: f.at}), bea.root, nil)), true)
+	if e := view().Ended[b]; e == nil || e.Member != "bea" || e.Why != "left" {
+		t.Fatalf("%+v", e)
+	}
+	f.at++
+	f.must("back", f.put(seal(t, "leave", jsonBody(t, Leave{Name: "bea", Root: pub(bea.root), At: f.at, Back: true}), bea.root, nil)), true)
+	if e := view().Ended[b]; e != nil {
+		t.Fatalf("back, and ended: %+v", e)
+	}
+
+	// a suspension in its window ends nothing; past it, it does
+	id := MemberID(pub(cat.root))
+	f.cfg.Members.Revoked = []string{id}
+	f.cfg.Members.Suspended = map[string]string{id: "terms"}
+	f.cfg.Members.Removed = map[string]uint64{id: f.at}
+	if e := view().Ended[c]; e != nil {
+		t.Fatalf("suspended, and ended: %+v", e)
+	}
+	f.at += SuspendWindow + 1
+	if e := view().Ended[c]; e == nil || e.Why != "removed" {
+		t.Fatalf("%+v", e)
+	}
+
+	// off the list with no date: no word to delete by
+	f.cfg.Members.Revoked = append(f.cfg.Members.Revoked, MemberID(pub(dan.root)))
+	if e := view().Ended[d]; e != nil {
+		t.Fatalf("undated, and ended: %+v", e)
+	}
+	// gone from what a box has heard, access lost: still nothing
+	delete(f.boxes, d)
+	if e := view().Ended[d]; e != nil {
+		t.Fatalf("unheard, and ended: %+v", e)
+	}
+}

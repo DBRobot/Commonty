@@ -1085,13 +1085,18 @@ func main() {
 			if rc != nil {
 				i.Computers = rc.Computers(len(s.Directory), logItem(s), s.Height, s.Time, s.IdentBoxes())
 			}
-			return place.Decide(i, s, cfg.Rules.GoneAfter, boxOwners(ids, s))
+			v := identView(ids, s)
+			if v != nil {
+				i.Ended = v.Ended
+			}
+			return place.Decide(i, s, cfg.Rules.GoneAfter, place.Owners(v))
 		}
 		joinedHolder = func(s *state.State, id string) (string, string) {
 			return planHolder(s, decide(s), boxOwners(ids, s), id)
 		}
 		placed.limits = cfg.Computers
 		placed.noLeases = *joinKey != ""
+		placed.seen = filepath.Join(*dir, "owners-seen")
 		placed.agreed = func(s *state.State) (map[string]*computers.Listed, error) {
 			if rc == nil {
 				return nil, errors.New("the release has no rules for computers")
@@ -1125,9 +1130,13 @@ func main() {
 					if time.Now().UnixMilli()-s.Time > freshFor.Milliseconds() {
 						continue
 					}
-					placed.reconcile(decide(s), s)
+					plan := decide(s)
+					placed.reconcile(plan, s)
 					if *enlistedFile != "" {
-						writeEnlisted(*enlistedFile, boxOwners(ids, s)[*box])
+						owner := place.Owners(identView(ids, s))[*box]
+						writeEnlisted(*enlistedFile, owner)
+						placed.sawOwner(owner)
+						placed.forget(plan, s, owner)
 					}
 				}
 			}()
@@ -1253,15 +1262,15 @@ dd_control_dropped_total %d
 	}
 }
 
-// boxOwners: whose each joined box is, from the agreed identity state at s
-func boxOwners(ids *ident.Server, s *state.State) map[string]string {
+// identView: the agreed identity state at s, as readers get it
+func identView(ids *ident.Server, s *state.State) *ident.View {
 	if ids == nil {
 		return nil
 	}
-	return place.Owners(ids.View(len(s.Directory), func(i int) ident.Item {
+	return ids.View(len(s.Directory), func(i int) ident.Item {
 		d := s.Directory[i]
 		return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item, Boxes: d.Boxes}
-	}, s.Height, s.Time, s.IdentBoxes()))
+	}, s.Height, s.Time, s.IdentBoxes())
 }
 
 // boxSigner signs as this box: with its TPM, or a test's key file

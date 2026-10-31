@@ -93,6 +93,10 @@ type placer struct {
 	// a computer it is given runs by the plan alone, on its owner's box and
 	// its disk there, for as long as fresh plans keep giving it (ownComputer)
 	noLeases bool
+	// who this box has known as its owner (sawOwner), a file for each; and
+	// when (uptime) it last began removing a former one's things
+	seen   string
+	forgot map[string]int64
 	// the computers agreed now (computer-<id>), from the same state as the
 	// plan; nil, or an error, and none runs here
 	agreed func(s *state.State) (map[string]*computers.Listed, error)

@@ -18,6 +18,7 @@ import (
 
 	"commonty/control/state"
 	"commonty/control/state/computers"
+	"commonty/control/state/ident"
 )
 
 // Inputs is what the release says (flake: placement-inputs).
@@ -30,6 +31,9 @@ type Inputs struct {
 	// members' remote computers as agreed (state/computers, /computers):
 	// not the release's, so dd-control sets them each round
 	Computers []*computers.Listed `json:"-"`
+	// box -> the enlistment over for good there, by the agreed identity
+	// state (ident.View's Ended): dd-control sets it each round too
+	Ended map[string]*ident.Ended `json:"-"`
 	// what a box that joined on its own key may be given (JoinedRules);
 	// absent, nothing but copies
 	Joined *JoinedRules `json:"joined,omitempty"`
@@ -140,6 +144,9 @@ type Plan struct {
 	Copies map[string][]string `json:"copies"`
 	// box -> what stays there (moves on-failure) though it no longer fits
 	DoesNotFit map[string][]string `json:"doesNotFit"`
+	// box -> whose plaintext it removes (forgets): only a joined box, whose
+	// enlistment ended for good by a signed word, long enough ago
+	Forget map[string]ident.Ended `json:"forget,omitempty"`
 }
 
 type Decision struct {
@@ -902,6 +909,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64, owners map[string]string
 		can: can, room: room, fit: fit, place: place, adds: adds, draining: draining, planned: planned,
 	})
 	placeComputers(in, s, &p, live, now, draining, in.Damping.PerGiB, owners)
+	p.Forget = forgets(in, s, live, owners)
 
 	// the copies, once the services are placed: a bucket stays in the
 	// stores that keep it, and goes to more only where it fits
