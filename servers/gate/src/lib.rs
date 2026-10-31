@@ -3709,6 +3709,7 @@ pub async fn start(
         )
         // a box's own: signed by its TPM, answered sealed to it
         .route("/_dd/network/box", post(network::box_join))
+        .route("/_dd/network/games", post(network::games_access))
         .route("/_dd/network/controller", post(network::controller_join))
         .route("/_dd/network/computer", post(network::computer_join))
         // a home controller's own requests, signed by its key (controller.rs)

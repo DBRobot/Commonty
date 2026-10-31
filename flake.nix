@@ -1475,9 +1475,11 @@
           has = s: name: builtins.elem s (fp.built.${name} or [ ]);
           # what a member's device may reach for games, on any box: each
           # box built with them, its own list (dd.games.reach: its range and
-          # every port a game insists on)
+          # every port a game insists on), and what a box the release does
+          # not list is built with, with none of them built here
           fleetGamePorts = lib.unique (
             lib.concatMap (n: self.nixosConfigurations.${n}.config.dd.games.reach) (fp.builtWith "dd-games")
+            ++ (import ./nix/lib/games-reach.nix { inherit lib; }).reach
           );
           # and for members' computers: the pool of each box built with
           # them (dd.computers.reach)

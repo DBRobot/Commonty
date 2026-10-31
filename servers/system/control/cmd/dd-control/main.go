@@ -172,6 +172,13 @@ func joinMessage(box string, now int64) []byte {
 	return []byte(fmt.Sprintf("commonty box join v1\x00%s\x00%d", box, now))
 }
 
+// what a joined box signs to ask who may play on its game servers (the
+// gate's network.rs, games_access_message)
+func gamesAccessMessage(box string, now int64, servers []byte) []byte {
+	sum := sha256.Sum256(servers)
+	return []byte(fmt.Sprintf("commonty games access v1\x00%s\x00%d\x00%x", box, now, sum))
+}
+
 // what a box signs to ask for a network key for the remote computer it
 // runs (the gate's network.rs, computer_join_message)
 func computerJoinMessage(box, id string, now int64) []byte {
@@ -551,6 +558,7 @@ func main() {
 	report := flag.String("sign-report", "", "sign the box's report in this directory (hardware.json, hardware-configuration.nix) as -box, into report.sig, and exit")
 	join := flag.Bool("sign-join", false, "print a request for a join key to the fleet's network, signed as -box now, and exit")
 	computerJoin := flag.String("sign-computer-join", "", "print a request for a network key for the remote computer with this id, which this box runs, signed as -box now, and exit")
+	gamesAccess := flag.String("sign-games-access", "", "print a request for who may play on the game servers in this JSON file, signed as -box now, and exit")
 	metrics := flag.String("metrics", "", "a validator writes its progress and self-heals here, as metrics (node_exporter's textfile); empty: nowhere")
 	testWedge := flag.String("test-wedge", "", "tests only: while this file exists, delivering a decision hangs, as a wedged consensus does")
 	testDeaf := flag.String("test-deaf", "", "tests only: while this file exists, consensus frames from the relay are dropped")
@@ -584,6 +592,21 @@ func main() {
 		}
 		fmt.Fprintln(os.Stderr, "check-sign:", err)
 		os.Exit(1)
+	}
+
+	if *gamesAccess != "" {
+		servers, err := os.ReadFile(*gamesAccess)
+		if err != nil {
+			log.Fatal(err)
+		}
+		now := time.Now().Unix()
+		sign := boxSigner(*tpmKeys, *softKey, "")
+		sig, err := sign(gamesAccessMessage(*box, now, servers))
+		if err != nil {
+			log.Fatal(err)
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"box": *box, "time": now, "servers": string(servers), "sig": sig})
+		return
 	}
 
 	if *computerJoin != "" {

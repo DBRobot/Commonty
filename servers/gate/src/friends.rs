@@ -539,7 +539,7 @@ pub(crate) async fn accept(
 
 #[derive(serde::Deserialize)]
 pub(crate) struct Server {
-    owner: String,
+    pub(crate) owner: String,
     #[serde(default)]
     players: Vec<String>,
 }
@@ -552,6 +552,11 @@ pub(crate) async fn game_access(
     State(app): State<Arc<App>>,
     Json(servers): Json<Vec<Server>>,
 ) -> Response {
+    Json(access(&app, servers).await).into_response()
+}
+
+/// for each server, who may play on it now and their devices' addresses
+pub(crate) async fn access(app: &App, servers: Vec<Server>) -> Vec<serde_json::Value> {
     let mut allowed = Vec::new();
     for s in servers {
         let mut who = Vec::new();
@@ -579,15 +584,14 @@ pub(crate) async fn game_access(
         }
         _ => Default::default(),
     };
-    let out: Vec<_> = allowed
+    allowed
         .into_iter()
         .map(|who| {
             let addresses: Vec<&String> =
                 who.iter().filter_map(|u| owned.get(u)).flatten().collect();
             serde_json::json!({ "players": who, "addresses": addresses })
         })
-        .collect();
-    Json(out).into_response()
+        .collect()
 }
 
 /// GET /internal/games/friends/{user}: who they may invite

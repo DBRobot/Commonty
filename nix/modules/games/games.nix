@@ -34,7 +34,7 @@ let
   guest = guestPkgs.nixos ./game-guest.nix;
   # the repo's catalogue, not cfg.catalogue: a test's is a derivation, and
   # reading one here would be import from derivation
-  repoGames = (lib.importJSON ../../../data/games/catalogue.json).games;
+  reachDefaults = import ../../lib/games-reach.nix { inherit lib; };
   vm = guest.config.system.build.vm;
 
   # One instance, by id: read its record, give the guest its memory, cores
@@ -127,14 +127,20 @@ in
       default = lib.max 4096 (config.dd.box.memoryBytes / (1024 * 1024) / 3);
       description = "memory every running guest and its qemu on this box may have together: a third of the box's, unless its box.json says gamesMemoryMiB (modules/box/host.nix)";
     };
+    door = lib.mkOption {
+      type = lib.types.str;
+      default = lib.optionalString (config.dd.box.joined or false
+      ) "https://home.${base}/_dd/network/games";
+      description = "where a box with no network door of its own asks who may play on its servers (the gate's network.rs); empty: its own gate";
+    };
     portBase = lib.mkOption {
       type = lib.types.port;
-      default = 27000;
+      default = reachDefaults.portBase;
       description = "first of the ports handed to instances";
     };
     portCount = lib.mkOption {
       type = lib.types.ints.positive;
-      default = 200;
+      default = reachDefaults.portCount;
       description = "how many ports from portBase instances may be handed (a game's fixed ports are its own, data/games/catalogue.json)";
     };
     kvm = lib.mkOption {
@@ -152,18 +158,7 @@ in
       readOnly = true;
       # a port a game insists on, and any it opens by itself beside that
       # one (implicit_ports, at offsets from SERVER_PORT)
-      default = lib.unique (
-        lib.concatMap (
-          g:
-          let
-            fixed = g.fixed_ports or { };
-          in
-          lib.attrValues fixed
-          ++ lib.optionals (fixed ? SERVER_PORT) (
-            map (o: fixed.SERVER_PORT + o) (lib.attrValues (g.implicit_ports or { }))
-          )
-        ) repoGames
-      );
+      default = reachDefaults.fixedPorts;
       description = "every port a catalogue game insists on, whatever the pool: ports.nix reserves them, and they are in reach";
     };
     reach = lib.mkOption {
@@ -217,13 +212,22 @@ in
         pkgs.iptables
         pkgs.coreutils
         pkgs.diffutils # cmp: the chain is rebuilt only when the answer changed
-      ];
+      ]
+      # what signs an ask of the door (dd-control, its TPM)
+      ++ lib.optional (cfg.door != "") pkgs.tpm2-tools;
       serviceConfig.Type = "oneshot";
-      script = ddScript ./games-access.sh {
-        ACCESS = "/run/dd-games/access.json";
-        GATE = "http://127.0.0.1:${toString config.dd.verify.port}";
-        STATE = "/run/games-access";
-      };
+      script = ddScript ./games-access.sh (
+        {
+          ACCESS = "/run/dd-games/access.json";
+          GATE = "http://127.0.0.1:${toString config.dd.verify.port}";
+          STATE = "/run/games-access";
+        }
+        // lib.optionalAttrs (cfg.door != "") {
+          DOOR = cfg.door;
+          BOX = config.networking.hostName;
+          CONTROL_BIN = "${self.packages.${pkgs.stdenv.hostPlatform.system}.dd-control}/bin/dd-control";
+        }
+      );
     };
     systemd.timers.games-access = {
       wantedBy = [ "timers.target" ];

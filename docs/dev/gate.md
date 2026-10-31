@@ -1309,6 +1309,7 @@ path                                        method   what                       
 -- network and house
 /_dd/network/join                           POST     Headscale join key                        token; member or guest
 /_dd/network/box                            POST     a box's key, sealed to it                 a listed box's TPM signature
+/_dd/network/games                          POST     who may play on a joined box's servers    the enlisted box's TPM signature, its owner's servers
 /_dd/house                                  GET      every box in the house                    member, session or token
 /_dd/house/here                             GET      this box's link                           local; a directory box: its house
 /_dd/house/wifi                             POST     a signed Wi-Fi change                     member + passkey signature

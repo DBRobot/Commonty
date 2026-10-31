@@ -959,3 +959,12 @@ func TestAWriterGivenBackIsNotTakenBack(t *testing.T) {
 		t.Fatalf("took back what it gave away: %v", (*calls)[n:])
 	}
 }
+
+// the same bytes as the gate's network.rs games_access_message (its
+// a_games_ask_holds_only_under_its_own_key_for_what_it_signed)
+func TestGamesAccessMessage(t *testing.T) {
+	want := "commonty games access v1\x00j0123456789\x001790000000\x004f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+	if got := string(gamesAccessMessage("j0123456789", 1790000000, []byte("[]"))); got != want {
+		t.Fatalf("got %q", got)
+	}
+}

@@ -48,6 +48,8 @@ let
       # a box that joined on its own key (state/join.go): a stranger, which
       # keeps copies and nothing else
       tagOwners."tag:joined" = [ "boxes@" ];
+      # A box that joined is reached only as the agreed plan and whose it is
+      # say, and those rules are not here (headscale-plan.sh).
       # A person's devices reach a box's front door and its game servers.
       # The fleet's admin's devices reach every box for what an admin needs:
       # ssh, its dns, the cache push (at its store). A box's host - whoever has it at home -
@@ -134,6 +136,29 @@ let
   names = lib.filter (n: lib.hasSuffix ".${base}" n || n == base) (
     builtins.attrNames config.services.nginx.virtualHosts
   );
+  # what headscale reads: the rules above, and what the agreed plan adds
+  # (headscale-plan.sh). In a file, the plan's rules being no part of a release
+  policyFile = "${state}/policy.json";
+  needs = import ../../lib/needs.nix {
+    inherit lib;
+    on = config.dd.failover or false;
+  };
+  # what the plan may give a box that joined: a placed service, under no
+  # lease. The names of those not public, by service: a public name never
+  # goes to a member's box
+  givable = lib.filterAttrs (_: n: n.placed && !n.lease) needs;
+  public = lib.attrByPath [ "dd" "public" "hosts" ] [ ] config;
+  follow = builtins.listToAttrs (
+    lib.concatLists (
+      lib.mapAttrsToList (
+        svc: n:
+        map (h: {
+          name = h;
+          value = svc;
+        }) (lib.filter (h: !builtins.elem h public) n.hosts)
+      ) givable
+    )
+  );
 in
 {
   # with failover on, it follows its lease from box to box
@@ -148,6 +173,11 @@ in
       type = lib.types.str;
       default = "/var/lib/dd-verify/headscale-api.key";
       readOnly = true;
+    };
+    control = lib.mkOption {
+      type = lib.types.str;
+      default = "http://127.0.0.1:4195";
+      description = "this box's dd-control: the agreed state, the plan and whose each box is";
     };
     gamePorts = lib.mkOption {
       type = lib.types.listOf lib.types.str;
@@ -225,10 +255,53 @@ in
             };
             policy = {
               mode = "file";
-              path = "${policy}";
+              path = policyFile;
             };
             # nodes stay until removed; a laptop off for a month is still yours
             ephemeral_node_inactivity_timeout = "30m";
+          };
+        };
+
+        # the release's rules at every start; the plan's come back with the
+        # next run of headscale-plan
+        systemd.services.headscale = {
+          restartTriggers = [ policy ];
+          preStart = "install -m 0644 ${policy} ${policyFile}";
+        };
+
+        # what the agreed plan changes of the network: who reaches a box that
+        # joined, and where the app's DNS answers a name it was given. Nothing
+        # at all while it gives one none, which is every box of the release's
+        systemd.services.headscale-plan = {
+          description = "Keep the network's rules and names to the agreed plan, for the boxes that joined";
+          after = [ "headscale.service" ];
+          restartIfChanged = false;
+          path = [
+            pkgs.coreutils
+            pkgs.curl
+            pkgs.jq
+            pkgs.systemd
+            pkgs.tailscale
+          ];
+          serviceConfig.Type = "oneshot";
+          script = (import ../../lib/script.nix { inherit lib; }) ./headscale-plan.sh {
+            CONTROL = cfg.control;
+            SOCK = config.dd.net.socket;
+            STATE = state;
+            BASE = base;
+            BASE_POLICY = "${policy}";
+            POLICY = policyFile;
+            NAMES = builtins.toJSON names;
+            FOLLOW = builtins.toJSON follow;
+            GIVABLE = builtins.toJSON (builtins.attrNames givable);
+            GAME_PORTS = builtins.toJSON cfg.gamePorts;
+          };
+        };
+        systemd.timers.headscale-plan = {
+          wantedBy = [ "timers.target" ];
+          timerConfig = {
+            OnActiveSec = "1min";
+            OnUnitActiveSec = "30s";
           };
         };
 

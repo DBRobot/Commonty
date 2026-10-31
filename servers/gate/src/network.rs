@@ -391,6 +391,8 @@ pub struct Door {
     age: String,
     /// when each box last had a key, and the time it signed for it
     asked: Mutex<HashMap<String, (u64, u64)>>,
+    /// likewise for a joined box asking who may play on its servers
+    asked_games: Mutex<HashMap<String, (u64, u64)>>,
     /// each remote computer's node, by the key it joined with (its
     /// preauth key's id): whose computer, and which. What a computer's
     /// node is to the policy and the reaper comes from here, never from a
@@ -435,6 +437,8 @@ pub struct BoxKeys {
 const SKEW: u64 = 120;
 /// one key a box a minute
 const EVERY: u64 = 60;
+/// a joined box asks every 15 s who may play on its servers
+const GAMES_EVERY: u64 = 5;
 
 pub fn from_env() -> Result<Option<Door>> {
     let Ok(api) = std::env::var("VERIFY_HEADSCALE_API") else {
@@ -460,6 +464,7 @@ pub fn from_env() -> Result<Option<Door>> {
         },
         age: std::env::var("VERIFY_AGE").unwrap_or_else(|_| "age".into()),
         asked: Mutex::default(),
+        asked_games: Mutex::default(),
         bound: Mutex::new(
             bound_file
                 .as_ref()
@@ -1449,6 +1454,104 @@ pub(crate) async fn computer_join(
 }
 
 #[derive(serde::Deserialize)]
+pub(crate) struct GamesAsk {
+    #[serde(rename = "box")]
+    name: String,
+    time: u64,
+    /// the servers as JSON, as signed
+    servers: String,
+    sig: String,
+}
+
+/// what a box signs to ask who may play on its servers (dd-control,
+/// gamesAccessMessage)
+fn games_access_message(name: &str, time: u64, servers: &str) -> Vec<u8> {
+    use sha2::Digest;
+    let digest = sha2::Sha256::digest(servers.as_bytes());
+    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    format!("commonty games access v1\0{name}\0{time}\0{hex}").into_bytes()
+}
+
+/// a joined box's ask for its game servers, by the agreed state and nothing
+/// it says: the key it joined with, and whose it is. Its servers are its
+/// owner's: for anyone else's, nobody
+fn games_ask_ok(
+    ask: &GamesAsk,
+    keys: &BoxKeys,
+    now: u64,
+) -> Result<(), (StatusCode, &'static str)> {
+    if ask.time.abs_diff(now) > SKEW {
+        return Err((StatusCode::FORBIDDEN, "the time is off"));
+    }
+    let sig = signature(&ask.sig).ok_or((StatusCode::BAD_REQUEST, "no signature"))?;
+    keys.signs
+        .verify(
+            &games_access_message(&ask.name, ask.time, &ask.servers),
+            &sig,
+        )
+        .map_err(|_| (StatusCode::FORBIDDEN, "not signed by that box"))
+}
+
+/// POST /_dd/network/games, {box, time, servers, sig}: as
+/// /internal/games/access, for a box with no network door of its own. The
+/// box asks every quarter minute while it runs a server
+pub(crate) async fn games_access(
+    State(app): State<Arc<App>>,
+    Json(ask): Json<GamesAsk>,
+) -> Response {
+    let Some(door) = app.network.as_ref() else {
+        return (StatusCode::NOT_FOUND, "this box has no network door").into_response();
+    };
+    if !joined_name(&ask.name) {
+        return (StatusCode::FORBIDDEN, "not a box that joined").into_response();
+    }
+    let (st, owned) = crate::member_boxes::current(&app).await;
+    let Some(owner) = owned
+        .iter()
+        .find(|o| o.name == ask.name)
+        .map(|o| o.user.clone())
+    else {
+        return (StatusCode::FORBIDDEN, "no member has this box").into_response();
+    };
+    let Some(keys) = st["joined"]
+        .get(&ask.name)
+        .and_then(|j| box_keys(&ask.name, j).ok())
+    else {
+        return (StatusCode::FORBIDDEN, "not a box of this fleet").into_response();
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if let Err((code, why)) = games_ask_ok(&ask, &keys, now) {
+        return (code, why).into_response();
+    }
+    {
+        // each signed time once, and not faster than the box's own beat
+        let mut asked = door.asked_games.lock().unwrap();
+        if let Some(&(at, signed)) = asked.get(&ask.name)
+            && (now < at + GAMES_EVERY || ask.time <= signed)
+        {
+            return (StatusCode::TOO_MANY_REQUESTS, "too soon").into_response();
+        }
+        asked.insert(ask.name.clone(), (now, ask.time));
+    }
+    let Ok(servers) = serde_json::from_str::<Vec<crate::friends::Server>>(&ask.servers) else {
+        return (StatusCode::BAD_REQUEST, "not servers").into_response();
+    };
+    let servers = servers
+        .into_iter()
+        .map(|mut s| {
+            if s.owner != owner {
+                s.owner = String::new();
+            }
+            s
+        })
+        .collect();
+    Json(crate::friends::access(&app, servers).await).into_response()
+}
+
+#[derive(serde::Deserialize)]
 pub(crate) struct BoxAsk {
     #[serde(rename = "box")]
     name: String,
@@ -1500,6 +1603,46 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
+    /// A joined box's ask for its game servers holds only under the key it
+    /// joined with, for those servers, near now. The same bytes as
+    /// dd-control's gamesAccessMessage (its TestGamesAccessMessage).
+    #[test]
+    fn a_games_ask_holds_only_under_its_own_key_for_what_it_signed() {
+        use base64::Engine;
+        use p256::ecdsa::{Signature, SigningKey, signature::Signer};
+        assert_eq!(
+            games_access_message("j0123456789", 1_790_000_000, "[]"),
+            b"commonty games access v1\0j0123456789\x001790000000\x004f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945".to_vec()
+        );
+        let own = SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+        let other = SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+        let keys = BoxKeys {
+            signs: *own.verifying_key(),
+            recipient: String::new(),
+        };
+        let now = 1_790_000_000;
+        let ask = |k: &SigningKey, time: u64, signed: &str, servers: &str| {
+            let s: Signature = k.sign(&games_access_message("j0123456789", time, signed));
+            GamesAsk {
+                name: "j0123456789".into(),
+                time,
+                servers: servers.into(),
+                sig: base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(s.to_bytes()),
+            }
+        };
+        assert!(games_ask_ok(&ask(&own, now, "[]", "[]"), &keys, now).is_ok());
+        for bad in [
+            ask(&other, now, "[]", "[]"),
+            ask(&own, now, "[]", r#"[{"owner":"ada"}]"#),
+            ask(&own, now - SKEW - 1, "[]", "[]"),
+        ] {
+            assert_eq!(
+                games_ask_ok(&bad, &keys, now).unwrap_err().0,
+                StatusCode::FORBIDDEN
+            );
+        }
+    }
+
     /// A fake headscale with three nodes: a box, a member's laptop and a
     /// stranger's phone. Only the phone may go.
     #[tokio::test]
@@ -1545,6 +1688,7 @@ mod tests {
             boxes: HashMap::new(),
             age: "age".into(),
             asked: Mutex::default(),
+            asked_games: Mutex::default(),
             bound: Mutex::default(),
             bound_file: None,
             last_good: Mutex::default(),
@@ -1609,6 +1753,7 @@ mod tests {
             boxes: HashMap::new(),
             age: "age".into(),
             asked: Mutex::default(),
+            asked_games: Mutex::default(),
             bound: Mutex::default(),
             bound_file: None,
             last_good: Mutex::default(),
@@ -2064,6 +2209,7 @@ mod tests {
             boxes,
             age: age.display().to_string(),
             asked: Mutex::default(),
+            asked_games: Mutex::default(),
             bound: Mutex::default(),
             bound_file: None,
             last_good: Mutex::default(),
@@ -2264,6 +2410,7 @@ mod tests {
             boxes,
             age,
             asked: Mutex::default(),
+            asked_games: Mutex::default(),
             bound: Mutex::default(),
             bound_file: None,
             last_good: Mutex::default(),
