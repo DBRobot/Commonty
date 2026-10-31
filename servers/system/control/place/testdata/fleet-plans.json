@@ -1,0 +1,2441 @@
+{
+ "both up": {
+  "boxes": {
+   "node1": [
+    {
+     "service": "acme",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "commonty-net",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-agent",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-box-report",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-control",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-secrets-key",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-verify",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "disk-unlock",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "disk-watch",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "prometheus-node-exporter",
+     "fit": 0,
+     "why": "beside disk-watch"
+    },
+    {
+     "service": "home-network",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "netbridge",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "nginx",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "owner-devices",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "prometheus",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "restic-backup",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "store",
+     "fit": 0,
+     "why": "beside restic-backup"
+    },
+    {
+     "service": "storage-view",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "thanos-sidecar",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "timer-watch",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "zfs-datasets",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-games",
+     "fit": 3.699960907617615,
+     "why": "stays: it moves only when its box is gone; suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "postgresql",
+     "fit": 0.4986083111870915,
+     "why": "where its data is: suits 0.50"
+    },
+    {
+     "service": "headscale",
+     "fit": 1.6998592674234139,
+     "why": "where its data is: suits 0.50"
+    },
+    {
+     "service": "dd-transcode",
+     "fit": 4.667952064920719,
+     "why": "suits 1.47, line 100/500 Mb/s"
+    },
+    {
+     "service": "libraries",
+     "fit": 3.7,
+     "why": "suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "llama-swap",
+     "fit": 2.0997453619942394,
+     "why": "suits 0.30, line 100/500 Mb/s"
+    },
+    {
+     "service": "mail-inbox",
+     "fit": 1.7000000000000002,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "pihole",
+     "fit": 0.8997810826586436,
+     "why": "its house: stays: it moves only when its box is gone; suits 0.50"
+    },
+    {
+     "service": "searxng",
+     "fit": 2.2992963371170685,
+     "why": "suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "tang",
+     "fit": 0.49993745218818386,
+     "why": "its house: stays: it moves only when its box is gone; suits 0.50"
+    },
+    {
+     "service": "cloudflared",
+     "fit": 2.899655987035011,
+     "why": "spread: suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "computers",
+     "fit": 3.6999921815235233,
+     "why": "suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "dd-dns",
+     "fit": 0.49974980875273556,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "dd-mail",
+     "fit": 0.49993745218818386,
+     "why": "spread: suits 0.50"
+    },
+    {
+     "service": "disk-images",
+     "fit": 3.7,
+     "why": "suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "ente-museum",
+     "fit": 2.699726353323305,
+     "why": "where its data is: suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "ente-web",
+     "fit": 0.9,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "thanos-store",
+     "fit": 0.8998123565645517,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "thanos-query",
+     "fit": 1.299882722852845,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "fleet-alerts",
+     "fit": 0.8998749043763679,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "forgejo",
+     "fit": 2.6988194100519713,
+     "why": "where its data is: suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "forgejo-public",
+     "fit": 1.3,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "forgejo-runner",
+     "fit": 3.9971368911607565,
+     "why": "spread: suits 1.95, line 100/500 Mb/s, 69% full"
+    },
+    {
+     "service": "joined-metrics",
+     "fit": 0.9399637458395538,
+     "why": "suits 0.50, 69% full"
+    },
+    {
+     "service": "members-runner",
+     "fit": 3.3070327813915315,
+     "why": "spread: suits 1.97, line 100/500 Mb/s, 77% full"
+    },
+    {
+     "service": "metrics-page",
+     "fit": 1.039057261041381,
+     "why": "suits 0.50, 77% full"
+    },
+    {
+     "service": "nix-cache",
+     "fit": 2.6390572610413807,
+     "why": "suits 0.50, line 100/500 Mb/s, 77% full"
+    },
+    {
+     "service": "postgres-dumps",
+     "fit": 0.2349870541695238,
+     "why": "suits 0.50, 77% full"
+    },
+    {
+     "service": "vaultwarden",
+     "fit": 0.6343857960818022,
+     "why": "where its data is: suits 0.50, 87% full"
+    },
+    {
+     "service": "pwned-list",
+     "fit": 0.6343857960818022,
+     "why": "beside vaultwarden"
+    },
+    {
+     "service": "storage-ledger",
+     "fit": 0.6133770898776847,
+     "why": "suits 0.50, 87% full"
+    },
+    {
+     "service": "thanos-compact",
+     "fit": -0.1941143903184379,
+     "why": "where its data is: suits 0.50, 87% full"
+    },
+    {
+     "service": "vaultwarden-send",
+     "fit": 0.2068003714293727,
+     "why": "suits 0.50, 87% full"
+    }
+   ],
+   "node2": [
+    {
+     "service": "acme",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "commonty-net",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-agent",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-box-report",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-control",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-secrets-key",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-verify",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "disk-unlock",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "disk-watch",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "prometheus-node-exporter",
+     "fit": 0,
+     "why": "beside disk-watch"
+    },
+    {
+     "service": "home-network",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "netbridge",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "nginx",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "owner-devices",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "prometheus",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "restic-backup",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "store",
+     "fit": 0,
+     "why": "beside restic-backup"
+    },
+    {
+     "service": "storage-view",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "thanos-sidecar",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "timer-watch",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "zfs-datasets",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "cloudflared",
+     "fit": 2.8985548116918607,
+     "why": "spread: suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "dd-mail",
+     "fit": 0.49973723848942925,
+     "why": "spread: suits 0.50"
+    },
+    {
+     "service": "forgejo-runner",
+     "fit": 3.4931991598816547,
+     "why": "spread: suits 1.09, line 100/500 Mb/s"
+    },
+    {
+     "service": "harmonia",
+     "fit": 0.8993430962235731,
+     "why": "moves from node1: better by 0.36, over the margin 0.30; suits 0.50"
+    },
+    {
+     "service": "mail-worker-check",
+     "fit": 0.4994744769788585,
+     "why": "moves from node1: better by 0.36, over the margin 0.30; suits 0.50"
+    },
+    {
+     "service": "members-runner",
+     "fit": 2.7858854442530654,
+     "why": "spread: suits 1.87, line 100/500 Mb/s, 87% full"
+    }
+   ]
+  },
+  "unplaced": {},
+  "copies": {
+   "backups-node1": [
+    "node1",
+    "node2"
+   ],
+   "backups-node2": [
+    "node1",
+    "node2"
+   ],
+   "ente": [
+    "node1",
+    "node2"
+   ],
+   "forge": [
+    "node1",
+    "node2"
+   ],
+   "headscale": [
+    "node1",
+    "node2"
+   ],
+   "libraries": [
+    "node1",
+    "node2"
+   ],
+   "mail": [
+    "node1",
+    "node2"
+   ],
+   "metrics": [
+    "node1"
+   ],
+   "nix-cache": [
+    "node1"
+   ],
+   "postgres-wal": [
+    "node1",
+    "node2"
+   ],
+   "vaultwarden": [
+    "node1",
+    "node2"
+   ]
+  },
+  "doesNotFit": {}
+ },
+ "node1 gone": {
+  "boxes": {
+   "node2": [
+    {
+     "service": "acme",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "commonty-net",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-agent",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-box-report",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-control",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-secrets-key",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-verify",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "disk-unlock",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "disk-watch",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "prometheus-node-exporter",
+     "fit": 0,
+     "why": "beside disk-watch"
+    },
+    {
+     "service": "home-network",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "netbridge",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "nginx",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "owner-devices",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "prometheus",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "restic-backup",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "store",
+     "fit": 0,
+     "why": "beside restic-backup"
+    },
+    {
+     "service": "storage-view",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "thanos-sidecar",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "timer-watch",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "zfs-datasets",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "postgresql",
+     "fit": 0.4941535563898005,
+     "why": "suits 0.49"
+    },
+    {
+     "service": "headscale",
+     "fit": 1.699408786601216,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "cloudflared",
+     "fit": 2.8985548116918607,
+     "why": "spread: suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "computers",
+     "fit": 3.699967154811179,
+     "why": "suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "dd-dns",
+     "fit": 0.49894895395771693,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "dd-mail",
+     "fit": 0.49973723848942925,
+     "why": "spread: suits 0.50"
+    },
+    {
+     "service": "disk-images",
+     "fit": 3.7,
+     "why": "suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "ente-museum",
+     "fit": 2.6988504183912534,
+     "why": "suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "ente-web",
+     "fit": 0.9,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "thanos-store",
+     "fit": 0.8992117154682877,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "thanos-query",
+     "fit": 1.2995073221676798,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "fleet-alerts",
+     "fit": 0.8994744769788585,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "forgejo",
+     "fit": 2.6950403764879773,
+     "why": "suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "forgejo-public",
+     "fit": 1.3,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "forgejo-runner",
+     "fit": 3.4931991598816547,
+     "why": "spread: suits 1.09, line 100/500 Mb/s"
+    },
+    {
+     "service": "harmonia",
+     "fit": 0.8993430962235731,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "joined-metrics",
+     "fit": 1.297897907915434,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "mail-worker-check",
+     "fit": 0.4994744769788585,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "members-runner",
+     "fit": 2.6208093893768454,
+     "why": "spread: suits 1.87, line 100/500 Mb/s, 91% full"
+    },
+    {
+     "service": "metrics-page",
+     "fit": 0.45534328278907577,
+     "why": "suits 0.50, 91% full"
+    },
+    {
+     "service": "nix-cache",
+     "fit": 2.0553432827890754,
+     "why": "suits 0.50, line 100/500 Mb/s, 91% full"
+    },
+    {
+     "service": "postgres-dumps",
+     "fit": -0.3617555360973306,
+     "why": "suits 0.50, 92% full"
+    },
+    {
+     "service": "vaultwarden",
+     "fit": -1.244669592645697,
+     "why": "no box has room for it by the plan's sum; here it is 4.2 GiB over; suits 0.50, 134% full"
+    },
+    {
+     "service": "pwned-list",
+     "fit": -1.244669592645697,
+     "why": "beside vaultwarden"
+    },
+    {
+     "service": "storage-ledger",
+     "fit": -1.3329265470785816,
+     "why": "no box has room for it by the plan's sum; here it is 4.5 GiB over; suits 0.49, 136% full"
+    },
+    {
+     "service": "thanos-compact",
+     "fit": -2.1643980341792233,
+     "why": "no box has room for it by the plan's sum; here it is 4.6 GiB over; suits 0.50, 137% full"
+    },
+    {
+     "service": "vaultwarden-send",
+     "fit": -1.760555147087126,
+     "why": "no box has room for it by the plan's sum; here it is 4.6 GiB over; suits 0.50, 137% full"
+    }
+   ]
+  },
+  "unplaced": {
+   "copies/backups-node1": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB",
+   "copies/backups-node2": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB",
+   "copies/ente": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB",
+   "copies/forge": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB",
+   "copies/headscale": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB",
+   "copies/libraries": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB",
+   "copies/mail": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB",
+   "copies/postgres-wal": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB",
+   "copies/vaultwarden": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB",
+   "dd-games": "no live box can run it",
+   "dd-transcode": "no live box can run it",
+   "libraries": "no live box can run it",
+   "llama-swap": "no live box can run it",
+   "mail-inbox": "no live box can run it",
+   "pihole": "no live box can run it",
+   "searxng": "no live box can run it",
+   "tang": "no live box can run it"
+  },
+  "copies": {
+   "backups-node1": [
+    "node2"
+   ],
+   "backups-node2": [
+    "node2"
+   ],
+   "ente": [
+    "node2"
+   ],
+   "forge": [
+    "node2"
+   ],
+   "headscale": [
+    "node2"
+   ],
+   "libraries": [
+    "node2"
+   ],
+   "mail": [
+    "node2"
+   ],
+   "metrics": [
+    "node2"
+   ],
+   "nix-cache": [
+    "node2"
+   ],
+   "postgres-wal": [
+    "node2"
+   ],
+   "vaultwarden": [
+    "node2"
+   ]
+  },
+  "doesNotFit": {
+   "node2": [
+    "vaultwarden",
+    "pwned-list",
+    "storage-ledger",
+    "thanos-compact",
+    "vaultwarden-send"
+   ]
+  }
+ },
+ "node1 judges itself": {
+  "boxes": {
+   "node1": [
+    {
+     "service": "acme",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "commonty-net",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-agent",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-box-report",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-control",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-secrets-key",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-verify",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "disk-unlock",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "disk-watch",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "prometheus-node-exporter",
+     "fit": 0,
+     "why": "beside disk-watch"
+    },
+    {
+     "service": "home-network",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "netbridge",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "nginx",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "owner-devices",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "prometheus",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "restic-backup",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "store",
+     "fit": 0,
+     "why": "beside restic-backup"
+    },
+    {
+     "service": "storage-view",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "thanos-sidecar",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "timer-watch",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "zfs-datasets",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-games",
+     "fit": 4.2,
+     "why": "stays: it moves only when its box is gone; suits 1.00, line 100/500 Mb/s"
+    },
+    {
+     "service": "postgresql",
+     "fit": 1,
+     "why": "where its data is: suits 1.00"
+    },
+    {
+     "service": "headscale",
+     "fit": 2.2,
+     "why": "where its data is: suits 1.00"
+    },
+    {
+     "service": "dd-transcode",
+     "fit": 4.2,
+     "why": "suits 1.00, line 100/500 Mb/s"
+    },
+    {
+     "service": "forgejo",
+     "fit": 3.2,
+     "why": "where its data is: suits 1.00, line 100/500 Mb/s"
+    },
+    {
+     "service": "llama-swap",
+     "fit": 2.8,
+     "why": "suits 1.00, line 100/500 Mb/s"
+    },
+    {
+     "service": "mail-inbox",
+     "fit": 2.2,
+     "why": "suits 1.00"
+    },
+    {
+     "service": "thanos-store",
+     "fit": 1.4,
+     "why": "suits 1.00"
+    },
+    {
+     "service": "thanos-query",
+     "fit": 1.8,
+     "why": "suits 1.00"
+    },
+    {
+     "service": "pihole",
+     "fit": 1.4,
+     "why": "its house: stays: it moves only when its box is gone; suits 1.00"
+    },
+    {
+     "service": "searxng",
+     "fit": 2.8,
+     "why": "suits 1.00, line 100/500 Mb/s"
+    },
+    {
+     "service": "tang",
+     "fit": 1,
+     "why": "its house: stays: it moves only when its box is gone; suits 1.00"
+    },
+    {
+     "service": "pwned-list",
+     "fit": 3.1064557490831293,
+     "why": "suits 1.00, line 100/500 Mb/s, 67% full"
+    },
+    {
+     "service": "vaultwarden",
+     "fit": 3.1064557490831293,
+     "why": "beside pwned-list"
+    },
+    {
+     "service": "cloudflared",
+     "fit": 3.1032179800008834,
+     "why": "spread: suits 1.00, line 100/500 Mb/s, 67% full"
+    },
+    {
+     "service": "dd-mail",
+     "fit": 0.7026292947132022,
+     "why": "spread: suits 1.00, 67% full"
+    },
+    {
+     "service": "ente-museum",
+     "fit": 2.900053796579598,
+     "why": "where its data is: suits 1.00, line 100/500 Mb/s, 67% full"
+    },
+    {
+     "service": "fleet-alerts",
+     "fit": 1.0988764260042356,
+     "why": "suits 1.00, 68% full"
+    },
+    {
+     "service": "forgejo-runner",
+     "fit": 2.646766125065183,
+     "why": "spread: suits 1.00, line 100/500 Mb/s, 79% full"
+    },
+    {
+     "service": "harmonia",
+     "fit": 0.6452944118459807,
+     "why": "stays: node2 is better by 0.25, under the margin 0.30; suits 1.00, 79% full"
+    },
+    {
+     "service": "joined-metrics",
+     "fit": 1.0405849295445322,
+     "why": "suits 1.00, 79% full"
+    },
+    {
+     "service": "mail-worker-check",
+     "fit": 0.23940755896917,
+     "why": "stays: node2 is better by 0.26, under the margin 0.30; suits 1.00, 79% full"
+    },
+    {
+     "service": "members-runner",
+     "fit": 1.9380006916764687,
+     "why": "spread: suits 1.00, line 100/500 Mb/s, 87% full"
+    },
+    {
+     "service": "nix-cache",
+     "fit": 2.7380006916764685,
+     "why": "suits 1.00, line 100/500 Mb/s, 87% full"
+    },
+    {
+     "service": "postgres-dumps",
+     "fit": 0.3343214086284618,
+     "why": "suits 1.00, 87% full"
+    },
+    {
+     "service": "storage-ledger",
+     "fit": 1.1151891367788278,
+     "why": "suits 1.00, 87% full"
+    },
+    {
+     "service": "thanos-compact",
+     "fit": 0.30657961444649207,
+     "why": "where its data is: suits 1.00, 87% full"
+    }
+   ],
+   "node2": [
+    {
+     "service": "acme",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "commonty-net",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-agent",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-box-report",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-control",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-secrets-key",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-verify",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "disk-unlock",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "disk-watch",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "prometheus-node-exporter",
+     "fit": 0,
+     "why": "beside disk-watch"
+    },
+    {
+     "service": "home-network",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "netbridge",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "nginx",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "owner-devices",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "prometheus",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "restic-backup",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "store",
+     "fit": 0,
+     "why": "beside restic-backup"
+    },
+    {
+     "service": "storage-view",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "thanos-sidecar",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "timer-watch",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "zfs-datasets",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "computers",
+     "fit": 3.699967154811179,
+     "why": "suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "dd-dns",
+     "fit": 0.49894895395771693,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "disk-images",
+     "fit": 3.7,
+     "why": "suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "ente-web",
+     "fit": 0.9,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "cloudflared",
+     "fit": 2.8985548116918607,
+     "why": "spread: suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "dd-mail",
+     "fit": 0.49973723848942925,
+     "why": "spread: suits 0.50"
+    },
+    {
+     "service": "forgejo-runner",
+     "fit": 3.4931991598816547,
+     "why": "spread: suits 1.09, line 100/500 Mb/s"
+    },
+    {
+     "service": "members-runner",
+     "fit": 2.786812837819786,
+     "why": "spread: suits 1.87, line 100/500 Mb/s, 87% full"
+    }
+   ]
+  },
+  "unplaced": {
+   "forgejo-public": "no live box that can run it has room",
+   "libraries": "no live box can run it",
+   "metrics-page": "no live box that can run it has room",
+   "vaultwarden-send": "no live box that can run it has room"
+  },
+  "copies": {
+   "backups-node1": [
+    "node1",
+    "node2"
+   ],
+   "backups-node2": [
+    "node1",
+    "node2"
+   ],
+   "ente": [
+    "node1",
+    "node2"
+   ],
+   "forge": [
+    "node1",
+    "node2"
+   ],
+   "headscale": [
+    "node1",
+    "node2"
+   ],
+   "libraries": [
+    "node1",
+    "node2"
+   ],
+   "mail": [
+    "node1",
+    "node2"
+   ],
+   "metrics": [
+    "node1"
+   ],
+   "nix-cache": [
+    "node1"
+   ],
+   "postgres-wal": [
+    "node1",
+    "node2"
+   ],
+   "vaultwarden": [
+    "node1",
+    "node2"
+   ]
+  },
+  "doesNotFit": {}
+ },
+ "node1 switching": {
+  "boxes": {
+   "node1": [
+    {
+     "service": "acme",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "commonty-net",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-agent",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-box-report",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-control",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-secrets-key",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-verify",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "disk-unlock",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "disk-watch",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "prometheus-node-exporter",
+     "fit": 0,
+     "why": "beside disk-watch"
+    },
+    {
+     "service": "home-network",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "netbridge",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "nginx",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "owner-devices",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "prometheus",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "restic-backup",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "store",
+     "fit": 0,
+     "why": "beside restic-backup"
+    },
+    {
+     "service": "storage-view",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "thanos-sidecar",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "timer-watch",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "zfs-datasets",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-games",
+     "fit": 3.699960907617615,
+     "why": "restarts in place: no other box holds its group; suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "dd-transcode",
+     "fit": 4.26795206492072,
+     "why": "restarts in place: no other box holds its group; suits 1.47, line 100/500 Mb/s"
+    },
+    {
+     "service": "headscale",
+     "fit": 4.26795206492072,
+     "why": "beside dd-transcode"
+    },
+    {
+     "service": "postgresql",
+     "fit": 4.26795206492072,
+     "why": "beside dd-transcode"
+    },
+    {
+     "service": "llama-swap",
+     "fit": 2.0997453619942394,
+     "why": "restarts in place: no other box holds its group; suits 0.30, line 100/500 Mb/s"
+    },
+    {
+     "service": "mail-inbox",
+     "fit": 1.7000000000000002,
+     "why": "restarts in place: no other box holds its group; suits 0.50"
+    },
+    {
+     "service": "pihole",
+     "fit": 0.8997810826586436,
+     "why": "its house: restarts in place: no other box holds its group; suits 0.50"
+    },
+    {
+     "service": "searxng",
+     "fit": 2.2992963371170685,
+     "why": "restarts in place: no other box holds its group; suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "tang",
+     "fit": 0.49993745218818386,
+     "why": "its house: restarts in place: no other box holds its group; suits 0.50"
+    }
+   ],
+   "node2": [
+    {
+     "service": "acme",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "commonty-net",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-agent",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-box-report",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-control",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-secrets-key",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-verify",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "disk-unlock",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "disk-watch",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "prometheus-node-exporter",
+     "fit": 0,
+     "why": "beside disk-watch"
+    },
+    {
+     "service": "home-network",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "netbridge",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "nginx",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "owner-devices",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "prometheus",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "restic-backup",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "store",
+     "fit": 0,
+     "why": "beside restic-backup"
+    },
+    {
+     "service": "storage-view",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "thanos-sidecar",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "timer-watch",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "zfs-datasets",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "postgresql",
+     "fit": 0.4941535563898005,
+     "why": "suits 0.49"
+    },
+    {
+     "service": "headscale",
+     "fit": 1.699408786601216,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "cloudflared",
+     "fit": 2.8985548116918607,
+     "why": "spread: suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "computers",
+     "fit": 3.699967154811179,
+     "why": "suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "dd-dns",
+     "fit": 0.49894895395771693,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "dd-mail",
+     "fit": 0.49973723848942925,
+     "why": "spread: suits 0.50"
+    },
+    {
+     "service": "disk-images",
+     "fit": 3.7,
+     "why": "suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "ente-museum",
+     "fit": 2.6988504183912534,
+     "why": "suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "ente-web",
+     "fit": 0.9,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "thanos-store",
+     "fit": 0.8992117154682877,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "thanos-query",
+     "fit": 1.2995073221676798,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "fleet-alerts",
+     "fit": 0.8994744769788585,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "forgejo",
+     "fit": 2.6950403764879773,
+     "why": "suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "forgejo-public",
+     "fit": 1.3,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "forgejo-runner",
+     "fit": 3.4931991598816547,
+     "why": "spread: suits 1.09, line 100/500 Mb/s"
+    },
+    {
+     "service": "harmonia",
+     "fit": 0.8993430962235731,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "joined-metrics",
+     "fit": 1.297897907915434,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "mail-worker-check",
+     "fit": 0.4994744769788585,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "members-runner",
+     "fit": 2.6208093893768454,
+     "why": "spread: suits 1.87, line 100/500 Mb/s, 91% full"
+    },
+    {
+     "service": "metrics-page",
+     "fit": 0.45534328278907577,
+     "why": "suits 0.50, 91% full"
+    },
+    {
+     "service": "nix-cache",
+     "fit": 2.0553432827890754,
+     "why": "suits 0.50, line 100/500 Mb/s, 91% full"
+    },
+    {
+     "service": "postgres-dumps",
+     "fit": -0.3617555360973306,
+     "why": "suits 0.50, 92% full"
+    },
+    {
+     "service": "vaultwarden",
+     "fit": -1.244669592645697,
+     "why": "no box has room for it by the plan's sum; here it is 4.2 GiB over; suits 0.50, 134% full"
+    },
+    {
+     "service": "pwned-list",
+     "fit": -1.244669592645697,
+     "why": "beside vaultwarden"
+    },
+    {
+     "service": "storage-ledger",
+     "fit": -1.3329265470785816,
+     "why": "no box has room for it by the plan's sum; here it is 4.5 GiB over; suits 0.49, 136% full"
+    },
+    {
+     "service": "thanos-compact",
+     "fit": -2.1643980341792233,
+     "why": "no box has room for it by the plan's sum; here it is 4.6 GiB over; suits 0.50, 137% full"
+    },
+    {
+     "service": "vaultwarden-send",
+     "fit": -1.760555147087126,
+     "why": "no box has room for it by the plan's sum; here it is 4.6 GiB over; suits 0.50, 137% full"
+    }
+   ]
+  },
+  "unplaced": {
+   "libraries": "no live box that can run it has room"
+  },
+  "copies": {
+   "backups-node1": [
+    "node1",
+    "node2"
+   ],
+   "backups-node2": [
+    "node1",
+    "node2"
+   ],
+   "ente": [
+    "node1",
+    "node2"
+   ],
+   "forge": [
+    "node1",
+    "node2"
+   ],
+   "headscale": [
+    "node1",
+    "node2"
+   ],
+   "libraries": [
+    "node1",
+    "node2"
+   ],
+   "mail": [
+    "node1",
+    "node2"
+   ],
+   "metrics": [
+    "node1"
+   ],
+   "nix-cache": [
+    "node1"
+   ],
+   "postgres-wal": [
+    "node1",
+    "node2"
+   ],
+   "vaultwarden": [
+    "node1",
+    "node2"
+   ]
+  },
+  "doesNotFit": {
+   "node2": [
+    "vaultwarden",
+    "pwned-list",
+    "storage-ledger",
+    "thanos-compact",
+    "vaultwarden-send"
+   ]
+  }
+ },
+ "node2 draining": {
+  "boxes": {
+   "node1": [
+    {
+     "service": "acme",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "commonty-net",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-agent",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-box-report",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-control",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-secrets-key",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-verify",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "disk-unlock",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "disk-watch",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "prometheus-node-exporter",
+     "fit": 0,
+     "why": "beside disk-watch"
+    },
+    {
+     "service": "home-network",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "netbridge",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "nginx",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "owner-devices",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "prometheus",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "restic-backup",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "store",
+     "fit": 0,
+     "why": "beside restic-backup"
+    },
+    {
+     "service": "storage-view",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "thanos-sidecar",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "timer-watch",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "zfs-datasets",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-games",
+     "fit": 3.699960907617615,
+     "why": "stays: it moves only when its box is gone; suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "postgresql",
+     "fit": 0.4986083111870915,
+     "why": "where its data is: suits 0.50"
+    },
+    {
+     "service": "headscale",
+     "fit": 1.6998592674234139,
+     "why": "where its data is: suits 0.50"
+    },
+    {
+     "service": "dd-transcode",
+     "fit": 4.667952064920719,
+     "why": "suits 1.47, line 100/500 Mb/s"
+    },
+    {
+     "service": "libraries",
+     "fit": 3.7,
+     "why": "suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "llama-swap",
+     "fit": 2.0997453619942394,
+     "why": "suits 0.30, line 100/500 Mb/s"
+    },
+    {
+     "service": "mail-inbox",
+     "fit": 1.7000000000000002,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "pihole",
+     "fit": 0.8997810826586436,
+     "why": "its house: stays: it moves only when its box is gone; suits 0.50"
+    },
+    {
+     "service": "searxng",
+     "fit": 2.2992963371170685,
+     "why": "suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "tang",
+     "fit": 0.49993745218818386,
+     "why": "its house: stays: it moves only when its box is gone; suits 0.50"
+    },
+    {
+     "service": "cloudflared",
+     "fit": 2.899655987035011,
+     "why": "spread: suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "computers",
+     "fit": 3.6999921815235233,
+     "why": "suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "dd-dns",
+     "fit": 0.49974980875273556,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "dd-mail",
+     "fit": 0.49993745218818386,
+     "why": "spread: suits 0.50"
+    },
+    {
+     "service": "disk-images",
+     "fit": 3.7,
+     "why": "suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "ente-museum",
+     "fit": 2.699726353323305,
+     "why": "where its data is: suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "ente-web",
+     "fit": 0.9,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "thanos-store",
+     "fit": 0.8998123565645517,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "thanos-query",
+     "fit": 1.299882722852845,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "fleet-alerts",
+     "fit": 0.8998749043763679,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "forgejo",
+     "fit": 2.6988194100519713,
+     "why": "where its data is: suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "forgejo-public",
+     "fit": 1.3,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "forgejo-runner",
+     "fit": 3.9971368911607565,
+     "why": "spread: suits 1.95, line 100/500 Mb/s, 69% full"
+    },
+    {
+     "service": "harmonia",
+     "fit": 0.5435455278867882,
+     "why": "suits 0.50, 69% full"
+    },
+    {
+     "service": "joined-metrics",
+     "fit": 0.938492032620351,
+     "why": "suits 0.50, 69% full"
+    },
+    {
+     "service": "mail-worker-check",
+     "fit": 0.13768994891588543,
+     "why": "suits 0.50, 69% full"
+    },
+    {
+     "service": "members-runner",
+     "fit": 3.304383697596967,
+     "why": "spread: suits 1.97, line 100/500 Mb/s, 77% full"
+    },
+    {
+     "service": "metrics-page",
+     "fit": 1.0364081772468166,
+     "why": "suits 0.50, 77% full"
+    },
+    {
+     "service": "nix-cache",
+     "fit": 2.636408177246816,
+     "why": "suits 0.50, line 100/500 Mb/s, 77% full"
+    },
+    {
+     "service": "postgres-dumps",
+     "fit": 0.23233797037495885,
+     "why": "suits 0.50, 77% full"
+    },
+    {
+     "service": "vaultwarden",
+     "fit": 0.6317367122872377,
+     "why": "where its data is: suits 0.50, 87% full"
+    },
+    {
+     "service": "pwned-list",
+     "fit": 0.6317367122872377,
+     "why": "beside vaultwarden"
+    },
+    {
+     "service": "storage-ledger",
+     "fit": 0.6107280060831197,
+     "why": "suits 0.50, 87% full"
+    },
+    {
+     "service": "thanos-compact",
+     "fit": -0.19676347411300288,
+     "why": "where its data is: suits 0.50, 87% full"
+    },
+    {
+     "service": "vaultwarden-send",
+     "fit": 0.20415128763480772,
+     "why": "suits 0.50, 87% full"
+    }
+   ],
+   "node2": [
+    {
+     "service": "acme",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "commonty-net",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-agent",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-box-report",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-control",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-secrets-key",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-verify",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "disk-unlock",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "disk-watch",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "prometheus-node-exporter",
+     "fit": 0,
+     "why": "beside disk-watch"
+    },
+    {
+     "service": "home-network",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "netbridge",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "nginx",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "owner-devices",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "prometheus",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "restic-backup",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "store",
+     "fit": 0,
+     "why": "beside restic-backup"
+    },
+    {
+     "service": "storage-view",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "thanos-sidecar",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "timer-watch",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "zfs-datasets",
+     "fit": 0,
+     "why": "every box"
+    }
+   ]
+  },
+  "unplaced": {
+   "copies/backups-node1": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB",
+   "copies/ente": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB",
+   "copies/forge": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB",
+   "copies/headscale": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB",
+   "copies/libraries": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB",
+   "copies/mail": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB",
+   "copies/postgres-wal": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB",
+   "copies/vaultwarden": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB"
+  },
+  "copies": {
+   "backups-node1": [
+    "node1"
+   ],
+   "backups-node2": [
+    "node1",
+    "node2"
+   ],
+   "ente": [
+    "node1"
+   ],
+   "forge": [
+    "node1"
+   ],
+   "headscale": [
+    "node1"
+   ],
+   "libraries": [
+    "node1"
+   ],
+   "mail": [
+    "node1"
+   ],
+   "metrics": [
+    "node1"
+   ],
+   "nix-cache": [
+    "node1"
+   ],
+   "postgres-wal": [
+    "node1"
+   ],
+   "vaultwarden": [
+    "node1"
+   ]
+  },
+  "doesNotFit": {}
+ },
+ "node2 gone": {
+  "boxes": {
+   "node1": [
+    {
+     "service": "acme",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "commonty-net",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-agent",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-box-report",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-control",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-secrets-key",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "dd-verify",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "disk-unlock",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "disk-watch",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "prometheus-node-exporter",
+     "fit": 0,
+     "why": "beside disk-watch"
+    },
+    {
+     "service": "home-network",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "netbridge",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "nginx",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "owner-devices",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "prometheus",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "restic-backup",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "store",
+     "fit": 0,
+     "why": "beside restic-backup"
+    },
+    {
+     "service": "storage-view",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "thanos-sidecar",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "timer-watch",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "zfs-datasets",
+     "fit": 0,
+     "why": "every box"
+    },
+    {
+     "service": "cloudflared",
+     "fit": 2.899655987035011,
+     "why": "spread: suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "computers",
+     "fit": 3.6999921815235233,
+     "why": "suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "dd-dns",
+     "fit": 0.49974980875273556,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "dd-games",
+     "fit": 3.699960907617615,
+     "why": "stays: it moves only when its box is gone; suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "dd-mail",
+     "fit": 0.49993745218818386,
+     "why": "spread: suits 0.50"
+    },
+    {
+     "service": "postgresql",
+     "fit": 0.4986083111870915,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "headscale",
+     "fit": 1.6998592674234139,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "dd-transcode",
+     "fit": 4.667952064920719,
+     "why": "suits 1.47, line 100/500 Mb/s"
+    },
+    {
+     "service": "disk-images",
+     "fit": 3.7,
+     "why": "suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "ente-museum",
+     "fit": 2.699726353323305,
+     "why": "suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "ente-web",
+     "fit": 0.9,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "thanos-store",
+     "fit": 0.8998123565645517,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "thanos-query",
+     "fit": 1.299882722852845,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "fleet-alerts",
+     "fit": 0.8998749043763679,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "forgejo",
+     "fit": 2.6988194100519713,
+     "why": "suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "forgejo-public",
+     "fit": 1.3,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "forgejo-runner",
+     "fit": 4.351963280525226,
+     "why": "spread: suits 1.95, line 100/500 Mb/s"
+    },
+    {
+     "service": "harmonia",
+     "fit": 0.8998436304704598,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "joined-metrics",
+     "fit": 1.2994996175054712,
+     "why": "suits 0.50"
+    },
+    {
+     "service": "libraries",
+     "fit": 3.7,
+     "why": "suits 0.50, line 100/500 Mb/s"
+    },
+    {
+     "service": "llama-swap",
+     "fit": 1.7480095703900957,
+     "why": "suits 0.30, line 100/500 Mb/s, 69% full"
+    },
+    {
+     "service": "mail-inbox",
+     "fit": 1.3482642083958565,
+     "why": "suits 0.50, 69% full"
+    },
+    {
+     "service": "mail-worker-check",
+     "fit": 0.14696174219686192,
+     "why": "suits 0.50, 69% full"
+    },
+    {
+     "service": "members-runner",
+     "fit": 3.3136554908779434,
+     "why": "spread: suits 1.97, line 100/500 Mb/s, 76% full"
+    },
+    {
+     "service": "metrics-page",
+     "fit": 1.045679970527793,
+     "why": "suits 0.50, 76% full"
+    },
+    {
+     "service": "nix-cache",
+     "fit": 2.6456799705277927,
+     "why": "suits 0.50, line 100/500 Mb/s, 76% full"
+    },
+    {
+     "service": "pihole",
+     "fit": 0.24340065467955285,
+     "why": "its house: stays: it moves only when its box is gone; suits 0.50, 76% full"
+    },
+    {
+     "service": "postgres-dumps",
+     "fit": 0.23954936514905167,
+     "why": "suits 0.50, 77% full"
+    },
+    {
+     "service": "vaultwarden",
+     "fit": 0.6389481070613305,
+     "why": "suits 0.50, 87% full"
+    },
+    {
+     "service": "pwned-list",
+     "fit": 0.6389481070613305,
+     "why": "beside vaultwarden"
+    },
+    {
+     "service": "searxng",
+     "fit": 1.2317781042215272,
+     "why": "suits 0.50, line 100/500 Mb/s, 87% full"
+    },
+    {
+     "service": "storage-ledger",
+     "fit": 0.611316691370801,
+     "why": "suits 0.50, 87% full"
+    },
+    {
+     "service": "tang",
+     "fit": -0.587301737844673,
+     "why": "its house: stays: it moves only when its box is gone; suits 0.50, 87% full"
+    },
+    {
+     "service": "thanos-compact",
+     "fit": -0.19676347411300288,
+     "why": "suits 0.50, 87% full"
+    },
+    {
+     "service": "vaultwarden-send",
+     "fit": 0.20415128763480772,
+     "why": "suits 0.50, 87% full"
+    }
+   ]
+  },
+  "unplaced": {
+   "copies/backups-node1": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB",
+   "copies/backups-node2": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB",
+   "copies/ente": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB",
+   "copies/forge": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB",
+   "copies/headscale": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB",
+   "copies/libraries": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB",
+   "copies/mail": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB",
+   "copies/postgres-wal": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB",
+   "copies/vaultwarden": "kept in 1 of 2 stores: no other live box has room for its 0.0 GiB"
+  },
+  "copies": {
+   "backups-node1": [
+    "node1"
+   ],
+   "backups-node2": [
+    "node1"
+   ],
+   "ente": [
+    "node1"
+   ],
+   "forge": [
+    "node1"
+   ],
+   "headscale": [
+    "node1"
+   ],
+   "libraries": [
+    "node1"
+   ],
+   "mail": [
+    "node1"
+   ],
+   "metrics": [
+    "node1"
+   ],
+   "nix-cache": [
+    "node1"
+   ],
+   "postgres-wal": [
+    "node1"
+   ],
+   "vaultwarden": [
+    "node1"
+   ]
+  },
+  "doesNotFit": {}
+ }
+}
