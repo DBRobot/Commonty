@@ -1081,7 +1081,7 @@ func main() {
 			if rc != nil {
 				i.Computers = rc.Computers(len(s.Directory), logItem(s), s.Height, s.Time, s.IdentBoxes())
 			}
-			return place.Decide(i, s, cfg.Rules.GoneAfter, memberBoxes(ids, s))
+			return place.Decide(i, s, cfg.Rules.GoneAfter, boxOwners(ids, s))
 		}
 		placed.limits = cfg.Computers
 		placed.agreed = func(s *state.State) (map[string]*computers.Listed, error) {
@@ -1236,28 +1236,15 @@ dd_control_dropped_total %d
 	}
 }
 
-// memberBoxes: the boxes members have enlisted that qualify, from the
-// agreed identity state at s - placement's peers beside the release's
-func memberBoxes(ids *ident.Server, s *state.State) map[string]bool {
-	out := map[string]bool{}
+// boxOwners: whose each joined box is, from the agreed identity state at s
+func boxOwners(ids *ident.Server, s *state.State) map[string]string {
 	if ids == nil {
-		return out
+		return nil
 	}
-	v := ids.View(len(s.Directory), func(i int) ident.Item {
+	return place.Owners(ids.View(len(s.Directory), func(i int) ident.Item {
 		d := s.Directory[i]
 		return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item, Boxes: d.Boxes}
-	}, s.Height, s.Time, s.IdentBoxes())
-	for _, m := range v.Members {
-		if m.Status != "member" {
-			continue
-		}
-		for _, b := range m.Enlisted {
-			if b.Qualifies != "" {
-				out[b.Box] = true
-			}
-		}
-	}
-	return out
+	}, s.Height, s.Time, s.IdentBoxes()))
 }
 
 // boxSigner signs as this box: with its TPM, or a test's key file
