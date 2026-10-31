@@ -113,9 +113,51 @@ type View struct {
 	Outcomes  map[string]string     `json:"outcomes"`
 	// box -> whose it is: every enlistment that stands
 	Enlisted map[string]*Owner `json:"enlisted"`
+	// box -> whose it was, where that has ended for good by a signed word
+	// (Ended). Only what a box may remove of theirs goes by this
+	Ended map[string]*Ended `json:"ended,omitempty"`
 	// box -> whose ticket it joined with, while no one has enlisted it and
 	// its ticket is good: theirs to enlist
 	Waiting map[string]*Owner `json:"waiting"`
+}
+
+// Ended is an enlistment over for good, by something signed and agreed: its
+// member took the box off (unenlisted), left, or was suspended and the window
+// passed with them still out. A suspension in its window, an access lost for
+// want of a box, a member nobody knows: none of these is here, so no gap or
+// change of mind in what a box has read can delete anything
+type Ended struct {
+	Member string `json:"member"`
+	At     int64  `json:"at"` // agreed, ms
+	Why    string `json:"why"`
+}
+
+// ended: every box whose enlistment has ended for good at `at`
+func (s *State) ended(cfg *Config, at uint64) map[string]*Ended {
+	out := map[string]*Ended{}
+	for b, u := range s.Unenlisted {
+		if s.Enlisted[b] == nil {
+			out[b] = &Ended{Member: u.Member, At: int64(u.At) * 1000, Why: "unenlisted"}
+		}
+	}
+	for b, en := range s.Enlisted {
+		h := s.entry(en.Member, at)
+		if h == nil || !contains(h.Signed.Entry.MemberIDs(), en.ID) {
+			continue
+		}
+		e := &h.Signed.Entry
+		switch st, left, _ := s.standing(cfg, e, at); st {
+		case "left":
+			out[b] = &Ended{Member: en.Member, At: int64(left) * 1000, Why: "left"}
+		case "revoked":
+			// past a dated suspension's window: due, as on leaving. A name
+			// taken off the list with no date says no more than that
+			if r := removedOf(cfg, e); r > 0 && at >= r+SuspendWindow {
+				out[b] = &Ended{Member: en.Member, At: int64(r+SuspendWindow) * 1000, Why: "removed"}
+			}
+		}
+	}
+	return out
 }
 
 // Open is an invite not yet expired
@@ -191,7 +233,7 @@ func (s *State) View(cfg *Config, height uint64, timeMs int64, boxes Boxes) *Vie
 	if timeMs > 0 {
 		at = uint64(timeMs / 1000)
 	}
-	v := &View{Height: height, Time: timeMs, Members: map[string]*Member{}, Handovers: s.Handovers, Invites: map[string]*Open{}, Outcomes: s.Outcomes, Enlisted: map[string]*Owner{}, Waiting: s.waiting(cfg, at)}
+	v := &View{Height: height, Time: timeMs, Members: map[string]*Member{}, Handovers: s.Handovers, Invites: map[string]*Open{}, Outcomes: s.Outcomes, Enlisted: map[string]*Owner{}, Ended: s.ended(cfg, at), Waiting: s.waiting(cfg, at)}
 	for _, n := range s.names() {
 		h := s.entry(n, at)
 		if h == nil {

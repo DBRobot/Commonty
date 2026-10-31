@@ -304,6 +304,18 @@ replaying the directory serves its replay, which knows invites only).
   plan reads the agreed state, so a box lying in it builds more and is given
   no more, and a loss needs no rebuild to take effect. It gives nobody a login
   (`dd.box.owner` stays empty on a joined box).
+- **When it stops being theirs**: an unenlist, leaving or a suspension stops
+  everything of theirs on it in the next plan; only ciphertext copies stay.
+  A box with no owner is a stranger. Its disk's plaintext of theirs (their
+  computers' disks, game servers and worlds) goes once a signed word that
+  ended it has stood an hour (`ident.View` `ended`, `place.Forget`,
+  `box/forget-owner.sh`): the unenlist, their leaving, or a dated suspension
+  past its window. A suspension in its window keeps it, as a suspended member
+  keeps everything; being off the enlisted list for any other reason, or an
+  empty or lagging state, says nothing. The box checks the plan itself: it
+  must be a joined box, not that member's by the same state, and have known
+  them as its owner. A box sold is re-imaged, which wipes it, or unenlisted
+  first; either way the new owner's ticket makes it a new box.
 - **Which house**: boxes of one owner set up on one Wi-Fi say one house (a
   hash of its name, in the agreed state); a box set up by cable names none and
   is a house of its own.

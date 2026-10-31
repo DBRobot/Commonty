@@ -63,6 +63,40 @@ func siteOf(in Inputs, s *state.State, owners map[string]string, name string) st
 	return name
 }
 
+// ForgetHold is how long after an enlistment ended a box removes what is on
+// its disk of that member's: services stop at once, by the plan; a disk goes
+// only once the word that ended it has stood this long (ms)
+const ForgetHold = int64(3600_000)
+
+// MayForget: of what a plan says, what any box must also hold true by the same
+// state before it removes anything: the word has stood long enough, and the box
+// is not that member's now. Decide and the box each ask, so neither alone can
+// remove what the other would keep.
+func MayForget(e ident.Ended, now int64, owner string) bool {
+	return e.Member != "" && e.Member != owner && e.At > 0 && now-e.At >= ForgetHold
+}
+
+// forgets: which live joined boxes remove which member's plaintext. Nothing
+// before the switch that lets joined boxes run anything, as they have none
+func forgets(in Inputs, s *state.State, live []string, owners map[string]string) map[string]ident.Ended {
+	if in.Joined == nil || !in.Joined.Attested {
+		return nil
+	}
+	var out map[string]ident.Ended
+	for _, name := range live {
+		e := in.Ended[name]
+		_, listed := in.Boxes[name]
+		if e == nil || listed || s.Joined[name] == nil || !MayForget(*e, s.Time, owners[name]) {
+			continue
+		}
+		if out == nil {
+			out = map[string]ident.Ended{}
+		}
+		out[name] = *e
+	}
+	return out
+}
+
 // JoinedNoHouse is the house a box says when it can name none
 // (nix/modules/box/control.nix)
 const JoinedNoHouse = "joined"

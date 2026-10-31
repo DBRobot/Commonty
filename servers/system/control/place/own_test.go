@@ -239,3 +239,75 @@ func TestNode1AndNode2DecideAsBeforeBesideOtherBoxes(t *testing.T) {
 		}
 	}
 }
+
+// a box lived on by ann, her enlistment over an hour ago by a signed word
+func endedFleet() (Inputs, *state.State) {
+	in, s := ownFleet(map[string]string{"ja": "joined"}, "games")
+	s.Time = 10 * ForgetHold
+	for _, b := range s.Boxes {
+		b.LastSeen = s.Time
+	}
+	in.Ended = map[string]*ident.Ended{"ja": {Member: "ann", At: s.Time - ForgetHold, Why: "unenlisted"}}
+	return in, s
+}
+
+func TestAnEndedOwnerIsForgottenByThePlan(t *testing.T) {
+	in, s := endedFleet()
+	p := Decide(in, s, 90_000, nil)
+	if p.Forget["ja"].Member != "ann" {
+		t.Fatalf("not told to forget: %+v", p.Forget)
+	}
+}
+
+// nothing but a signed word that has stood long enough, for a joined box no
+// longer theirs, ever names anyone: not an empty state, a box that fell out of
+// the enlisted list, a young word or anything about a box of the release
+func TestNothingElseEverMakesABoxForget(t *testing.T) {
+	cases := map[string]func(*Inputs, *state.State) map[string]string{
+		"no word at all": func(in *Inputs, _ *state.State) map[string]string {
+			in.Ended = nil
+			return nil
+		},
+		"a word too young": func(in *Inputs, s *state.State) map[string]string {
+			in.Ended["ja"].At = s.Time - ForgetHold + 1
+			return nil
+		},
+		"a word with no time": func(in *Inputs, _ *state.State) map[string]string {
+			in.Ended["ja"].At = 0
+			return nil
+		},
+		"the box is theirs by the state": func(*Inputs, *state.State) map[string]string {
+			return map[string]string{"ja": "ann"}
+		},
+		"before the switch": func(in *Inputs, _ *state.State) map[string]string {
+			in.Joined = &JoinedRules{}
+			return nil
+		},
+		"a box not joined": func(_ *Inputs, s *state.State) map[string]string {
+			delete(s.Joined, "ja")
+			return nil
+		},
+		"a box of the release": func(in *Inputs, s *state.State) map[string]string {
+			in.Ended["node1"] = in.Ended["ja"]
+			delete(in.Ended, "ja")
+			s.Joined["node1"] = &state.Joined{Key: "k"}
+			return nil
+		},
+		"a box not heard": func(_ *Inputs, s *state.State) map[string]string {
+			s.Boxes["ja"].LastSeen = 0
+			return nil
+		},
+	}
+	for name, change := range cases {
+		in, s := endedFleet()
+		own := change(&in, s)
+		if p := Decide(in, s, 90_000, own); len(p.Forget) != 0 {
+			t.Errorf("%s: forgets %+v", name, p.Forget)
+		}
+	}
+	// an owner's new box says nothing of their old one, nor does another's word
+	in, s := endedFleet()
+	if p := Decide(in, s, 90_000, map[string]string{"ja": "bea"}); p.Forget["ja"].Member != "ann" {
+		t.Errorf("a box now bea's keeps ann's things: %+v", p.Forget)
+	}
+}
