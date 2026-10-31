@@ -265,12 +265,14 @@ fn route(app: &Arc<App>, method: &str, path: &str, body: &Value) -> Result<Reply
             };
             Reply::Json(json!({
                 "checks": c,
+                "missing": missing(),
                 "firmware": p,
                 "maker": product("sys_vendor"),
                 "model": product("product_name"),
                 "drive": {
                     "ticket": a.drive.join("ticket").exists(),
                     "backupKey": a.drive.join("backup.key").exists(),
+                    "expired": drive_expired(a),
                     "version": std::fs::read_to_string(a.drive.join("version")).unwrap_or_default().trim(),
                 },
             }))
@@ -393,6 +395,13 @@ fn route(app: &Arc<App>, method: &str, path: &str, body: &Value) -> Result<Reply
         ("POST", "/api/install") => {
             let disk = body["disk"].as_str().context("which disk")?.to_string();
             check_disk(&disk)?;
+            let lacks = missing();
+            if !lacks.is_empty() {
+                bail!("this machine needs {}", lacks.join(", "));
+            }
+            if drive_expired(a) {
+                bail!("this drive's pass has run out: make a new drive in the app");
+            }
             let mut env = vec![("DISK", disk), drive_env(a, "TICKET", "ticket")];
             if let Some(w) = app.wifi.lock().unwrap().clone() {
                 env.push(("WIFI", w.display().to_string()));
@@ -414,6 +423,28 @@ fn route(app: &Arc<App>, method: &str, path: &str, body: &Value) -> Result<Reply
         }
         _ => Reply::Missing,
     })
+}
+
+/// What this machine lacks of the hardware minimum
+fn missing() -> Vec<String> {
+    let threads = std::thread::available_parallelism().map_or(0, |n| n.get() as u64);
+    let mem = std::fs::read_to_string("/proc/meminfo")
+        .ok()
+        .and_then(|m| setup::mem_total(&m))
+        .unwrap_or(0);
+    setup::missing(threads, mem)
+}
+
+/// The drive's ticket has run out: a box joining with it could never be its
+/// member's (the judge refuses to enlist it), so no disk is wiped for it
+fn drive_expired(a: &Args) -> bool {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    std::fs::read_to_string(a.drive.join("ticket"))
+        .ok()
+        .and_then(|t| setup::ticket_expires(&t))
+        .is_some_and(|until| until <= now)
 }
 
 fn drive_env(a: &Args, k: &'static str, f: &str) -> (&'static str, String) {
@@ -480,7 +511,8 @@ fn disks() -> Result<Value> {
                 .as_array()
                 .map(|c| c.iter().map(|p| json!({ "name": p["name"], "fs": p["fstype"] })).collect())
                 .unwrap_or_default();
-            json!({ "name": d["name"], "size": d["size"], "model": d["model"], "used": used, "parts": parts })
+            let small = d["size"].as_u64().is_some_and(|s| s < setup::MIN_SYSTEM_DISK);
+            json!({ "name": d["name"], "size": d["size"], "small": small, "model": d["model"], "used": used, "parts": parts })
         })
         .collect();
     Ok(json!({ "disks": list }))
@@ -490,7 +522,7 @@ fn check_disk(disk: &str) -> Result<()> {
     let list = disks()?;
     let ok = list["disks"]
         .as_array()
-        .is_some_and(|l| l.iter().any(|d| d["name"] == disk));
+        .is_some_and(|l| l.iter().any(|d| d["name"] == disk && d["small"] != true));
     if !ok {
         bail!("{disk} is not a disk this machine can be installed to");
     }

@@ -100,10 +100,28 @@ async function firmware() {
     }
     return li;
   }));
+  const missing = v.missing;
+  if (missing.length) $('fw-checks').append(refusal('Enough to run a box', `It needs ${missing.join(', ')}.`));
+  if (v.drive.expired) $('fw-checks').append(refusal('This drive\'s pass is still good', 'It has run out, and a box set up with it would never be yours. Make a new drive in the app.'));
   $('fw-tip').hidden = fw.already.includes('power') || changes.has('power');
   $('fw-set').hidden = fw.change.length === 0;
-  // a box needs UEFI, its TPM, setup mode, and to see its disks; the rest it can do without
-  can('firmware', ok.uefi && ok.tpm && ok.setupMode && ok.raid);
+  // a box needs UEFI, its TPM, setup mode, to see its disks, and the
+  // minimum; the rest it can do without
+  can('firmware', ok.uefi && ok.tpm && ok.setupMode && ok.raid && !missing.length && !v.drive.expired);
+}
+function refusal(what, why) {
+  const li = document.createElement('li');
+  const name = document.createElement('span');
+  name.textContent = what;
+  const word = document.createElement('span');
+  word.className = 'state-word';
+  word.dataset.state = 'broken';
+  word.textContent = 'No';
+  const how = document.createElement('p');
+  how.className = 'how';
+  how.textContent = why;
+  li.append(name, word, how);
+  return li;
 }
 $('fw-again').onclick = firmware;
 $('fw-set').onclick = async () => {
@@ -197,6 +215,7 @@ async function disks() {
     r.type = 'radio';
     r.name = 'disk';
     r.checked = disk && disk.name === d.name;
+    r.disabled = d.small;
     r.onchange = () => { disk = d; backedUp = false; can('disk', true); };
     const what = document.createElement('span');
     what.className = 'what';
@@ -204,7 +223,7 @@ async function disks() {
     name.textContent = d.model || d.name;
     const meta = document.createElement('span');
     meta.className = 'meta';
-    meta.textContent = d.used ? `${d.name} · ${human(d.used)} used` : d.name;
+    meta.textContent = d.small ? `${d.name} · too small: a box needs 128 GB` : d.used ? `${d.name} · ${human(d.used)} used` : d.name;
     what.append(name, meta);
     const size = document.createElement('span');
     size.className = 'size';
@@ -213,7 +232,7 @@ async function disks() {
     li.append(l);
     return li;
   }));
-  if (v.disks.length === 1 && !disk) { disk = v.disks[0]; $('disk-list').querySelector('input').checked = true; }
+  if (v.disks.length === 1 && !disk && !v.disks[0].small) { disk = v.disks[0]; $('disk-list').querySelector('input').checked = true; }
   can('disk', !!disk);
 }
 
