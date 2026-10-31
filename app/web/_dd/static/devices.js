@@ -169,6 +169,22 @@ function keyRow(k, n) {
   return li;
 }
 
+// how a box is, by member_boxes.rs how(): said only when there is something to say
+const BOX_HOW = {
+  building: ['Building its update.', false],
+  behind: ['Out of date. It updates itself when it can.', false],
+  fetch: ['Its update failed: it could not download what it needs. It will try again.', true],
+  memory: ['Its update failed: it ran out of memory. It will try again.', true],
+  disk: ['Its update failed: its disk is full. It will try again.', true],
+  build: ['Its update failed while building. It will try again.', true],
+  refused: ['It refused its latest update and stays on the one it runs.', true],
+  quiet: ['Not heard from lately. It may be off or offline.', true],
+  silent: [
+    'Not heard from in over a day. If it is on, a firmware update or a Secure Boot change may have locked its disk. Nothing can unlock it: setting it up again erases it, and what only it kept, such as its game worlds, is lost.',
+    true,
+  ],
+};
+
 // a box this person set up from the app (docs/dev/joining.md), as a row
 function boxRow(b) {
   const li = el('li', 'dv-item');
@@ -178,6 +194,8 @@ function boxRow(b) {
   const bits = [`set up ${day(Math.floor(b.joined / 1000))}`];
   if (b.lastSeen) bits.push(`seen ${ago(Math.floor(b.lastSeen / 1000))}`);
   text.append(el('div', 'dv-name', b.name), el('div', 'dv-meta', bits.join(' · ')));
+  const how = BOX_HOW[b.how];
+  if (how) text.append(el('div', how[1] ? 'dv-meta bad' : 'dv-meta', how[0]));
   const actions = el('div', 'dv-actions');
   // removing is signed by the account's main key: a passkey one here, a
   // device one in the app on the device holding it
