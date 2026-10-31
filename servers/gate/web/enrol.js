@@ -3,6 +3,7 @@
 // appears. The passkey signs in and nothing more: no key is made from it.
 
 import { creationOptions, attestation, post, say, safeRd } from './webauthn.js';
+import { readEntry } from './kit.js';
 
 const q = new URLSearchParams(location.search);
 const rd = safeRd(q.get('rd'));
@@ -30,7 +31,7 @@ async function go() {
         // the enrol link's token reads its own entry; nobody else's
         const e = await fetch('/_dd/directory/' + encodeURIComponent(user), { headers: auth });
         if (!e.ok) continue;
-        const entry = (await e.json()).entry;
+        const { entry } = readEntry(await e.text());
         if ((entry.passkeys || []).some(p => p.id === id)) {
           say('Signed in to your entry. Taking you to sign in…');
           location.href = '/_dd/login?rd=' + encodeURIComponent(rd);

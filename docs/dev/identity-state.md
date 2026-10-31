@@ -342,6 +342,13 @@ its body as signed (`signature` holds `v2:<body>:<sig>`, and it is written
 back out as the envelope), so `verify`, `accept`, `anchored` and
 `directory::resolve` check either form with no change to any caller.
 
+The pages read both forms the same way too: `readEntry`
+(servers/web-shared/kit.js, under shell.js `entryOf`) gives `.entry`, a v2
+envelope's body parsed, for what a page shows, and keeps the answer's text
+as it came (`.text`) for the wasm to check before a passkey signs on from
+it, never a copy written out again. The mail and DNS Workers read an
+entry's fields with identity.js `fieldsOf`.
+
 | component | judged | now | dead |
 |---|---|---|---|
 | client/directory `resolve` | signature + agreement + anchor | same, v1 or v2 | nothing |

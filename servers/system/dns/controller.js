@@ -13,7 +13,7 @@
 import { initSync, controllerName, controllerWord, signedBy } from './dd_mail.js';
 import wasm from './dd_mail_bg.wasm';
 import { MEMBERS } from './fleet.js';
-import { mode, agreedMember, isMember, entryOf, differ } from './identity.js';
+import { mode, agreedMember, isMember, entryOf, fieldsOf, differ } from './identity.js';
 
 let ready = false;
 const load = () => {
@@ -72,13 +72,13 @@ async function memberWord(env, entry, label, controller, sig) {
   // who the word claims to be, for the shadow log: the entry's name
   let who = '';
   try {
-    who = String(JSON.parse(entry).entry.name || '');
+    who = String(fieldsOf(entry).name || '');
   } catch {
     /* not an entry: the checks say so */
   }
   if (how !== 'replay') {
     try {
-      const name = JSON.parse(entry).entry.name;
+      const name = fieldsOf(entry).name;
       const m = await agreedMember(env, name);
       if (!isMember(m)) throw new Error('not a member');
       agreed = controllerWord(entryOf(m), label, controller, sig, env.DOMAIN);

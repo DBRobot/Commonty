@@ -74,7 +74,8 @@ inputs_kept       chosen. nix/tests/ci-keep.nix: each job's keep step
 worker_tests      its chosen checks: mail-worker, dns-worker, sso, control,
                   control-relay, control-upgrade, control-together,
                   control-signfail.
-page_tests        its chosen checks: mail-page, files-page, media-page, same-tab.
+page_tests        its chosen checks: mail-page, files-page, media-page, same-tab,
+                  entry-pages.
 site_checks       its chosen checks: site-headers, site-roles, site-a11y,
                   site-speed, site-links.
 build_programs    a VM test was chosen. dd and the pages (cli); verify, agent, games,

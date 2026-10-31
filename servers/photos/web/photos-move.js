@@ -10,6 +10,7 @@
 
 import init, { seal_for_app } from '/_dd/web/dd_web.js';
 import { b64u, u8b64, say } from './webauthn.js';
+import { readEntry } from './kit.js';
 
 const q = new URLSearchParams(location.search);
 const slot = q.get('slot');
@@ -18,7 +19,7 @@ const to = q.get('to');
 async function oldPassword(user) {
   const e = await fetch('/_dd/directory/' + encodeURIComponent(user));
   if (!e.ok) throw new Error('no entry');
-  const allow = ((await e.json()).entry.passkeys || []).map((p) => ({ type: 'public-key', id: b64u(p.id) }));
+  const allow = (readEntry(await e.text()).entry.passkeys || []).map((p) => ({ type: 'public-key', id: b64u(p.id) }));
   if (!allow.length) throw new Error('this account has no passkey, so there is nothing to move');
   const cfg = await (await fetch('/_dd/config')).json();
   const salt = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('dd-photos')));

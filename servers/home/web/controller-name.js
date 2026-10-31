@@ -8,6 +8,7 @@
 // (docs/dev/home-controller.md, "The root's word, either kind of root").
 
 import { b64u, u8b64 } from './webauthn.js';
+import { readEntry } from './kit.js';
 
 const $ = (id) => document.getElementById(id);
 const show = (id) => {
@@ -38,7 +39,7 @@ async function start() {
   $('name').textContent = name;
   const e = await fetch(`/_dd/directory/${encodeURIComponent(me.user)}`);
   if (!e.ok) throw new Error(`the box said ${e.status}`);
-  const { entry } = await e.json();
+  const { entry } = readEntry(await e.text());
   if (!entry.root.startsWith('webauthn:')) {
     return broken('Your account is held by a device, not a passkey: the Commonty app names the controller by itself.');
   }

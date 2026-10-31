@@ -48,9 +48,9 @@ GROUPS = {
         "control-together",
         "control-signfail",
     ],
-    # the Mail, Files and Movies & TV pages as the app serves them, and every bar link
-    # and home tile staying in its tab
-    "page_tests": ["mail-page", "files-page", "media-page", "same-tab"],
+    # the Mail, Files and Movies & TV pages as the app serves them, every bar link
+    # and home tile staying in its tab, and Settings with a v1 or v2 entry
+    "page_tests": ["mail-page", "files-page", "media-page", "same-tab", "entry-pages"],
     # the site as a browser meets it, through node1's nginx and the gate
     "site_checks": [
         "site-headers",

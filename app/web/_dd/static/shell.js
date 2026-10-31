@@ -3,7 +3,7 @@
 // itself is a plain file: the box serves it to a browser and the app
 // carries its own copy, and both look the same because they are the same.
 
-import { webUrl } from './kit.js';
+import { webUrl, readEntry } from './kit.js';
 import { start as guide } from './guide.js';
 // and the footer, after the page
 import './footer.js';
@@ -49,7 +49,9 @@ export function entryText(user) {
   }
   return entries.get(user);
 }
-export const entryOf = async (user) => JSON.parse(await entryText(user));
+/// the same, read (kit.js readEntry): `.entry` from a v1 entry or a v2
+/// envelope's body, `.text` as the directory gave it
+export const entryOf = async (user) => readEntry(await entryText(user));
 export function forgetEntry(user) { entries.delete(user); }
 
 /// Running inside the app rather than a browser tab: the app serves these

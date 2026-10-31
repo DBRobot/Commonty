@@ -93,6 +93,8 @@
     "sso"
     # every bar link and home tile stays in its tab, on a box's pages and the app's
     "same-tab"
+    # Settings reads a member's entry as the directory gives it, v1 or v2
+    "entry-pages"
     "dns-worker"
     # the control plane: relay, witness and three validators, offline
     "control"
