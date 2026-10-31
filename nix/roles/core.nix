@@ -108,14 +108,17 @@ in
   # the write-ahead log of a running prometheus does not restore (segments
   # out of order); the blocks do, at the cost of the last two hours
   dd.backup.exclude = [ "/var/lib/prometheus2/data/wal" ];
-  # the datasets the box's pool holds, kept: snapshots and scrubs, on each
-  # box of the release's (a box that joined on its own key keeps nothing of
-  # its own worth them). Its backup's password is the one secret of its
-  # own, shared with nobody, where its file holds it; the repository is in
-  # the box's own store, under the store's key to its bucket
-  # (storage/backup.nix)
-  services.zfs.autoSnapshot.enable = !config.dd.box.joined;
-  services.zfs.autoScrub.enable = !config.dd.box.joined;
+  # the datasets the box's pool holds, kept: snapshots and scrubs, on every
+  # box. Only what asks for snapshots gets them (fleet/layout.nix: root,
+  # /var, /home; never /nix): on a box that joined on its own key that is
+  # its owner's services' state and no store, whose ciphertext copies are
+  # kept elsewhere too and would pin a week of deleted blocks on a small
+  # disk. Its backup's password is the one secret of its own, shared with
+  # nobody, where its file holds it (a box that joined has none: no backup);
+  # the repository is in the box's own store, under the store's key to its
+  # bucket (storage/backup.nix)
+  services.zfs.autoSnapshot.enable = true;
+  services.zfs.autoScrub.enable = true;
   sops.secrets.restic-password = lib.mkIf (config.dd.hasSecret "restic-password") { };
   dd.backup.passwordFile = lib.mkIf (config.dd.hasSecret "restic-password") config.sops.secrets.restic-password.path;
   # the metric blocks go to the store that keeps the metrics bucket, its
