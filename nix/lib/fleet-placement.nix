@@ -141,12 +141,16 @@ let
   joined =
     { dir, name }:
     let
+      # what its tier gives it; the fleet owner's own box, by the file its
+      # dd-control writes from the agreed state, what its capability says.
+      # The plan only ever narrows this (place.Decide)
+      tier = s: builtins.elem s (inputs.joined.services ++ (inputs.joined.own or [ ])) || cap.owner == policy.owner;
       cap =
         (import ./capability.nix {
           inherit lib needs policy;
           boxes.${name} = {
             hw = lib.importJSON (dir + "/hardware.json");
-            own = lib.importJSON (dir + "/box.json");
+            own = import ./joined-own.nix { inherit lib; } dir;
             site = "joined";
             region = "joined";
           };
@@ -155,15 +159,13 @@ let
       rs = lib.filter (r: !(bundles.${r}.one or false)) (bundlesFor {
         inherit (cap) can;
         has = _: false;
-        allowed = s: builtins.elem s inputs.joined.services;
+        allowed = tier;
       });
     in
     {
       bundles = rs;
       built = servicesOf rs;
-      carries = lib.filter (s: builtins.elem s inputs.joined.services) (
-        carriesOf cap.can (servicesOf rs)
-      );
+      carries = lib.filter tier (carriesOf cap.can (servicesOf rs));
     };
 in
 {
