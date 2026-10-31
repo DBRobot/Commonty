@@ -288,6 +288,10 @@ func (s *State) Judge(id *ident.State, cfg *ident.Config, lim *Limits, raw json.
 	s.setBoxes(boxes)
 	defer s.setBoxes(nil)
 	hash := ident.ItemHash(raw)
+	if err := cfg.OnRootPage(raw); err != nil {
+		s.outcome(hash, err)
+		return
+	}
 	env, err := ident.ReadEnvelope(raw)
 	if err != nil {
 		s.outcome(hash, err)

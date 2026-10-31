@@ -2609,6 +2609,16 @@ async fn chat_search(
 
 /// Boxes, Backups, Devices, Network: the pages behind the bar's menu.
 /// Each is a member's own view of the fleet; the demo gets none of them.
+/// A page where a root passkey signs for the account (identity::ROOT_PAGES),
+/// asked for under another name of the domain: to the name it can sign on.
+fn to_home(app: &App, headers: &HeaderMap, uri: &str) -> Option<Response> {
+    let host = asked_host(headers);
+    let ours = host == app.domain || host.ends_with(&format!(".{}", app.domain));
+    let home = format!("home.{}", app.domain);
+    (ours && host != home && !host.starts_with("demo-"))
+        .then(|| Redirect::to(&format!("https://{home}{uri}")).into_response())
+}
+
 async fn member_page(app: &App, headers: &HeaderMap, name: &str, at: &str) -> Response {
     let cookie = headers.get("cookie").and_then(|v| v.to_str().ok());
     match app.signed_in(cookie) {
@@ -3595,7 +3605,14 @@ pub async fn start(
         .route("/_dd/enrol", get(|| async { Html(pages::enrol()) }))
         .route(
             "/_dd/join",
-            get(|State(a): State<Arc<App>>| async move { Html(pages::join(&a.domain)) }),
+            get(
+                |State(a): State<Arc<App>>, h: HeaderMap, uri: axum::http::Uri| async move {
+                    match to_home(&a, &h, &uri.to_string()) {
+                        Some(r) => r,
+                        None => Html(pages::join(&a.domain)).into_response(),
+                    }
+                },
+            ),
         )
         .route("/_dd/join/start", post(join_start))
         .route("/_dd/join/finish", post(join_finish))
@@ -3654,9 +3671,14 @@ pub async fn start(
         .route("/_dd/photos/config", post(photos::config))
         .route(
             "/_dd/settings",
-            get(|State(a): State<Arc<App>>, h: HeaderMap| async move {
-                member_page(&a, &h, "settings", "/_dd/settings").await
-            }),
+            get(
+                |State(a): State<Arc<App>>, h: HeaderMap, uri: axum::http::Uri| async move {
+                    match to_home(&a, &h, &uri.to_string()) {
+                        Some(r) => r,
+                        None => member_page(&a, &h, "settings", "/_dd/settings").await,
+                    }
+                },
+            ),
         )
         .route("/_dd/add/start", post(adddevice::start))
         .route("/_dd/add/status", get(adddevice::status))

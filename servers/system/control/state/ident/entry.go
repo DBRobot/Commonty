@@ -394,6 +394,54 @@ func VerifyLeave(s *SignedLeave, onFile *Entry) error {
 	return VerifyEd25519(onFile.Root, expected, s.Signature)
 }
 
+// OnRootPage refuses an item whose passkey signature was made on a page that
+// may not speak for an account (Config.RootPages). Whichever key the item's
+// signature turns out to be by, a key's own signature is no assertion and
+// passes here; a bad assertion is the verdict's to refuse
+func (cfg *Config) OnRootPage(raw json.RawMessage) error {
+	if len(cfg.RootPages) == 0 {
+		return nil
+	}
+	var top struct {
+		Sig         string `json:"sig"`
+		RecoverySig string `json:"recovery_sig"`
+		Entry       *struct {
+			Signature         string `json:"signature"`
+			RecoverySignature string `json:"recovery_signature"`
+		} `json:"entry"`
+		Leave *struct {
+			Signature string `json:"signature"`
+		} `json:"leave"`
+	}
+	if json.Unmarshal(raw, &top) != nil {
+		return nil
+	}
+	sigs := []string{top.Sig, top.RecoverySig}
+	if top.Entry != nil {
+		sigs = append(sigs, top.Entry.Signature, top.Entry.RecoverySignature)
+	}
+	if top.Leave != nil {
+		sigs = append(sigs, top.Leave.Signature)
+	}
+	for _, sig := range sigs {
+		a, err := ReadAssertion(sig)
+		if err != nil || a.ClientDataJSON == "" {
+			continue
+		}
+		client, err := b64url.DecodeString(a.ClientDataJSON)
+		if err != nil {
+			continue
+		}
+		var c struct {
+			Origin string `json:"origin"`
+		}
+		if json.Unmarshal(client, &c) != nil || !contains(cfg.RootPages, c.Origin) {
+			return Rejected("a passkey signed this on a page that may not speak for an account")
+		}
+	}
+	return nil
+}
+
 // VerifyRoot checks a v2 statement (leave, enlist, unenlist) against the
 // entry on file's root: ed25519 over the message, or the root passkey's
 // assertion over its sha256

@@ -28,6 +28,11 @@ type Config struct {
 		Removed   map[string]uint64 `json:"removed,omitempty"`
 		Suspended map[string]string `json:"suspended,omitempty"`
 	} `json:"members"`
+	// the pages a root passkey may speak for an account on, as origins
+	// (identity::ROOT_PAGES); none: any name of the relying party, as before.
+	// In the config because a judge's verdict reaches what validators apply
+	// (computerAt): every validator takes it in the same block
+	RootPages []string `json:"root_pages,omitempty"`
 }
 
 // Held is an entry the log has given a name
@@ -357,6 +362,10 @@ func (s *State) Judge(cfg *Config, voters []string, from string, raw json.RawMes
 	// outcomes by what was signed; claims and acks by the item's log name,
 	// which the gates' acks still use
 	hash, name := ItemHash(raw), LogName(raw)
+	if err := cfg.OnRootPage(raw); err != nil {
+		s.outcome(hash, err)
+		return
+	}
 	// which item it is, by its exact keys: v1 is one key (entry, invite,
 	// ack, leave), as Rust's tagged enum reads it; v2 is an envelope
 	if err := noDuplicates(raw); err != nil {
