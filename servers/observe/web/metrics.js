@@ -93,7 +93,25 @@ async function api(path, params) {
   return merge(answers);
 }
 const now = () => Math.floor(Date.now() / 1000);
-const instant = (query) => api('query', { query }).then((d) => d.result);
+// Another box reaches this Thanos through the bucket, its newest block an
+// hour or more behind, so a query at now has nothing of it: its figures are
+// its last ones, asked at that time. Past LATE it has stopped answering (a
+// block is 2h, cut once the head spans 3h).
+const LATE = 4 * 3600;
+let behind = {};
+const instantAt = (query, time) => api('query', time ? { query, time } : { query }).then((d) => d.result);
+async function instant(query) {
+  const times = [...new Set(Object.values(behind))];
+  const [live, ...old] = await Promise.all([instantAt(query), ...times.map((t) => instantAt(query, t).catch(() => []))]);
+  const fresh = new Set(live.map((r) => r.metric.box));
+  return [...live, ...old.flatMap((res, i) => res.filter((r) => behind[r.metric.box] === times[i] && !fresh.has(r.metric.box)))];
+}
+// each box seen in the last day, and when its newest figures are from
+async function lastSeen() {
+  const res = await instantAt('max by (box) (max_over_time(timestamp(up{job="node"})[1d:1m]))').catch(() => []);
+  behind = Object.fromEntries(res.map((r) => [r.metric.box, Number(r.value[1])]).filter(([, t]) => now() - t > 300));
+  return res.map((r) => r.metric.box);
+}
 const range = (query, secs, points = 120) => {
   const end = now(), step = Math.max(15, Math.round(secs / points));
   return api('query_range', { query, start: end - secs, end, step }).then((d) => d.result);
@@ -188,6 +206,7 @@ const NAMES = {
 };
 
 async function fleet() {
+  const seen = await lastSeen();
   const q = (s) => instant(s).catch(() => []);
   const [up, info, cpu, load, mem, memTotal, temp, rx, tx, smart, wear, online, charge, failed, uptime, targets, boxes] = await Promise.all([
     q('up{job="node"}'), q('dd_box_info'), q(CPU), q('node_load1'),
@@ -200,11 +219,12 @@ async function fleet() {
     Promise.all(['dd_agent_counter', 'dd_backup_last_success_seconds', 'dd_backup_snapshots', 'dd_backup_oldest_seconds', 'dd_backup_path'].map(q)),
   ]);
   const [release, lastBackup, snapshots, oldest, paths] = boxes;
-  const names = [...new Set([...up.map((r) => r.metric.box), ...info.map((r) => r.metric.box)])].filter(Boolean).sort();
+  const names = [...new Set([...seen, ...up.map((r) => r.metric.box), ...info.map((r) => r.metric.box)])].filter(Boolean).sort();
   const pick = (res, box) => res.filter((r) => r.metric.box === box);
   return names.map((box) => ({
     box,
-    up: pick(up, box).some((r) => r.value[1] === '1'),
+    up: pick(up, box).some((r) => r.value[1] === '1') && !(now() - behind[box] > LATE),
+    asOf: behind[box],
     info: pick(info, box)[0]?.metric || {},
     cpu: byBox(cpu)[box], load: byBox(load)[box], mem: byBox(mem)[box], memTotal: byBox(memTotal)[box], temp: byBox(temp)[box],
     rx: byBox(rx)[box], tx: byBox(tx)[box], uptime: byBox(uptime)[box],
@@ -296,7 +316,7 @@ async function fleetView() {
     return el('div', { class: `card${b.up ? '' : ' down'}` },
       el('header', {}, el('span', { class: `dot ${state}` }), el('h2', {}, el('a', { href: `/box/${encodeURIComponent(b.box)}`, style: 'color:var(--ink)', text: b.box })),
         el('span', { class: `mchip ${state}`, text: !b.up ? 'not answering' : state === 'ok' ? 'fine' : `${mine.length} to look at` }), el('span', { class: 'spacer' }),
-        el('span', { class: 'small muted', text: [rel?.release ? `release ${rel.release}` : null, b.uptime ? `up ${age(b.uptime)}` : null].filter(Boolean).join(' · ') })),
+        el('span', { class: 'small muted', text: [b.asOf ? `figures from ${ago(b.asOf)}` : null, rel?.release ? `release ${rel.release}` : null, b.uptime ? `up ${age(b.uptime)}` : null].filter(Boolean).join(' · ') })),
       el('div', { class: 'what', text: [info.model?.replace(/\(R\)|\(TM\)|with Radeon Graphics| @ .*/g, '').trim(), b.memTotal ? `${bytes(b.memTotal)} memory` : null, info.kernel ? `kernel ${info.kernel}` : null].filter(Boolean).join(' · ') }),
       b.up ? el('div', { class: 'gauges' },
         g('CPU', b.load !== undefined ? `load ${b.load.toFixed(1)}` : '', [pct(b.cpu), el('small', { text: '%' })], sparkline(hist(cpuHist, b.box), 'var(--c1)', 100)),
@@ -354,7 +374,7 @@ async function boxView(name, params) {
     .sort((a, b2) => (a.state === 'failed' ? -1 : 0) - (b2.state === 'failed' ? -1 : 0) || a.name.localeCompare(b2.name));
   put(main(),
     el('div', { class: 'mrow gap' }, el('h2', { style: 'margin:0;font-size:20px', text: name }), el('span', { class: `mchip ${b.up ? 'ok' : 'bad'}`, text: b.up ? 'answering' : 'not answering' }),
-      el('span', { class: 'muted small', text: [b.info.model, b.memTotal ? bytes(b.memTotal) : null, b.uptime ? `up ${age(b.uptime)}` : null, b.release?.release ? `release ${b.release.release}` : null].filter(Boolean).join(' · ') }),
+      el('span', { class: 'muted small', text: [b.asOf ? `figures from ${ago(b.asOf)}` : null, b.info.model, b.memTotal ? bytes(b.memTotal) : null, b.uptime ? `up ${age(b.uptime)}` : null, b.release?.release ? `release ${b.release.release}` : null].filter(Boolean).join(' · ') }),
       el('span', { class: 'spacer' }), spanPicker(key, `/box/${encodeURIComponent(name)}`)),
     el('div', { class: 'charts gap' },
       chartBox('CPU', Number.isFinite(last(busy)) ? `now ${pct(last(busy))}%` : '', [line('busy', 'var(--c1)', busy), line('waiting on disk', 'var(--c3)', iowait)], { max: 100, unit: (v) => `${Math.round(v)}%`, secs }),
