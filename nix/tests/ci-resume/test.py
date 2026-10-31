@@ -83,6 +83,9 @@ DISK = log(
         "mkdir /var/lib/gitea-runner/node2/.cache/act/a1: no space left on device",
     ],
 )
+# a runner killed before it sent a line: the forge has no log file, cannot
+# move it at the task's end, and its log route answers 500 (runner-restart)
+NO_FILE = "(no log file)"
 
 
 def job(name, status, logtext=None, needs=(), job_id=None, duration="5m0s", attempt=1):
@@ -219,6 +222,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         a = re.fullmatch(r"/attempt/(\d+)/logs", rest)
         if method == "GET" and a:
             text = jobs[i]["logs"].get(int(a.group(1)))
+            if text == NO_FILE:
+                return self.reply(500)
             return self.reply(200, text.encode()) if text else self.reply(404)
         if method == "POST" and rest == "/rerun":
             code = f.rerun(run, i)
@@ -417,6 +422,17 @@ case(
 case(
     "nor one that failed at once on a full disk",
     lambda f: f.add(5, pr_jobs(b_log=DISK, b_duration="1.2s")),
+    [],
+)
+case(
+    "one killed before its first line, which the forge has no log for, is run again",
+    lambda f: f.add(5, pr_jobs(b_log=NO_FILE, b_duration="10m14s")),
+    [(5, 2)],
+    lambda f, said: any("not one line" in s for s in said),
+)
+case(
+    "but not one with no log that the forge did not wait its zombie timeout on",
+    lambda f: f.add(5, pr_jobs(b_log=NO_FILE, b_duration="1.2s")),
     [],
 )
 case(

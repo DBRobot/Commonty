@@ -88,12 +88,20 @@ def seconds(d):
 
 def killed(log, duration, zombie=600):
     """why a failed job's attempt was killed from outside, or None when it
-    failed of itself. log: the attempt's whole log; duration: the forge's
-    (its start to its end), in seconds; zombie: the forge's zombie timeout"""
-    lines = [m for m in (TS.match(x) for x in log.splitlines()) if m]
-    if not lines:
-        return None
+    failed of itself. log: the attempt's whole log, None when the forge has
+    none; duration: the forge's (its start to its end), in seconds; zombie:
+    the forge's zombie timeout"""
+    lines = [m for m in (TS.match(x) for x in (log or "").splitlines()) if m]
     if ENDLESS[0] <= duration <= ENDLESS[1]:
+        return None
+    if not lines:
+        # no log at all (None: the forge has none to give): its runner went
+        # before it sent a line, and the forge heard nothing the whole time
+        if log is None and duration >= LOST_SHARE * zombie:
+            return (
+                "the forge lost it: no word from its runner for %d min, not one line"
+                % (duration // 60)
+            )
         return None
     texts = [m.group(2).strip() for m in lines]
     last = next((t for t in reversed(texts) if t), "")
@@ -200,11 +208,17 @@ class Forge:
         return int(m.group(1))
 
     def log(self, run, job, attempt):
+        """the attempt's log, or None when the forge has none: a runner killed
+        before it sent its first line leaves no file, the forge cannot move it
+        ("Cannot transfer logs of task"), and its log route answers 500 for good
+        (runner-restart, 2026-10-30)"""
         s, _, b = self.ask(
             "GET",
             "/%s/actions/runs/%d/jobs/%d/attempt/%d/logs"
             % (self.repo, run, job, attempt),
         )
+        if s == 500:
+            return None
         if s != 200:
             raise OSError("run #%d job %d: its log: http %s" % (run, job, s))
         return b.decode(errors="replace")
