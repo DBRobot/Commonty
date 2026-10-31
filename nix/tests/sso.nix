@@ -39,6 +39,16 @@ pkgs.runCommand "sso-e2e"
       ${self.packages.${system}.verify}/bin/verify > gate.log 2>&1 &
     gate=$!
 
+    # the same, at the stage before: the Worker can be tried, nothing else moves
+    mkdir -p trying/keys
+    jq '.v5' $tester > trying/keys/tester.json
+    VERIFY_ROLE=full VERIFY_DIR=$PWD/trying/keys VERIFY_DOMAIN=commonty.test \
+      VERIFY_MEMBERS="$(jq -r '.members' $tester)" VERIFY_HOSTS=files \
+      VERIFY_ID=https://id.commonty.test VERIFY_ID_STAGE=try VERIFY_BIND=127.0.0.1:4182 \
+      VERIFY_PAGES_DIR=${self.packages.${system}.pages} \
+      ${self.packages.${system}.verify}/bin/verify > trying.log 2>&1 &
+    trying=$!
+
     # the id Worker, as the release uploads it
     mkdir w
     cp -rL --no-preserve=mode ${self.packages.${system}.id-worker}/. w/
@@ -59,13 +69,13 @@ pkgs.runCommand "sso-e2e"
     (cd w && wrangler dev --port 8788 --ip 127.0.0.1 > ../wrangler.log 2>&1) &
     worker=$!
 
-    for u in http://127.0.0.1:4181/health http://127.0.0.1:8788/; do
+    for u in http://127.0.0.1:4181/health http://127.0.0.1:4182/health http://127.0.0.1:8788/; do
       for i in $(seq 1 120); do curl -s -o /dev/null "$u" && break; sleep 0.5; done
     done
 
     status=0
     python3 ${./sso/flow.py} $tester || status=$?
-    kill $gate $worker 2>/dev/null || true
+    kill $gate $trying $worker 2>/dev/null || true
     if [ $status -ne 0 ]; then
       echo "--- gate"; tail -30 gate.log
       echo "--- worker"; tail -30 wrangler.log

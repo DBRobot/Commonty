@@ -977,7 +977,9 @@ mod tests {
         })
         .await
         .unwrap();
-        let sessions = crate::session::Sessions::open(&d, "commonty.test", false).unwrap();
+        let sessions =
+            crate::session::Sessions::open(&d, "commonty.test", crate::session::Cookies::Domain)
+                .unwrap();
         (format!("http://{addr}"), sessions, got)
     }
 

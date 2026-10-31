@@ -99,6 +99,7 @@ PUBLIC = {
     "/_dd/joke": "an easter egg page, no data",
     "/_dd/sso/start": "sign-in at the id Worker",
     "/_dd/sso/creds": "the passkey ids a name has, for the id Worker",
+    "/_dd/sso/names": "this box's names and a challenge for each, for the id Worker",
     "/_dd/boxes": "a redirect to Settings",
     "/_dd/backups": "a redirect to Settings",
     "/_dd/devices": "a redirect to Settings",

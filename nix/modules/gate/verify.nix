@@ -502,6 +502,7 @@ in
         VERIFY_HOSTS = lib.concatStringsSep "," cfg.hosts;
         # sign-in at the id Worker, when it is set up (sso.rs)
         VERIFY_ID = config.dd.idWorker;
+        VERIFY_ID_STAGE = config.dd.idWorkerStage;
         VERIFY_BOXES = builtins.toJSON cfg.boxes;
         VERIFY_MEMBERS = builtins.toJSON config.dd.members;
         # our Rust for the browser, next to the pages that use it

@@ -834,6 +834,11 @@ impl Directory {
         self
     }
 
+    /// every name this box answers to
+    pub fn names(&self) -> &[String] {
+        &self.names
+    }
+
     /// Where a token is being used, for its audience check: the name the
     /// request was asked under when that is one of this box's own, and
     /// otherwise none, which no audience matches. The header picks among

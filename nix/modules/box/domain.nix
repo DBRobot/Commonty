@@ -36,4 +36,19 @@
       if builtins.pathExists ../../../fleet/id-worker.json then "https://id.${config.dd.domain}" else "";
     description = "the id Worker's address; empty: each gate's own sign-in page";
   };
+  # how far along: "try" hands a sign-in over to whoever asks for it there and
+  # changes nothing else, "on" is every sign-in. id-worker.json says; one
+  # without a stage is on
+  options.dd.idWorkerStage = lib.mkOption {
+    type = lib.types.enum [
+      "try"
+      "on"
+    ];
+    default =
+      if builtins.pathExists ../../../fleet/id-worker.json then
+        (builtins.fromJSON (builtins.readFile ../../../fleet/id-worker.json)).stage or "on"
+      else
+        "on";
+    description = "whether the id Worker can be tried, or is where every sign-in is";
+  };
 }

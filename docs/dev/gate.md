@@ -199,8 +199,8 @@ and `X-DD-Role`. Services read the name through
 
 ### Once for every box: the id Worker
 
-With `dd id setup` done (fleet/id-worker.json, `dd.idWorker`, `VERIFY_ID`),
-sign-in is not any box's. It is the id Worker's
+With fleet/id-worker.json at stage `on` (`dd id setup`, `dd.idWorker`,
+`VERIFY_ID`, `VERIFY_ID_STAGE`), sign-in is not any box's. It is the id Worker's
 ([servers/system/id](../../servers/system/id)), at `id.<domain>`: static
 pages from the release, no secret, nothing stored. Whichever box served the
 sign-in page could ask the passkey for a sign-in good on every other box,
@@ -232,14 +232,40 @@ the box (sso.rs)
   challenge; the sign-in not ended here
   ─► __Host-dd: a cookie for this name alone, signed by this box's own
      secret, carrying the sign-in's id; ─► rd
+  a sign-in it will not take (ended here, a passkey no longer on file)
+  ─► the id page with again=1, which asks for the passkey and does not hand
+     the same one over again
 ```
+
+So that going to another name finds a session there, the id page asks the box
+for its other names and a challenge for each (`/_dd/sso/names`) and hands each
+its own hand-off in the background (`warm`, 204, a cookie), at most 700 ms
+before the hand-off it came for. A name out of reach from this browser makes
+the trip when it is opened, in the same way. The first page after a sign-in is
+the one that pays; a member then moves between the box's names as before.
+The id page keeps the names it reached, and signing out there
+(`id.<domain>/out`) posts `/_dd/sso/out` to each.
 
 The box's own id for the session is made from the person and the
 sign-in's id (`sso::session_id`), never the browser's choice alone. With
 sessions per name, only `__Host-dd` is read: the domain-wide `dd_session`
 from before is not, since any name of the domain can set one in a browser
-(its owner's own session, to sign the browser in as them). Signing out
-clears both.
+(its owner's own session, to sign the browser in as them). So moving to stage
+`on` signs everyone out once. Signing out clears both.
+
+**Stages.** `dd id setup` uploads the Worker and writes the file at `try`: every
+box serves `/_dd/sso/*` and takes a hand-off into a `__Host-dd` for that name,
+reads both cookies, and everything else is as it was, so the whole path can be
+tried at `https://home.<domain>/_dd/sso/start`. `on` moves `/_dd/login` and every
+session to it. Going back: `try` again, or take the file out; each is a release.
+With the Worker out of reach, `/_dd/login?here` is still this box's own page,
+and signs in this box alone.
+
+A cookie for one name still rides along with a request another name's page
+makes, the browser counting every name of the domain as one site. A change
+asked by a page more than one label below the domain (a box's own names, a
+joined box's) has its cookie removed before the gate or `/verify` reads it,
+unless that page is on the name it asks (`no_session_for_a_page_below`).
 
 **Metrics** are a box's owner's (`box.json` owner, `VERIFY_OWNER`) and the
 admin's (`policy.json` owner, `VERIFY_ADMIN`): `metrics.<domain>` and a
@@ -259,8 +285,8 @@ What a box receives works nowhere else: the hand-off names its host and
 its challenge, and the cookie is this box's and this name's. That is why
 sessions are per name with sign-in at the Worker: a cookie for the whole
 domain is sent to every box's names, and any one of them could replay it.
-Each name of a box makes the trip once, with no prompt. The domain-wide
-`dd_session` from before is still read until it runs out.
+Each name of a box has a session with no prompt, from the first trip's
+background hand-offs or its own trip.
 
 A passkey shown to confirm something (the Devices tab, deleting a disk
 image) is still this box's own ceremony below; in a session that is
