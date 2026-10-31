@@ -528,7 +528,8 @@
    "nix/tests/lib/waits.py",
    "nix/modules/forge/runner-start.sh",
    "nix/modules/forge/runner-keys.nix",
-   "nix/modules/forge/runner-token.sh"
+   "nix/modules/forge/runner-token.sh",
+   "nix/modules/forge/ci-resume.py"
   ],
   "why": {
    "nix/modules/forge/runner-restart.nix": "dd-runner-restart unit/timer, restartIfChanged=false, 'started' ExecStartPre, entry format",
@@ -541,7 +542,8 @@
    "nix/tests/lib/waits.py": "start_fresh/journal_of/wait_unit_active drive the dd-runner-restart passes",
    "nix/modules/forge/runner-start.sh": "the runners' main process (replaced runner-address.sh): waits for the forge, fetches and opens its sealed token, registers, starts the runner",
    "nix/modules/forge/runner-keys.nix": "dd-runner-keys seals each runner box's registration tokens to its secrets key; the test asserts box.host.age and the members token",
-   "nix/modules/forge/runner-token.sh": "opens the sealed token into /var/lib/dd-runner-token/{host,members}.env, which the test greps"
+   "nix/modules/forge/runner-token.sh": "opens the sealed token into /var/lib/dd-runner-token/{host,members}.env, which the test greps",
+   "nix/modules/forge/ci-resume.py": "the killed-job section runs ci-resume on the host"
   },
   "notes": "runner-capacity.sh is skipped when capacity is fixed (it is, here). The gate is only stopped/started as part of the switch; its code is not asserted.",
   "family": "vm"
@@ -3823,5 +3825,20 @@
    "app/Cargo.toml": "crane reads the app's manifest for its name and version at evaluation"
   },
   "notes": "legacyPackages.appReleaseEvaluates: the four downloads' recipes evaluated, never built (the boxes build them after a release). Cheap beside the app's lint and tests, so it stays on pull requests in flake_check while app_checks is main's alone."
+ },
+ "ci-resume": {
+  "paths": [
+   "nix/tests/ci-resume.nix",
+   "nix/tests/ci-resume/**",
+   "nix/modules/forge/ci-resume.py",
+   ".forgejo/workflows/entry_point.yml"
+  ],
+  "why": {
+   "nix/tests/ci-resume.nix": "the check",
+   "nix/tests/ci-resume/**": "its cases",
+   "nix/modules/forge/ci-resume.py": "the script under test",
+   ".forgejo/workflows/entry_point.yml": "ci_ok's script is read from it"
+  },
+  "notes": ""
  }
 }
