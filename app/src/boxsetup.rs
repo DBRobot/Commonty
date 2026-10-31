@@ -138,6 +138,9 @@ fn open_window<R: Runtime>(app: &AppHandle<R>) -> Result<Response<Vec<u8>>, Stri
 struct Write {
     device: String,
     wifi: WifiChoice,
+    /// its member says this house's line has no data cap
+    #[serde(default)]
+    flat: bool,
 }
 
 /// this computer's network, one typed in, or none: wired
@@ -260,7 +263,7 @@ async fn write_drive<R: Runtime>(app: &AppHandle<R>, w: Write) -> Result<(), Str
         p.stage = "key".into();
         p.phase = "key".into();
     });
-    let drive = made(app, &version, wifi).await?;
+    let drive = made(app, &version, wifi, w.flat).await?;
     let id = drive.ticket_id.clone();
     tauri::async_runtime::spawn_blocking(move || {
         installer::card::write_files(&disk, &drive.files())
@@ -284,6 +287,8 @@ struct Drive {
     /// the pending backup's restic password
     backup_key: Zeroizing<String>,
     wifi: Option<Zeroizing<String>>,
+    /// what its member said of its line; nothing said, no file
+    flat: bool,
     version: String,
 }
 
@@ -297,6 +302,9 @@ impl Drive {
         if let Some(w) = &self.wifi {
             f.push(("wifi.json", w.as_bytes()));
         }
+        if self.flat {
+            f.push(("line.json", br#"{"metered":false}"#));
+        }
         f
     }
 }
@@ -308,6 +316,7 @@ async fn made<R: Runtime>(
     app: &AppHandle<R>,
     version: &str,
     wifi: Option<(String, Zeroizing<String>)>,
+    flat: bool,
 ) -> Result<Drive, String> {
     let keys = app.state::<crate::account::Keys>();
     let user = keys
@@ -347,6 +356,7 @@ async fn made<R: Runtime>(
         ticket_id,
         backup_key,
         wifi,
+        flat,
         version: version.to_string(),
     })
 }
@@ -693,6 +703,7 @@ mod tests {
             ticket_id: "ab".repeat(16),
             backup_key: Zeroizing::new("KEY".into()),
             wifi: None,
+            flat: false,
             version: "0.1.30".into(),
         };
         let names: Vec<_> = d.files().iter().map(|(n, _)| *n).collect();
@@ -705,6 +716,8 @@ mod tests {
         assert_eq!(f.len(), 4);
         assert_eq!(f[3], ("wifi.json", &br#"{"ssid":"a","psk":"b"}"#[..]));
         assert_eq!(f[0].1, b"TICKET");
+        let d = Drive { flat: true, ..d };
+        assert_eq!(d.files()[4], ("line.json", &br#"{"metered":false}"#[..]));
     }
 
     #[test]

@@ -159,7 +159,7 @@ async function write() {
     const r = await api('/write', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ device: chosen.id, wifi: wifiChoice() }),
+      body: JSON.stringify({ device: chosen.id, wifi: wifiChoice(), flat: $('hi-flat').checked }),
     });
     if (!r.ok) return failed(await said(r));
   }
