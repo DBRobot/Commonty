@@ -12,7 +12,8 @@
 # NOT_BEFORE (seconds: the oldest release it takes, when it was made),
 # DISK (to name the disk when there is more than one; it is wiped),
 # Secure Boot in setup mode (its keys cleared at the firmware's screen),
-# WIFI ({ssid, psk}, a file) and TICKET (the member's join ticket, a file),
+# WIFI ({ssid, psk}, a file), LINE ({metered}, a file: its member's word) and
+# TICKET (the member's join ticket, a file),
 # both from the drive's commonty/ (docs/dev/joining.md), BUILD_LOG_FORMAT (nix's,
 # for the screen to read). --tidy: only what a failed install left is undone.
 set -euo pipefail
@@ -135,6 +136,13 @@ if [ -n "${TICKET:-}" ] && [ -s "$TICKET" ]; then
   install -m 0600 "$TICKET" /mnt/var/lib/dd/join-ticket
 fi
 jq --arg ssid "$ssid" '.house.ssid = $ssid | .house.sealedWifi = ($ssid != "")' "$BOX_JSON" > /mnt/var/lib/dd/box/box.json
+
+# its member's word on its line, if they gave one: nothing said takes no
+# heavy traffic (capability.nix)
+if [ -n "${LINE:-}" ] && [ -s "$LINE" ] && jq -e '.metered | type == "boolean"' "$LINE" >/dev/null; then
+  jq --slurpfile l "$LINE" '.internet.metered = $l[0].metered' /mnt/var/lib/dd/box/box.json > "$w/box.json"
+  cp "$w/box.json" /mnt/var/lib/dd/box/box.json
+fi
 
 # its system, built here from that commit and its report, onto the disk:
 # the installer's own store is memory. What it already has is taken from it

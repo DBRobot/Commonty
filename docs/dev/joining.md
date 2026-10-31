@@ -219,6 +219,10 @@ box installer (full screen)        fleet
   - **Decided** (David, 2026-10-12): the box enrolls keys of its own, over
     systemd-pcrlock binding PCR 4, which needs no firmware step but moves
     the pool's key into LUKS and predicts every release's boot.
+- **Its line**: setting up the drive, its member may say the line has no
+  data cap (`line.json` on the drive, box.json `internet.metered`). Nothing
+  said, it takes no `high` traffic and is never speed-tested
+  ([servers](servers.md#needs-and-placement)).
 - **Wi-Fi**: the network the box was set up on (the drive's `wifi.json`, or
   one picked on the screen) is sealed to the box's secrets key, which only
   its TPM opens (`/var/lib/dd/wifi.age`, box.json `house.sealedWifi`). The
