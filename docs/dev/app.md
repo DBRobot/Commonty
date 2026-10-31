@@ -16,7 +16,11 @@ Its code is in [`app/`](../../app/); how it is built and released is
   ([`app/net/`](../../app/net/)), built into the app. Joining asks the gate for
   a single-use key in the member's name; the membership then lives on disk
   and resumes at every start. Boxes are reached directly by name, not
-  through the public door.
+  through the public door. When the control server forgets the device (its
+  node deleted: control answers 404, or a login url to a resume), the app
+  drops the engine, its state and the `joined` marker, and joins again with
+  a new key, a minute after a failed try and then longer, to half an hour
+  (`net::watch`). A signed-in device with no state on disk joins at start.
 - **Carries the site's pages.** The signed-in pages (home, Files, Movies &
   TV, Settings) ship inside the app and are served to its own window
   ([`app/src/site.rs`](../../app/src/site.rs)), so they open without a round
@@ -291,6 +295,15 @@ the browser ─ POST /_dd/app/pair/finish {verifier} ─▶ the hash matches and
   first calls wait for it on a device that has joined, and a call that
   finds no way through yet is sent again (`local::send`), so a page opened
   at once is not a 502. A 502 says why in the app's log.
+- **A device on the network calls nowhere else.** While it is joined (or
+  joining again after being forgotten) and the engine is not up, calls
+  fail with "not on your boxes' network" rather than go straight out:
+  some services answer only on the network (Passwords' sign-in refresh is
+  turned away outside it, and that signs the person out). A proxy whose
+  engine has stopped running is dropped on the first call it refuses
+  (`net::drop_if_down`), not sent every call; the watcher puts it back
+  once the engine is running again. The status says not connected, so the
+  start screen shows Reconnect.
 - **Links come in** by `tauri-plugin-deep-link`. The `.deb` desktop entry
   and the Windows installer register the scheme. An AppImage registers
   itself at start. On Android it is an intent filter in the manifest. On

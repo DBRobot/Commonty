@@ -1350,6 +1350,11 @@ async fn file(root: Option<&Path>, path: &str, shell: bool) -> Response {
 pub(crate) fn http() -> Result<reqwest::Client, String> {
     static C: Mutex<Option<(Option<String>, reqwest::Client)>> = Mutex::new(None);
     let via = directory::proxy().map(|p| format!("{}\0{}\0{}", p.addr, p.user, p.password));
+    // a device on the network goes there or nowhere: straight out, a box's
+    // services that answer only on it turn the call away
+    if via.is_none() && crate::net::wanted() {
+        return Err(crate::net::NOT_ON_NETWORK.to_string());
+    }
     let mut c = C.lock().map_err(|e| e.to_string())?;
     if let Some((v, client)) = c.as_ref()
         && *v == via
@@ -1385,7 +1390,9 @@ pub(crate) async fn network_ready() {
 }
 
 /// A call to a box, sent again when it found no way through yet (the
-/// network still finding the box), if it has no body to send twice
+/// network still finding the box), if it has no body to send twice. A
+/// proxy whose engine is not running refuses everything (a node the
+/// network forgot): not again into it, and the next calls are told so.
 pub(crate) async fn send(mut out: reqwest::RequestBuilder) -> reqwest::Result<reqwest::Response> {
     for _ in 0..3 {
         let Some(again) = out.try_clone() else { break };
@@ -1396,6 +1403,12 @@ pub(crate) async fn send(mut out: reqwest::RequestBuilder) -> reqwest::Result<re
                     e.url().map(|u| u.path()).unwrap_or(""),
                     why(&e)
                 );
+                let down = tauri::async_runtime::spawn_blocking(crate::net::drop_if_down)
+                    .await
+                    .unwrap_or(false);
+                if down {
+                    return Err(e);
+                }
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 out = again;
             }

@@ -4,10 +4,12 @@
 //! asked through that proxy, by the box's name, straight to the box.
 
 use std::ffi::{CStr, CString, c_char};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::account::Keys;
 
@@ -41,6 +43,8 @@ struct Started {
     credential: String,
     ip: String,
     #[serde(default)]
+    gone: bool,
+    #[serde(default)]
     error: String,
 }
 
@@ -59,6 +63,9 @@ pub struct NetStatus {
     pub name: String,
     #[serde(default)]
     pub peers: Vec<Peer>,
+    /// the control server no longer knows this device: it joins again
+    #[serde(default)]
+    pub gone: bool,
     #[serde(default)]
     pub error: String,
     /// whether this device has joined before (state on disk)
@@ -174,27 +181,62 @@ fn start(control: &str, key: &str, tunfd: i32) -> Result<Started, String> {
         )
     });
     let st: Started = serde_json::from_str(&out).map_err(|e| format!("engine: {e}: {out}"))?;
+    if st.gone {
+        GONE.store(true, Ordering::SeqCst);
+    }
     if !st.error.is_empty() {
         return Err(st.error);
     }
+    GONE.store(false, Ordering::SeqCst);
+    WANT.store(false, Ordering::SeqCst);
     eprintln!("network: on as {}, proxy at {}", st.ip, st.proxy);
     // joined for real: the next start resumes from here without a key
     let _ = std::fs::write(&marker, st.ip.as_bytes());
     if std::env::var_os("COMMONTY_NET_DEBUG").is_some() {
         eprintln!("network: proxy credential {}", st.credential);
     }
-    directory::via(Some(directory::Proxy {
+    let p = directory::Proxy {
         addr: st.proxy.clone(),
         user: "tsnet".to_string(),
         password: st.credential.clone(),
-    }));
+    };
+    if let Ok(mut l) = PROXY.lock() {
+        *l = Some(p.clone());
+    }
+    directory::via(Some(p));
     open_browser();
     Ok(st)
 }
 
+/// the control server said this device is not on the network any more
+static GONE: AtomicBool = AtomicBool::new(false);
+
+/// signed in, and not joined: the app was started with no state on disk
+static WANT: AtomicBool = AtomicBool::new(false);
+
+/// whether this device belongs on the network, so its calls to the boxes
+/// go nowhere else: some services answer only there (Passwords' sign-in
+/// refresh, outside it, is turned away and signs the person out)
+pub fn wanted() -> bool {
+    joined() || GONE.load(Ordering::SeqCst)
+}
+
+pub const NOT_ON_NETWORK: &str =
+    "this device is not on your boxes' network right now; it is joining again";
+
+/// the engine's proxy while it is up, to point clients at again after a
+/// call found the engine down and went straight out
+static PROXY: std::sync::Mutex<Option<directory::Proxy>> = std::sync::Mutex::new(None);
+
 fn status_now() -> NetStatus {
     let out = take(unsafe { commonty_net_status() });
     let mut st: NetStatus = serde_json::from_str(&out).unwrap_or_default();
+    if GONE.load(Ordering::SeqCst) && !st.running {
+        st.gone = true;
+    }
+    if st.gone && st.error.is_empty() {
+        st.error = NOT_ON_NETWORK.to_string();
+    }
     st.joined = state_dir()
         .map(|d| d.join("joined").exists())
         .unwrap_or(false);
@@ -213,6 +255,19 @@ pub async fn net_status() -> Result<NetStatus, String> {
 /// takes it once, and from then on the state on disk is the membership
 #[tauri::command]
 pub async fn net_join(app: tauri::AppHandle, keys: State<'_, Keys>) -> Result<NetStatus, String> {
+    // a device the network forgot: its state is worth nothing now
+    if status_now().gone {
+        forget_node(&app);
+    }
+    join(&app, &keys).await?;
+    Ok(status_now())
+}
+
+/// one join at a time: Reconnect and the watcher's rejoin would each make a node
+static JOINING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+async fn join(app: &tauri::AppHandle, keys: &Keys) -> Result<(), String> {
+    let _one = JOINING.lock().await;
     let (_, user, token) = media::gate::Opener::load(&keys.0).map_err(|e| e.to_string())?;
     let dirs = crate::account::dirs();
     // the front door: this device is not on the network yet
@@ -237,7 +292,9 @@ pub async fn net_join(app: tauri::AppHandle, keys: State<'_, Keys>) -> Result<Ne
         .ok_or("no control url")?
         .to_string();
     let key = v["key"].as_str().ok_or("no key")?.to_string();
+    let handle = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let app = handle;
         let st = start(&control, &key, -1)?;
         // joined; a phone now takes the network for the whole device
         #[cfg(target_os = "android")]
@@ -254,7 +311,110 @@ pub async fn net_join(app: tauri::AppHandle, keys: State<'_, Keys>) -> Result<Ne
     })
     .await
     .map_err(|e| e.to_string())??;
-    Ok(status_now())
+    watch(app);
+    Ok(())
+}
+
+/// a node the network forgot: off it, calls straight out at once, and its
+/// state and marker gone so the next start is a join and not a resume
+fn forget_node(app: &tauri::AppHandle) {
+    stop();
+    #[cfg(target_os = "android")]
+    crate::vpn::down(app);
+    let _ = app;
+    GONE.store(true, Ordering::SeqCst);
+    if let Ok(d) = state_dir() {
+        clear_state(&d);
+    }
+}
+
+fn clear_state(dir: &Path) {
+    for f in ["tailscaled.state", "joined"] {
+        let _ = std::fs::remove_file(dir.join(f));
+    }
+}
+
+/// the gate's door makes a node per join: after a failure, a minute, then
+/// longer each time, to half an hour
+const FIRST_WAIT: Duration = Duration::from_secs(60);
+const LONGEST_WAIT: Duration = Duration::from_secs(30 * 60);
+const LOOK_EVERY: Duration = Duration::from_secs(15);
+
+/// One look at the engine. A forgotten node: off the network and joined
+/// again; a device that wants on and is not: joined. The wait before the
+/// next look, longer after a failed join.
+fn step(
+    st: &NetStatus,
+    want: bool,
+    wait: Duration,
+    forget: impl FnOnce(),
+    rejoin: impl FnOnce() -> Result<(), String>,
+) -> Duration {
+    if st.gone {
+        forget();
+    } else if !want || st.running {
+        return FIRST_WAIT;
+    }
+    match rejoin() {
+        Ok(()) => {
+            eprintln!("network: joined again");
+            FIRST_WAIT
+        }
+        Err(e) => {
+            eprintln!("network: joining again: {e}; next in {}s", wait.as_secs());
+            std::thread::sleep(wait);
+            (wait * 2).min(LONGEST_WAIT)
+        }
+    }
+}
+
+/// the engine looked at while the app runs: a node the control server
+/// forgot is joined again, and the proxy is put back once the engine is
+/// running again after a call went around it (local::send)
+fn watch(app: &tauri::AppHandle) {
+    static ON: AtomicBool = AtomicBool::new(false);
+    if ON.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let mut wait = FIRST_WAIT;
+        loop {
+            std::thread::sleep(LOOK_EVERY);
+            let st = status_now();
+            if st.running
+                && directory::proxy().is_none()
+                && let Some(p) = PROXY.lock().ok().and_then(|p| p.clone())
+            {
+                directory::via(Some(p));
+            }
+            wait = step(
+                &st,
+                WANT.load(Ordering::SeqCst),
+                wait,
+                || forget_node(&app),
+                || {
+                    let keys = app
+                        .try_state::<Keys>()
+                        .ok_or_else(|| "no keys".to_string())?;
+                    tauri::async_runtime::block_on(join(&app, &keys))
+                },
+            );
+        }
+    });
+}
+
+/// a call found no way through the proxy: if the engine is not running,
+/// the proxy refuses everything, so it is dropped and calls say the device
+/// is off the network (local::http) until the engine is back (the watcher
+/// puts the proxy back) or joined again
+pub fn drop_if_down() -> bool {
+    if directory::proxy().is_none() || status_now().running {
+        return false;
+    }
+    eprintln!("network: the engine is not running; calls wait for it");
+    directory::via(None);
+    true
 }
 
 /// resume from the state on disk, at app start; nothing if never joined
@@ -262,6 +422,15 @@ pub fn resume(app: &tauri::AppHandle, control: &str) {
     let Ok(d) = state_dir() else { return };
     // the marker holds this node's address, which the phone's VPN needs
     let Ok(ip) = std::fs::read_to_string(d.join("joined")) else {
+        // no state, but signed in: a device whose state was cleared (or
+        // set aside by hand) joins again rather than staying off
+        if app
+            .try_state::<Keys>()
+            .is_some_and(|k| media::gate::Opener::load(&k.0).is_ok())
+        {
+            WANT.store(true, Ordering::SeqCst);
+            watch(app);
+        }
         return;
     };
     let (app, control) = (app.clone(), control.to_string());
@@ -284,6 +453,8 @@ pub fn resume(app: &tauri::AppHandle, control: &str) {
             #[cfg(target_os = "android")]
             crate::vpn::down(&app);
         }
+        // and from here on, a node the control server forgets joins again
+        watch(&app);
     });
 }
 
@@ -294,5 +465,108 @@ pub fn joined() -> bool {
 
 pub fn stop() {
     unsafe { commonty_net_stop() };
+    if let Ok(mut p) = PROXY.lock() {
+        *p = None;
+    }
     directory::via(None);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    fn gone() -> NetStatus {
+        NetStatus {
+            gone: true,
+            ..Default::default()
+        }
+    }
+
+    // a node the control server forgot comes off the network before it
+    // joins again, and a failed join waits longer each time, to a cap
+    #[test]
+    fn forgotten_node_comes_off_then_joins_again() {
+        let calls = RefCell::new(Vec::new());
+        let ok = NetStatus {
+            running: true,
+            ..Default::default()
+        };
+        let w = step(
+            &ok,
+            true,
+            FIRST_WAIT,
+            || calls.borrow_mut().push("off"),
+            || Ok(()),
+        );
+        assert!(calls.borrow().is_empty(), "a running node is left alone");
+        assert_eq!(w, FIRST_WAIT);
+
+        let mut wait = Duration::from_millis(1);
+        for _ in 0..2 {
+            wait = step(
+                &gone(),
+                false,
+                wait,
+                || calls.borrow_mut().push("off"),
+                || {
+                    calls.borrow_mut().push("join");
+                    Err("the gate is away".to_string())
+                },
+            );
+        }
+        assert_eq!(*calls.borrow(), ["off", "join", "off", "join"]);
+        assert_eq!(wait, Duration::from_millis(4));
+        let w = step(&gone(), false, Duration::from_millis(1), || {}, || Ok(()));
+        assert_eq!(
+            w, FIRST_WAIT,
+            "joined: the next failure waits the least again"
+        );
+        assert_eq!((LONGEST_WAIT * 2).min(LONGEST_WAIT), LONGEST_WAIT);
+    }
+
+    // signed in with no state on disk (cleared, or set aside by hand): it
+    // joins, and nothing of an old node is taken off first
+    #[test]
+    fn a_device_off_the_network_joins() {
+        let calls = RefCell::new(Vec::new());
+        let off = NetStatus::default();
+        step(
+            &off,
+            true,
+            Duration::from_millis(1),
+            || calls.borrow_mut().push("off"),
+            || {
+                calls.borrow_mut().push("join");
+                Ok(())
+            },
+        );
+        assert_eq!(*calls.borrow(), ["join"]);
+        calls.borrow_mut().clear();
+        step(
+            &off,
+            false,
+            Duration::from_millis(1),
+            || calls.borrow_mut().push("off"),
+            || {
+                calls.borrow_mut().push("join");
+                Ok(())
+            },
+        );
+        assert!(calls.borrow().is_empty(), "a device never joined stays off");
+    }
+
+    #[test]
+    fn clearing_takes_the_state_and_marker_only() {
+        let dir = std::env::temp_dir().join(format!("commonty-net-clear-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for f in ["tailscaled.state", "joined", "proxy.pac"] {
+            std::fs::write(dir.join(f), "x").unwrap();
+        }
+        clear_state(&dir);
+        assert!(!dir.join("tailscaled.state").exists());
+        assert!(!dir.join("joined").exists());
+        assert!(dir.join("proxy.pac").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }
