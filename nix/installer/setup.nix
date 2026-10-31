@@ -80,7 +80,11 @@ in
       };
     };
     # the screen: the steps, and nothing else to click away to
-    users.users.setup = lib.mkIf config.dd.setup.screen { isNormalUser = true; };
+    users.users.setup = lib.mkIf config.dd.setup.screen {
+      isNormalUser = true;
+      group = "setup";
+    };
+    users.groups.setup = lib.mkIf config.dd.setup.screen { };
     systemd.services."cage-tty1" = lib.mkIf config.dd.setup.screen {
       after = [ "dd-box-setup-token.service" ];
       requires = [ "dd-box-setup-token.service" ];
