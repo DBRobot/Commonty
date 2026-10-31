@@ -15,6 +15,11 @@ are not built yet (below, Open).
    `dd computer`, the outbound rules and the allowance.
 4. **Snapshots**, so a computer can come back on another box. Not built.
 
+A member's computer goes on a joined box they enlisted first, when one has
+room; a member with none is hosted as before. One whose owner said anyone's
+goes on another member's box only when the release's have no room. On a joined
+box it runs by the plan alone, with no lease.
+
 A box hosts computers when its own report says it has KVM on x86_64 and
 its owner does not bar them: it is then built with the `compute` bundle
 (nix/lib/fleet-placement.nix, nix/roles/bundles.json) and the release's

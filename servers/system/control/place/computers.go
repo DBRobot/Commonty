@@ -17,17 +17,30 @@ const ComputersService = "computers"
 // placeComputers puts each remote computer that is up on one box
 // (docs/dev/remote-computers.md): sized against what the box says it has
 // for computers (computers.prom), less what is placed there already; on
-// the owner's boxes only for "own"; and once on a box, kept there while
-// that box is alive, whatever it now has room for (moves on failure)
-func placeComputers(in Inputs, s *state.State, p *Plan, live []string, now map[string]map[string]bool, draining func(string) bool, perGiB float64) {
+// the owner's boxes only for "own", and first on a joined box of theirs for
+// any; and once on a box, kept there while that box is alive, whatever it now
+// has room for (moves on failure)
+func placeComputers(in Inputs, s *state.State, p *Plan, live []string, now map[string]map[string]bool, draining func(string) bool, perGiB float64, owners map[string]string) {
 	type room struct{ mem, threads, disk float64 }
-	// a computer is plaintext to its host: only a box of the release whose
-	// table gives it computers and whose owner does not bar them, never a
-	// stranger nor a box on its own word
+	// a joined box its enlisted owner keeps: it may hold only theirs (may)
+	joinedHost := func(name string) bool {
+		b := s.Boxes[name]
+		if b == nil {
+			return false
+		}
+		_, can := b.Facts["can/"+ComputersService]
+		return in.Joined != nil && in.Joined.Attested && owners[name] != "" && b.Facts["can_live"] > 0 && can
+	}
+	// a computer is plaintext to its host: a box of the release whose table
+	// gives it computers and whose owner does not bar them, or its owner's own
+	// box by the agreed state; never a stranger nor a box on its own word
 	host := func(name string) bool {
 		rel, listed := in.Boxes[name]
+		if !listed {
+			return joinedHost(name)
+		}
 		_, can := rel.Can[ComputersService]
-		return listed && can && !slices.Contains(rel.Barred, ComputersService)
+		return can && !slices.Contains(rel.Barred, ComputersService)
 	}
 	left := map[string]*room{}
 	for _, name := range live {
@@ -38,16 +51,20 @@ func placeComputers(in Inputs, s *state.State, p *Plan, live []string, now map[s
 		// hardware its signed report gives the release, nor what its
 		// heartbeat measures
 		f, rel := s.Boxes[name].Facts, in.Boxes[name]
-		mem := min(f["computer_max_mem_bytes"], rel.MemoryGiB*gib)
+		// (a joined box has no report in the release: its word on its own
+		// room only hurts its owner's own computers)
+		mem, threads, disk := f["computer_max_mem_bytes"], f["computer_max_threads"], f["computer_max_disk_bytes"]
+		if _, listed := in.Boxes[name]; listed {
+			mem, threads, disk = min(mem, rel.MemoryGiB*gib), min(threads, rel.Threads), min(disk, rel.PoolGiB*gib)
+		}
 		if r := f["ram_bytes"]; r > 0 {
 			mem = min(mem, r)
 		}
-		threads := min(f["computer_max_threads"], rel.Threads)
 		if c := f["cores"]; c > 0 {
 			threads = min(threads, c)
 		}
 		if f["kvm"] > 0 && f["x86_64"] > 0 {
-			left[name] = &room{mem, threads, min(f["computer_max_disk_bytes"], rel.PoolGiB*gib)}
+			left[name] = &room{mem, threads, disk}
 		}
 	}
 	// what one adds to a box: its memory and threads, and the disk it may
@@ -91,8 +108,26 @@ func placeComputers(in Inputs, s *state.State, p *Plan, live []string, now map[s
 	// their room whatever comes after
 	// whether c may be on this box at all: one the release lets hold
 	// computers and, for "own", whose box it is by the release's word
-	// (box.json), not an enlistment, which is the member's alone
+	// (box.json); a joined box enlisted by c's own owner, whatever c says; or,
+	// for a computer whose owner said it may run on anyone's, another member's
+	mine := func(name string, c *computers.Listed) bool {
+		_, listed := in.Boxes[name]
+		return !listed && owners[name] == c.Owner
+	}
+	rank := func(name string, c *computers.Listed) int {
+		_, listed := in.Boxes[name]
+		switch {
+		case mine(name, c):
+			return 2
+		case listed:
+			return 1
+		}
+		return 0
+	}
 	may := func(name string, c *computers.Listed) bool {
+		if _, listed := in.Boxes[name]; !listed {
+			return left[name] != nil && (mine(name, c) || c.Consent == "any")
+		}
 		return left[name] != nil && (c.Consent == "any" || in.Boxes[name].Owner == c.Owner)
 	}
 	// a box's word that it runs one keeps it only where it may be
@@ -132,7 +167,9 @@ func placeComputers(in Inputs, s *state.State, p *Plan, live []string, now map[s
 			carry := max(size(c.ID)-min(used(name, c.ID), size(c.ID)), 0) / gib
 			// memory to spare after it, less what moving it here carries
 			f := 0.5*(r.mem-n.mem)/max(s.Boxes[name].Facts["computer_max_mem_bytes"], 1) - perGiB*carry
-			if best == "" || f > bestF {
+			// a box of their own first, then the release's as ever, then
+			// another member's
+			if best == "" || rank(name, c) > rank(best, c) || (rank(name, c) == rank(best, c) && f > bestF) {
 				best, bestF = name, f
 				bestWhy = fmt.Sprintf("fits: %.1f GiB, %d threads, %d GiB; carries %.1f GiB", n.mem/gib, c.Threads, c.Disk, carry)
 			}

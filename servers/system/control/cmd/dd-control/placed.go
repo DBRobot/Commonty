@@ -89,6 +89,10 @@ type placer struct {
 	refused map[string]int64
 	// where the plan's copies are written; empty: not at all
 	copies string
+	// a joined box holds no lease yet (leases on such boxes are for later):
+	// a computer it is given runs by the plan alone, on its owner's box and
+	// its disk there, for as long as fresh plans keep giving it (ownComputer)
+	noLeases bool
 	// the computers agreed now (computer-<id>), from the same state as the
 	// plan; nil, or an error, and none runs here
 	agreed func(s *state.State) (map[string]*computers.Listed, error)
@@ -508,6 +512,10 @@ func (p *placer) reconcile(plan place.Plan, s *state.State) {
 	}
 	ok := p.allowed(want, s)
 	for _, svc := range slices.Sorted(maps.Keys(cs)) {
+		if p.noLeases {
+			p.ownComputer(svc, want[svc] && ok[svc])
+			continue
+		}
 		p.reconcileLeased(svc, want[svc] && ok[svc], false, s)
 	}
 	// what the plan gives any box
@@ -549,6 +557,29 @@ func (p *placer) reconcile(plan place.Plan, s *state.State) {
 				_ = p.run(append([]string{"stop", "--no-block"}, p.units(svc)...)...)
 			}
 		}
+	}
+}
+
+// how long a computer on a box without leases runs past the last fresh plan
+// that gave it: its flag's until, which the fence stops it at
+const ownComputerFor = 2 * freshFor
+
+// ownComputer: a computer on a joined box, run while fresh plans give it here
+func (p *placer) ownComputer(svc string, want bool) {
+	if !want {
+		if p.up(svc) {
+			_ = p.stop(svc, "the plan does not give it here", false)
+		}
+		return
+	}
+	first := !p.up(svc)
+	content, _ := json.Marshal(held{Until: p.uptime() + ownComputerFor.Milliseconds()})
+	if err := p.raise(svc, content); err != nil {
+		log.Printf("placed: %s: %v", svc, err)
+		return
+	}
+	if first {
+		p.start(svc)
 	}
 }
 
