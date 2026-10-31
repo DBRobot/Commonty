@@ -150,6 +150,15 @@ let
       }).can ? pihole;
     "what is its owner's runs on a box somebody owns" = (judgedAs { }).can ? mine;
     "and not on a box nobody owns" = !((judgedAs { owner = null; }).can ? mine);
+    "a line nobody has said is flat takes no heavy traffic, and says so" =
+      lib.any (lib.hasInfix "nobody has said") (judgedAs { internet = { }; }).cannot.computers;
+    "a line said to be metered says that" =
+      lib.any (lib.hasInfix "the line is metered")
+        (judgedAs {
+          internet = {
+            metered = true;
+          };
+        }).cannot.computers;
   };
   failed =
     lib.concatLists (lib.zipListsWith (ok: n: lib.optional (!ok) n) expect names)
