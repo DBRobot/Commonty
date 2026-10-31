@@ -1,9 +1,9 @@
-# The control plane moving from release 359 to this one while it decides
-# (nix/tests/control-upgrade/run.py): two box validators, the witness and a
-# box that only reads, all on release 359's dd-control and witness, switched
-# to this release's one at a time, in two orders. Release 359's programs
-# are built from its commit, fetched from the forge's public door. No
-# network, no vm.
+# The control plane moving from the release the fleet runs to this one
+# while it decides (nix/tests/control-upgrade/run.py): two box validators,
+# the witness and a box that only reads, all on the old dd-control and
+# witness, switched to this release's one at a time, in two orders. The old
+# programs are built from their commit, fetched from the forge's public
+# door. No network, no vm.
 #
 # scenario "together": release 360's switch of 2026-10-24, the witness in
 # the config and off, both boxes switched at once; the leased writers must
@@ -29,28 +29,28 @@
 let
   sys = pkgs.stdenv.hostPlatform.system;
   python = pkgs.python3.withPackages (ps: [ ps.cryptography ]);
-  # hotfix-355's head: release 359, what the fleet runs before this one
+  # release 370, what the fleet runs before this one (state machine 2)
   old =
     let
       src = pkgs.fetchgit {
         url = "https://code.commonty.org/david/commonty.git";
-        rev = "40c76145d806b6ec28704fe7ec6d2a66d841cd96";
+        rev = "489e6dfe07e7bc41f87af01b588277039682437d";
         sparseCheckout = [ "servers/system/control" ];
-        hash = "sha256-BYxms7+ABkfZCfa5JT05k2oGQ+BhpKA1tsDDXecxvGo=";
+        hash = "sha256-UvLbiKoWogP2NxZh2bTaIz5HBK/gyTHzGUQYZvqT2iQ=";
       };
       control = "${src}/servers/system/control";
       dd-control = pkgs.buildGoModule {
-        pname = "dd-control-359";
+        pname = "dd-control-old";
         version = "0.1.0";
         src = control;
-        vendorHash = "sha256-sYPGMtJetj/Ou1Q52s2tfRJkNcaiPlhuqIiq/H/1UjY=";
+        vendorHash = "sha256-PdyOvSGb4sSM/5lYK1O2WwwfGPpkWtGxAoJ2RfuzjRU=";
         subPackages = [ "cmd/dd-control" ];
         doCheck = false;
       };
     in
     {
       inherit dd-control;
-      witness = pkgs.runCommand "dd-control-witness-359" { nativeBuildInputs = [ pkgs.go ]; } ''
+      witness = pkgs.runCommand "dd-control-witness-old" { nativeBuildInputs = [ pkgs.go ]; } ''
         export HOME=$TMPDIR GOCACHE=$TMPDIR/cache GOFLAGS=-mod=vendor GOOS=js GOARCH=wasm CGO_ENABLED=0
         cp -r ${control} src && chmod -R u+w src && cd src
         cp -r ${dd-control.goModules} vendor

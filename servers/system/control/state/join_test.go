@@ -1,13 +1,26 @@
+//go:build testswitches
+
 package state
 
 import (
+	"commonty/control/state/attest"
 	"commonty/control/state/ident"
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 )
+
+// a fleet whose release lets a box join on its word (attest.Test): what
+// these tests judge is the join itself; attest_test.go its proof
+func joinFleet(t *testing.T) *fleet {
+	f := attestFleet(t)
+	f.c.Attest = &attest.Config{Test: &attest.Test{UnattestedJoin: true}}
+	return f
+}
 
 // a key for the fake verifier: any base64 will do
 func strangerKey(i int) string {
@@ -27,7 +40,7 @@ func joinReq(key string, seq uint64) Request {
 }
 
 func TestABoxBelowTheMinimumCannotJoin(t *testing.T) {
-	f := newFleet(t)
+	f := joinFleet(t)
 	for i, short := range []string{"threads", "mem_total_bytes", "system_disk_bytes", "tpm_major", "secure_boot_capable", "nics"} {
 		k := strangerKey(i)
 		name, _, _ := JoinName(k)
@@ -55,7 +68,7 @@ func TestABoxBelowTheMinimumCannotJoin(t *testing.T) {
 }
 
 func TestAStrangerJoinsOnItsOwnKeyAndNameAndHoldsNoLease(t *testing.T) {
-	f := newFleet(t)
+	f := joinFleet(t)
 	k := strangerKey(1)
 	name, id, _ := JoinName(k)
 	if f.block(1000, joinReq(k, 1)) != 1 || f.s.Joined[name] == nil || f.s.Joined[name].ID != id {
@@ -74,7 +87,7 @@ func TestAStrangerJoinsOnItsOwnKeyAndNameAndHoldsNoLease(t *testing.T) {
 }
 
 func TestAJoinCannotTakeANameOrAKeyThatIsNotItsOwn(t *testing.T) {
-	f := newFleet(t)
+	f := joinFleet(t)
 	k := strangerKey(1)
 	r := joinReq(k, 1)
 	r.Box = "node1"
@@ -94,10 +107,14 @@ func TestAJoinCannotTakeANameOrAKeyThatIsNotItsOwn(t *testing.T) {
 	if f.block(1000, joinReq(k, 1)) != 1 || f.block(2000, joinReq(k, 2)) != 0 {
 		t.Fatal("the same key joined twice")
 	}
+	// nor does a join far from the agreed time count: stale
+	if err := f.s.checkJoin(f.c, fakeVerify, joinReq(strangerKey(50), 1), 1+JoinFresh+1); !errors.Is(err, ErrStale) {
+		t.Fatalf("a stale join: %v", err)
+	}
 }
 
 func TestJoinsAreBoundedAndTheGoneAreForgotten(t *testing.T) {
-	f := newFleet(t)
+	f := joinFleet(t)
 	now := int64(1000)
 	for i := 0; i < JoinsPerHour; i++ {
 		if f.block(now, joinReq(strangerKey(i), 1)) != 1 {
@@ -109,7 +126,7 @@ func TestJoinsAreBoundedAndTheGoneAreForgotten(t *testing.T) {
 	}
 	// an hour on, more
 	now += 3_600_000
-	if f.block(now, joinReq(strangerKey(99), 1)) != 1 {
+	if f.block(now, joinReq(strangerKey(99), uint64(now))) != 1 {
 		t.Fatal("a join an hour later refused")
 	}
 	// none heard from for thirty days: all forgotten
@@ -120,25 +137,25 @@ func TestJoinsAreBoundedAndTheGoneAreForgotten(t *testing.T) {
 }
 
 func TestNoMoreThanMaxJoined(t *testing.T) {
-	f := newFleet(t)
+	f := joinFleet(t)
 	now := int64(1000)
 	for i := 0; i < MaxJoined; i++ {
 		if i > 0 && i%JoinsPerHour == 0 {
 			now += 3_600_000
 		}
-		if f.block(now, joinReq(strangerKey(i), 1)) != 1 {
+		if f.block(now, joinReq(strangerKey(i), uint64(now))) != 1 {
 			t.Fatalf("join %d refused", i)
 		}
 		// each keeps beating, so none is forgotten
 	}
 	now += 3_600_000
-	if f.block(now, joinReq(strangerKey(MaxJoined), 1)) != 0 {
+	if f.block(now, joinReq(strangerKey(MaxJoined), uint64(now))) != 0 {
 		t.Fatal("past the most that may join")
 	}
 }
 
 func TestOnlyABoxOfTheReleaseSaysWhereAJoinedBoxIs(t *testing.T) {
-	f := newFleet(t)
+	f := joinFleet(t)
 	k := strangerKey(1)
 	name, _, _ := JoinName(k)
 	f.block(1000, joinReq(k, 1))
@@ -158,7 +175,7 @@ func TestOnlyABoxOfTheReleaseSaysWhereAJoinedBoxIs(t *testing.T) {
 }
 
 func TestAJoinedBoxOnlySendsHeartbeats(t *testing.T) {
-	f := newFleet(t)
+	f := joinFleet(t)
 	k := strangerKey(1)
 	name, _, _ := JoinName(k)
 	f.block(1000, joinReq(k, 1))
@@ -182,6 +199,63 @@ func claimFor(t *testing.T, key string) *ident.Claim {
 	return c
 }
 
+// ticketMember: the identity state f holds gets the member cliTicket
+// names, signed up with device as their one device - the ticket's own
+// signer (ticketDevice()) makes its claims good tickets, any other makes
+// them forgeries. It returns how many directory items that took.
+func ticketMember(t *testing.T, f *fleet, device string, now int64) int {
+	t.Helper()
+	tk := ticketOf(t)
+	seed := make([]byte, ed25519.SeedSize)
+	seed[0] = 9
+	root := ed25519.NewKeyFromSeed(seed)
+	pub := base64.StdEncoding.EncodeToString(root.Public().(ed25519.PublicKey))
+	if len(f.c.BoxVoters()) == 0 {
+		f.c.Validators = []Validator{{ID: 1, Name: "node1"}, {ID: 2, Name: "node2"}}
+	}
+	if f.c.Identity == nil {
+		f.c.Identity = &ident.Config{}
+	}
+	f.c.Identity.Members.Members = append(f.c.Identity.Members.Members, ident.MemberID(pub))
+	e := ident.Entry{Name: tk.User, Root: pub, Recovery: pub, Version: 1, Updated: 1,
+		Devices: []ident.Device{{Fingerprint: "f", PublicKey: device, Added: 1}}}
+	eb, err := e.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, _ := json.Marshal(ident.Envelope{V: 2, Kind: "entry", Body: base64.StdEncoding.EncodeToString(eb),
+		Sig: base64.StdEncoding.EncodeToString(ed25519.Sign(root, ident.Message("entry", eb)))})
+	reqs := []Request{f.req("node1", "directory", json.RawMessage(entry))}
+	for _, v := range f.c.BoxVoters() {
+		ack, _ := json.Marshal(map[string]string{"ack": ident.LogName(entry)})
+		reqs = append(reqs, f.req(v, "directory", json.RawMessage(ack)))
+	}
+	if n := f.block(now, reqs...); n != len(reqs) {
+		t.Fatalf("%d of %d directory items taken", n, len(reqs))
+	}
+	if f.s.ticketOwner(f.c, claimFor(t, strangerKey(0)), now) != (map[bool]string{true: tk.User, false: ""})[device == ticketDevice()] {
+		t.Fatal("the identity state does not judge the ticket as meant")
+	}
+	return len(reqs)
+}
+
+// ticketDevice: the device key that signed cliTicket (seed 3)
+func ticketDevice() string {
+	seed := make([]byte, ed25519.SeedSize)
+	seed[0] = 3
+	return base64.StdEncoding.EncodeToString(ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey))
+}
+
+// ticketOf: what cliTicket says
+func ticketOf(t *testing.T) *ident.Ticket {
+	t.Helper()
+	tk, err := ident.CheckClaim(claimFor(t, strangerKey(0)), strangerKey(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tk
+}
+
 func ticketJoin(key string, c *ident.Claim, seq uint64) Request {
 	name, _, _ := JoinName(key)
 	b, _ := json.Marshal(JoinReq{Key: key, Recipient: "age1x", House: "h", Facts: enough, Claim: c})
@@ -189,7 +263,7 @@ func ticketJoin(key string, c *ident.Claim, seq uint64) Request {
 }
 
 func TestATicketGoesWithOneBoxByItsID(t *testing.T) {
-	f := newFleet(t)
+	f := joinFleet(t)
 	a, b := strangerKey(1), strangerKey(2)
 	an, _, _ := JoinName(a)
 	ca := claimFor(t, a)
@@ -223,7 +297,7 @@ func TestATicketGoesWithOneBoxByItsID(t *testing.T) {
 }
 
 func TestAJoinWithATicketIsInTheDirectoryLogUnderItsName(t *testing.T) {
-	f := newFleet(t)
+	f := joinFleet(t)
 	k := strangerKey(1)
 	name, _, _ := JoinName(k)
 	c := claimFor(t, k)
@@ -256,7 +330,7 @@ func TestAJoinWithATicketIsInTheDirectoryLogUnderItsName(t *testing.T) {
 }
 
 func TestABoxDownByOurFaultIsNotForgotten(t *testing.T) {
-	f := newFleet(t)
+	f := joinFleet(t)
 	k := strangerKey(1)
 	name, _, _ := JoinName(k)
 	f.block(1000, joinReq(k, 1))
@@ -283,7 +357,7 @@ func TestABoxDownByOurFaultIsNotForgotten(t *testing.T) {
 }
 
 func TestAStrangersWordAloneIsNotOurFault(t *testing.T) {
-	f := newFleet(t)
+	f := joinFleet(t)
 	f.block(500, f.req("node1", "heartbeat", Heartbeat{Facts: map[string]float64{"release": 6}}))
 	for i, facts := range []map[string]float64{
 		{"agent_ok": 0},
@@ -294,9 +368,9 @@ func TestAStrangersWordAloneIsNotOurFault(t *testing.T) {
 		k := strangerKey(10 + i)
 		name, _, _ := JoinName(k)
 		at := 1000 + int64(i)*2*JoinedGoneAfter
-		f.block(at, joinReq(k, 1))
+		f.block(at, joinReq(k, uint64(at)))
 		b, _ := json.Marshal(Heartbeat{Facts: facts})
-		f.block(at, Request{Kind: "heartbeat", Box: name, Seq: 2, Body: b, Sig: "ok:" + k})
+		f.block(at, Request{Kind: "heartbeat", Box: name, Seq: uint64(at) + 1, Body: b, Sig: "ok:" + k})
 		if f.s.Joined[name] == nil {
 			t.Fatalf("%v: not joined", facts)
 		}
@@ -312,7 +386,7 @@ func TestAStrangersWordAloneIsNotOurFault(t *testing.T) {
 // member by a box is a member as of the item, not of the replay. Only the
 // facts access reads are kept, and only on a computer's item.
 func TestAComputersItemKeepsTheJoinedBoxesAsTheyWere(t *testing.T) {
-	f := newFleet(t)
+	f := joinFleet(t)
 	k := strangerKey(1)
 	name, _, _ := JoinName(k)
 	f.block(1000, joinReq(k, 1))

@@ -160,6 +160,23 @@ pub struct State {
     /// it joined)
     #[serde(default)]
     pub waiting: HashMap<String, Owner>,
+    /// box -> whose ticket it came with, refused, and why (since: when it
+    /// was refused): its TPM, its boot or its hardware
+    #[serde(default)]
+    pub refused: HashMap<String, Refused>,
+}
+
+/// A box refused, for its ticket's member: why, in their words
+#[derive(Clone, Debug, Deserialize, Default, PartialEq, Eq)]
+pub struct Refused {
+    #[serde(default)]
+    pub ticket: String,
+    #[serde(default)]
+    pub owner: String,
+    #[serde(default)]
+    pub since: u64,
+    #[serde(default)]
+    pub why: String,
 }
 
 /// An enlisted box's member and the ticket it was enlisted with

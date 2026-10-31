@@ -116,6 +116,17 @@ type View struct {
 	// box -> whose ticket it joined with, while no one has enlisted it and
 	// its ticket is good: theirs to enlist
 	Waiting map[string]*Owner `json:"waiting"`
+	// box -> whose ticket it came with, refused, and why: for that member
+	// alone, a week at most, until it joins
+	Refused map[string]*Refused `json:"refused"`
+}
+
+// Refused is a box refused, as its member sees it
+type Refused struct {
+	Ticket string `json:"ticket"`
+	Owner  string `json:"owner"`
+	Since  uint64 `json:"since"` // refused, agreed ms
+	Why    string `json:"why"`
 }
 
 // Open is an invite not yet expired
@@ -191,7 +202,7 @@ func (s *State) View(cfg *Config, height uint64, timeMs int64, boxes Boxes) *Vie
 	if timeMs > 0 {
 		at = uint64(timeMs / 1000)
 	}
-	v := &View{Height: height, Time: timeMs, Members: map[string]*Member{}, Handovers: s.Handovers, Invites: map[string]*Open{}, Outcomes: s.Outcomes, Enlisted: map[string]*Owner{}, Waiting: s.waiting(cfg, at)}
+	v := &View{Height: height, Time: timeMs, Members: map[string]*Member{}, Handovers: s.Handovers, Invites: map[string]*Open{}, Outcomes: s.Outcomes, Enlisted: map[string]*Owner{}, Waiting: s.waiting(cfg, at), Refused: s.refusedView(cfg, at)}
 	for _, n := range s.names() {
 		h := s.entry(n, at)
 		if h == nil {
@@ -268,6 +279,68 @@ func (s *State) waiting(cfg *Config, at uint64) map[string]*Owner {
 			continue
 		}
 		out[b] = &Owner{Ticket: j.Ticket, Owner: j.User, Since: j.At * 1000}
+	}
+	return out
+}
+
+// TicketOwner: the member a ticket's signed block is theirs for at `at` -
+// signed by a current device of the member it names, who is not banned,
+// and unused - with its id; "" for any other block, which no one can be
+// told of. Its expiry is the enlisting's to judge, as refusedView does.
+func (s *State) TicketOwner(cfg *Config, block string, at uint64) (owner, id string) {
+	sb, err := b64.DecodeString(block)
+	if err != nil {
+		return "", ""
+	}
+	named, err := blockTicket(sb)
+	if err != nil {
+		return "", ""
+	}
+	h := s.entry(named.User, at)
+	if h == nil || s.banned(cfg, &h.Signed.Entry, at) != "" {
+		return "", ""
+	}
+	var keys []string
+	for _, d := range h.Signed.Entry.Devices {
+		keys = append(keys, d.PublicKey)
+	}
+	t, err := ReadClaim(block, keys)
+	if err != nil || t.User != named.User {
+		return "", ""
+	}
+	if _, used := s.Tickets[t.ID]; used {
+		return "", ""
+	}
+	return t.User, t.ID
+}
+
+// refusedView: the refused boxes whose ticket a device of its member's
+// signed, for them, good now and unused, and that have not joined since;
+// Since is when it was refused
+func (s *State) refusedView(cfg *Config, at uint64) map[string]*Refused {
+	out := map[string]*Refused{}
+	for b, r := range s.Refusals {
+		if r.Until <= at || r.At+RefusalFor <= at {
+			continue
+		}
+		if _, used := s.Tickets[r.Ticket]; used {
+			continue
+		}
+		if j := s.Joins[b]; j != nil && j.At >= r.At {
+			continue
+		}
+		h := s.entry(r.User, at)
+		if h == nil || s.banned(cfg, &h.Signed.Entry, at) != "" {
+			continue
+		}
+		var keys []string
+		for _, d := range h.Signed.Entry.Devices {
+			keys = append(keys, d.PublicKey)
+		}
+		if t, err := ReadClaim(r.Block, keys); err != nil || t.User != r.User {
+			continue
+		}
+		out[b] = &Refused{Ticket: r.Ticket, Owner: r.User, Since: r.At * 1000, Why: r.Why}
 	}
 	return out
 }

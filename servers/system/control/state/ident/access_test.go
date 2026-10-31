@@ -431,6 +431,9 @@ func TestTheFactsKeptForAccessAreTheOnesItReads(t *testing.T) {
 		if Qualify(kept.Facts) != Qualify(full) || Minimum(kept.Facts) != Minimum(full) || OurFault(kept.Facts, 4) != OurFault(full, 4) {
 			t.Errorf("case %d: kept %v decides otherwise than %v", i, kept.Facts, full)
 		}
+		if k := ForAccess(BoxInfo{Facts: full, Unattested: true}); !k.Unattested {
+			t.Errorf("case %d: an unproven box kept as proven", i)
+		}
 		if kept.LastSeen != 5 || kept.Fleet != 4 {
 			t.Errorf("case %d: %+v", i, kept)
 		}
@@ -442,5 +445,73 @@ func TestTheFactsKeptForAccessAreTheOnesItReads(t *testing.T) {
 	}
 	if BoxesAt(nil) != nil {
 		t.Fatal("an item that kept no boxes knows some")
+	}
+}
+
+// refuse: the state machine's record of box n refused, with p's ticket
+func (f *fleet) refuse(n byte, p *person, id string, exp uint64, why string) string {
+	f.t.Helper()
+	name, spki := joinedBox(n)
+	c, err := MakeClaim(joinTicket(p.name, id, exp).token(p.device), spki)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	f.at++
+	f.s.Judge(f.cfg, voters, name, jsonBody(f.t, map[string]map[string]string{"refused": {"key": spki, "ticket": c.ID, "block": c.Block, "why": why}}), f.at)
+	return name
+}
+
+func TestARefusedBoxIsShownToItsTicketsMemberAlone(t *testing.T) {
+	f := newFleet(t)
+	ann := f.person("ann", 1)
+	bob := f.person("bob", 10)
+	a := f.refuse(1, ann, tid(1), f.at+7*day, "Secure Boot is off")
+	// a ticket ann's device never signed: shown to no one
+	f.refuse(2, &person{name: "ann", device: bob.device}, tid(2), f.at+7*day, "Secure Boot is off")
+	v := f.s.View(f.cfg, 1, int64(f.at)*1000, nil)
+	if r := v.Refused; len(r) != 1 || r[a] == nil || r[a].Owner != "ann" || r[a].Why != "Secure Boot is off" || r[a].Ticket != tid(1) {
+		t.Fatalf("refused: %+v", r)
+	}
+	// refused again for another reason: the newest stands
+	f.refuse(1, ann, tid(1), f.at+7*day, "it did not start the fleet's own system")
+	if r := f.s.View(f.cfg, 1, int64(f.at)*1000, nil).Refused[a]; r == nil || r.Why != "it did not start the fleet's own system" {
+		t.Fatalf("%+v", r)
+	}
+	// once it joins (its TPM proved), it is no longer refused, and waits
+	f.join(1, ann, tid(1), f.at+7*day)
+	v = f.s.View(f.cfg, 1, int64(f.at)*1000, nil)
+	if len(v.Refused) != 0 || v.Waiting[a] == nil {
+		t.Fatalf("refused %+v waiting %+v", v.Refused, v.Waiting)
+	}
+	// a refusal is shown a week at most
+	b := f.refuse(3, ann, tid(3), f.at+30*day, "Secure Boot is off")
+	f.at += RefusalFor
+	if r := f.s.View(f.cfg, 1, int64(f.at)*1000, nil).Refused; r[b] != nil {
+		t.Fatalf("a refusal past its week: %+v", r)
+	}
+	// and no gate can say one: only the state machine writes them, under
+	// the box's own name
+	other, _ := joinedBox(4)
+	f.at++
+	_, spki := joinedBox(5)
+	c, _ := MakeClaim(joinTicket("ann", tid(5), f.at+7*day).token(ann.device), spki)
+	f.s.Judge(f.cfg, voters, other, jsonBody(t, map[string]map[string]string{"refused": {"key": spki, "ticket": c.ID, "block": c.Block, "why": "x"}}), f.at)
+	if f.s.Refusals[other] != nil {
+		t.Fatal("a refusal under another box's name was kept")
+	}
+}
+
+func TestAJoinedBoxThatHasNotProvedItsTPMCountsForNothing(t *testing.T) {
+	f := newFleet(t)
+	ann := f.person("ann", 1)
+	a := f.box(ann, 1, computeBox)
+	if got := f.access("ann"); got != "box" {
+		t.Fatalf("a proven box: %s", got)
+	}
+	info := f.boxes[a]
+	info.Unattested = true
+	f.boxes[a] = info
+	if got := f.access("ann"); got != "none" {
+		t.Fatalf("an unproven box gave access: %s", got)
 	}
 }

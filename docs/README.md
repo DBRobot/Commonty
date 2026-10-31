@@ -75,6 +75,7 @@ last 90 days, is on the [status page](https://commonty.org/status).
 - [The app](dev/app.md)
 - [Releasing the app](dev/app-release.md)
 - [The control plane](dev/control-plane.md)
+- [Attestation: proof of real hardware](dev/attestation.md)
 - [The home controller](dev/home-controller.md)
 - [Storage: each box its own store](dev/storage.md)
 - [Failover](dev/failover.md)

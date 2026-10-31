@@ -65,7 +65,9 @@
   "cache-front",
   "wired-watch",
   "net-detect",
-  "boot-key"
+  "attest",
+  "boot-key",
+  "join-attest"
  ],
  "acme": {
   "paths": [
@@ -893,7 +895,9 @@
    "servers/system/release/src/**",
    "client/cli/src/release_cmd.rs",
    "client/identity/src/**",
-   "client/auth/src/**"
+   "client/auth/src/**",
+   "servers/system/control/state/attest/testswitch_on.go",
+   "servers/system/control/state/attest/testswitch_off.go"
   ],
   "why": {
    "nix/tests/joined-box/**": "fleet.py: relay/witness, 3 validators, gates, ada, ticket, signed enlist/unenlist/computer items",
@@ -920,7 +924,9 @@
    "servers/system/release/src/**": "dd-agent on the box",
    "client/cli/src/release_cmd.rs": "dd release init/sign",
    "client/identity/src/**": "envelope.rs v2 items; release signatures",
-   "client/auth/src/**": "join ticket / device token biscuits the gate and dd-control read"
+   "client/auth/src/**": "join ticket / device token biscuits the gate and dd-control read",
+   "servers/system/control/state/attest/testswitch_on.go": "dd-control-test reads the test's unattestedJoin",
+   "servers/system/control/state/attest/testswitch_off.go": "dd-control-test reads the test's unattestedJoin"
   },
   "notes": "Broadest of the set: it runs the whole control plane. Did not include servers/system/control/cmd/dd-plan-check. pkg.pages is passed to gates but no page is loaded, so web assets are excluded. disk-unlock-seal.sh not exercised (the test imports keys by hand).",
   "family": "vm"
@@ -966,7 +972,9 @@
    "servers/system/control/go.mod",
    "servers/system/control/go.sum",
    "servers/gate/src/directory.rs",
-   "servers/gate/src/ident.rs"
+   "servers/gate/src/ident.rs",
+   "servers/system/control/state/attest/testswitch_on.go",
+   "servers/system/control/state/attest/testswitch_off.go"
   ],
   "why": {
    "nix/tests/joined-box/fleet.py": "the fleet machine (shared with joined-box)",
@@ -991,7 +999,9 @@
    "servers/system/control/state/**": "join state, heartbeat facts",
    "servers/system/control/worker/**": "relay/witness under wrangler",
    "servers/gate/src/directory.rs": "fleet gates keep the directory as the agreed log the join lands in",
-   "servers/gate/src/ident.rs": "gates in agreed/replay identity mode"
+   "servers/gate/src/ident.rs": "gates in agreed/replay identity mode",
+   "servers/system/control/state/attest/testswitch_on.go": "dd-control-test reads the test's unattestedJoin",
+   "servers/system/control/state/attest/testswitch_off.go": "dd-control-test reads the test's unattestedJoin"
   },
   "notes": "Gate is only fleet scaffolding here; included directory.rs/ident.rs only. A gate startup break (lib.rs/main.rs) would also fail it but that is caught by many other tests. dd-agent is disabled, so the release crate is excluded.",
   "family": "vm"
@@ -3871,6 +3881,26 @@
   },
   "notes": ""
  },
+ "attest": {
+  "paths": [
+   "nix/tests/attest.nix",
+   "nix/tests/attest.py",
+   "servers/system/control/state/attest/**",
+   "servers/system/control/tpm/**",
+   "servers/system/control/cmd/attest-check/**",
+   "servers/system/control/go.mod",
+   "servers/system/control/go.sum",
+   "nix/modules/box/tpm-policy.sh",
+   "nix/lib/tpm-policy.nix"
+  ],
+  "why": {
+   "servers/system/control/state/attest/**": "the judge the test drives",
+   "servers/system/control/tpm/**": "the box's side: Begin, Respond",
+   "servers/system/control/cmd/attest-check/**": "the program it runs"
+  },
+  "notes": "swtpm + OVMF's real event log; no consensus (state.Block).",
+  "family": "vm"
+ },
  "boot-key": {
   "paths": [
    "nix/tests/boot-key.nix",
@@ -3891,6 +3921,29 @@
    "nix/modules/box/tpm-policy.sh": "the shell's signature with the join key"
   },
   "notes": "boot-key.nix does not go through box/boot-key.nix's units.",
+  "family": "vm"
+ },
+ "join-attest": {
+  "paths": [
+   "nix/tests/join-attest.nix",
+   "nix/tests/join-attest.py",
+   "servers/system/control/state/attest/**",
+   "servers/system/control/tpm/**",
+   "servers/system/control/cmd/attest-check/**",
+   "servers/system/control/go.mod",
+   "servers/system/control/go.sum",
+   "servers/system/control/state/join.go",
+   "servers/system/control/state/state.go",
+   "servers/system/control/cmd/boot-key/**",
+   "nix/modules/box/tpm-policy.sh",
+   "nix/lib/tpm-policy.nix",
+   "nix/modules/box/boot-key.nix"
+  ],
+  "why": {
+   "servers/system/control/state/join.go": "join judged through state.Block",
+   "servers/system/control/state/state.go": "attest-* requests in Check/Apply"
+  },
+  "notes": "Through state.Block, not the validators' pools: machine_test's TestARequestAsBigAsAProofIsJudged covers the pools. Secure Boot under the box's own keys on OVMF, lanzaboote.",
   "family": "vm"
  }
 }

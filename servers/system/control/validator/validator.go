@@ -94,13 +94,15 @@ type answer struct {
 }
 
 type Validator struct {
-	o     Options
-	c     *consensus.Consensus
-	pubs  map[uint64]ed25519.PublicKey
-	mu    sync.Mutex
-	st    *state.State
-	saved Saved
-	syncs chan answer
+	// the last request above smallRequest let into the pool (admit)
+	lastLarge time.Time
+	o         Options
+	c         *consensus.Consensus
+	pubs      map[uint64]ed25519.PublicKey
+	mu        sync.Mutex
+	st        *state.State
+	saved     Saved
+	syncs     chan answer
 	// frames for consensus, handed on by goroutines of their own: a
 	// consensus that hangs never stops the relay's reader, nor the answers
 	// to peers catching up (two wedges on 2026-10-22). The boxes' requests
@@ -191,6 +193,10 @@ func New(o Options) (*Validator, error) {
 	cfg.RequestForwardTimeout = time.Second
 	cfg.RequestComplainTimeout = 4 * time.Second
 	cfg.RequestAutoRemoveTimeout = time.Minute
+	// a join carries its TPM's proof, its boot image and event log among
+	// it (attest.MaxBegin); the pool's own default, 10 KiB, drops one unread.
+	// What may be that large, from whom, is admit's
+	cfg.RequestMaxBytes = state.MaxRequest
 	cfg.ViewChangeResendInterval = 2 * time.Second
 	cfg.ViewChangeTimeout = 4 * time.Second
 	cfg.LeaderHeartbeatTimeout = 3 * time.Second
@@ -530,8 +536,53 @@ func (v *Validator) hand(f frame) {
 	case wire.Forward:
 		v.c.HandleRequest(f.from, f.payload)
 	case wire.Submit:
-		_ = v.c.SubmitRequest(f.payload)
+		if v.admit(f.payload) {
+			_ = v.c.SubmitRequest(f.payload)
+		}
 	}
+}
+
+// smallRequest: what any request may be, as the pool's own default took
+// before a proof had to fit: larger are admit's to judge
+const smallRequest = 10 << 10
+
+// admit: whether a box's request goes to the pool. A request above
+// smallRequest would have every validator carry it through consensus before
+// any rule is applied, and any key can sign a join. So only a proof may be
+// that large, from version 3, one a second, and only if it would be applied
+// now or kept as a new refusal. Only what enters a pool here is judged: a
+// block's own check is still what decides, the same way everywhere.
+func (v *Validator) admit(raw []byte) bool {
+	if len(raw) <= smallRequest {
+		return true
+	}
+	var q state.Request
+	if json.Unmarshal(raw, &q) != nil {
+		return false
+	}
+	switch q.Kind {
+	case "join", "attest-begin", "attest-response":
+	default:
+		return false
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.st.Version() < 3 || time.Since(v.lastLarge) < time.Second {
+		return false
+	}
+	err := v.st.Check(v.st.In(v.o.Config), state.P256, q, v.st.Time)
+	var rf *state.Refusal
+	switch {
+	case err == nil:
+	case errors.As(err, &rf):
+		if old := v.st.Refused[q.Box]; old != nil && old.Why == rf.Why && v.st.Time-old.At < state.RefusedAgain {
+			return false
+		}
+	default:
+		return false
+	}
+	v.lastLarge = time.Now()
+	return true
 }
 
 // answer sends the askers what was last decided, off the relay's reader
@@ -787,7 +838,7 @@ func (v *Validator) VerifyRequest(raw []byte) (bft.RequestInfo, error) {
 		}
 	} else {
 		v.mu.Lock()
-		key, ok = v.st.BoxKey(v.st.In(v.o.Config), q.Box)
+		key, ok = v.st.KeyOf(v.st.In(v.o.Config), q)
 		v.mu.Unlock()
 	}
 	if !ok || !state.P256(key, q.Bytes(), q.Sig) {
