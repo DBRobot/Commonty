@@ -959,3 +959,44 @@ func TestAWriterGivenBackIsNotTakenBack(t *testing.T) {
 		t.Fatalf("took back what it gave away: %v", (*calls)[n:])
 	}
 }
+
+func TestAComputerOnAJoinedBoxRunsByThePlanAlone(t *testing.T) {
+	p, calls := newPlacer(t)
+	p.noLeases = true
+	clock := int64(1000)
+	p.uptime = func() int64 { return clock }
+	id := "0123456789abcdef"
+	svc := "computer-" + id
+	p.agreed = func(*state.State) (map[string]*computers.Listed, error) {
+		return map[string]*computers.Listed{svc: {ID: id, Owner: "ann", Up: true, Port: 27200}}, nil
+	}
+	p.limits = &computers.Limits{Memory: 4096, Threads: 4, Disk: 100, PortBase: 27200, PortCount: 8}
+	s := state.New()
+	give := place.Plan{Boxes: map[string][]place.Decision{p.box: {{Service: svc}}}}
+	p.reconcile(give, s)
+	if !p.up(svc) || !strings.Contains(strings.Join(*calls, ";"), "start --no-block dd-computer@"+id+".service") {
+		t.Fatalf("not started: %v", *calls)
+	}
+	// each fresh plan keeps it going
+	clock += ownComputerFor.Milliseconds() - 1
+	p.reconcile(give, s)
+	p.fence()
+	if !p.up(svc) {
+		t.Fatal("stopped with fresh plans giving it")
+	}
+	// the fence stops it when no fresh plan comes
+	clock += ownComputerFor.Milliseconds() + 1
+	p.fence()
+	if p.up(svc) {
+		t.Fatal("ran on with no fresh plan")
+	}
+	p.reconcile(give, s)
+	// gone from the plan: stopped, at once
+	p.reconcile(place.Plan{Boxes: map[string][]place.Decision{p.box: {}}}, s)
+	if p.up(svc) {
+		t.Fatal("still up, and the plan gave it nowhere")
+	}
+	if strings.Contains(strings.Join(*calls, ";"), "lease") {
+		t.Fatalf("asked for a lease: %v", *calls)
+	}
+}

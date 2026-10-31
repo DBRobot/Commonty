@@ -484,8 +484,12 @@ switched runs wherever it is built). It is greedy, not optimal:
   `up` (dd-control's own `/computers`, never judged again here). A
   computer is plaintext to its host, so only a box of the release whose
   table gives it `computers` and whose owner does not bar them may hold
-  one: never a stranger, never a box on its own word, and a box's word
-  that it runs one keeps it only there. Each
+  one, or, once joined boxes are attested, a joined box a member enlisted:
+  their own comes first, and another member's last, for a computer its owner
+  said may run on anyone's. It holds no lease there: its flag lasts as long as
+  fresh plans keep giving it. Never a stranger,
+  never a box on its own word, and a box's word that it runs one keeps it
+  only there. Each
   goes on one live x86_64 box with KVM whose `computers.prom` room
   (memory, threads, disk) holds it, less what the plan has put there
   already; a computer's disk counts only what it may still grow into on

@@ -355,3 +355,96 @@ func TestOnlyTheHolderAndTheCandidateSayWhatAMoveCarries(t *testing.T) {
 		t.Fatalf("on %q: a stranger's word steered it", h)
 	}
 }
+
+// ann's box by enlistment, and bea's and a stranger's beside it, all saying
+// they have the room; the release's node1 as ever
+func computeOwned() (Inputs, *state.State, map[string]string) {
+	in, s := compute()
+	in.Joined = &JoinedRules{Attested: true}
+	s.Joined = map[string]*state.Joined{}
+	for _, name := range []string{"jann", "jbea", "jstranger"} {
+		s.Joined[name] = &state.Joined{Key: name}
+		s.Boxes[name] = &state.BoxState{LastSeen: s.Time, Facts: map[string]float64{
+			"kvm": 1, "x86_64": 1, "can_live": 1, "can/" + ComputersService: 1,
+			"computer_max_mem_bytes": 16 * gib, "computer_max_threads": 8, "computer_max_disk_bytes": 200 * gib,
+		}}
+	}
+	return in, s, map[string]string{"jann": "ann", "jbea": "bea"}
+}
+
+func TestAMembersComputerGoesOnTheirOwnBox(t *testing.T) {
+	for _, consent := range []string{"own", "any"} {
+		in, s, own := computeOwned()
+		in.Computers = []*computers.Listed{computer(idA, "ann", 2048, 2, 20, consent)}
+		if h := holder(Decide(in, s, 90_000, own), idA); h != "jann" {
+			t.Fatalf("%s: on %q, not ann's own box", consent, h)
+		}
+	}
+}
+
+func TestAMemberWithoutABoxIsHostedAsBefore(t *testing.T) {
+	in, s, own := computeOwned()
+	in.Computers = []*computers.Listed{computer(idA, "cat", 2048, 2, 20, "any")}
+	if h := holder(Decide(in, s, 90_000, own), idA); h != "node1" {
+		t.Fatalf("on %q", h)
+	}
+	in.Computers = []*computers.Listed{computer(idA, "cat", 2048, 2, 20, "own")}
+	if h := holder(Decide(in, s, 90_000, own), idA); h != "" {
+		t.Fatalf("own, and no box of theirs: on %q", h)
+	}
+}
+
+func TestAMembersComputerStaysWhereItRunsOnAListedBox(t *testing.T) {
+	in, s, own := computeOwned()
+	in.Computers = []*computers.Listed{computer(idA, "ann", 2048, 2, 20, "any")}
+	s.Boxes["node1"].Facts["runs/"+ComputerService(idA)] = 1
+	if h := holder(Decide(in, s, 90_000, own), idA); h != "node1" {
+		t.Fatalf("its disk is on node1, and it went to %q", h)
+	}
+	// and with its host gone, their own box takes it
+	s.Boxes["node1"].LastSeen = 0
+	if h := holder(Decide(in, s, 90_000, own), idA); h != "jann" {
+		t.Fatalf("on %q", h)
+	}
+}
+
+func TestAComputerOnAnothersBoxOnlyIfItsOwnerSaidSoAndNeverAStrangers(t *testing.T) {
+	in, s, own := computeOwned()
+	// "own": never another member's, whatever it says it runs
+	in.Computers = []*computers.Listed{computer(idA, "ann", 2048, 2, 20, "own")}
+	for _, b := range []string{"jbea", "jstranger"} {
+		s.Boxes[b].Facts["runs/"+ComputerService(idA)] = 1
+		s.Boxes[b].Facts["computer_max_mem_bytes"] = 1000 * gib
+	}
+	if h := holder(Decide(in, s, 90_000, own), idA); h != "jann" {
+		t.Fatalf("on %q", h)
+	}
+	// "any", no box of hers: the release's as ever, while it has room
+	in, s, own = computeOwned()
+	delete(own, "jann")
+	in.Computers = []*computers.Listed{computer(idA, "ann", 2048, 2, 20, "any")}
+	if h := holder(Decide(in, s, 90_000, own), idA); h != "node1" {
+		t.Fatalf("on %q", h)
+	}
+	// and with no room there, another member's, never a stranger's
+	s.Boxes["node1"].LastSeen, s.Boxes["node2"].LastSeen = 0, 0
+	if h := holder(Decide(in, s, 90_000, own), idA); h != "jbea" {
+		t.Fatalf("on %q", h)
+	}
+	// a stranger's word that it runs one keeps nothing
+	s.Boxes["jstranger"].Facts["runs/"+ComputerService(idA)] = 1
+	if h := holder(Decide(in, s, 90_000, own), idA); h != "jbea" {
+		t.Fatalf("on %q", h)
+	}
+	// a box no longer its owner's lets it go at once
+	s.Boxes["jbea"].Facts["runs/"+ComputerService(idA)] = 1
+	if h := holder(Decide(in, s, 90_000, map[string]string{}), idA); h != "" {
+		t.Fatalf("nobody's boxes, and it stayed on %q", h)
+	}
+	// and with no switch, as before
+	s.Boxes["node1"].LastSeen = s.Time
+	in.Joined = &JoinedRules{}
+	if h := holder(Decide(in, s, 90_000, own), idA); h != "node1" {
+		t.Fatalf("not attested: on %q", h)
+	}
+}

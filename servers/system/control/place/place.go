@@ -898,7 +898,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64, owners map[string]string
 	placeOwn(in, s, &p, live, owners, canOf, ownPlace{
 		can: can, room: room, fit: fit, place: place, adds: adds, draining: draining, planned: planned,
 	})
-	placeComputers(in, s, &p, live, now, draining, in.Damping.PerGiB)
+	placeComputers(in, s, &p, live, now, draining, in.Damping.PerGiB, owners)
 
 	// the copies, once the services are placed: a bucket stays in the
 	// stores that keep it, and goes to more only where it fits
