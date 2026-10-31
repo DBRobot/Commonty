@@ -6,7 +6,9 @@
 # (modules/net/headscale.nix); this box says it again, so a rule there that
 # is wrong does not open these ports to every member. A device's
 # address is not in the config, so dd-owner-devices keeps a set of them
-# from this box's own view of the network: each peer and whose it is.
+# from this box's own view of the network: each peer and whose it is, and
+# the remote computers the release lets in with them (tag:admin-computer;
+# docs/dev/remote-computers.md).
 {
   config,
   pkgs,
@@ -62,9 +64,9 @@ in
       ];
       serviceConfig.Type = "oneshot";
       script = ''
-        ${lib.optionalString (
-          admin != ""
-        ) "OWNER=${lib.escapeShellArg admin} SET=dd-owner ${pkgs.bash}/bin/bash ${./owner-devices.sh}"}
+        ${lib.optionalString (admin != "")
+          "OWNER=${lib.escapeShellArg admin} SET=dd-owner TAG=tag:admin-computer ${pkgs.bash}/bin/bash ${./owner-devices.sh}"
+        }
         ${lib.optionalString (
           host != null
         ) "OWNER=${lib.escapeShellArg host} SET=dd-host ${pkgs.bash}/bin/bash ${./owner-devices.sh}"}

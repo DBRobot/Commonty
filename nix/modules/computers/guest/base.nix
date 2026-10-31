@@ -1,7 +1,9 @@
 # What every member's computer is before its owner's own Nix file: a NixOS
 # machine on a disk of its own, with its own store, that builds its own
-# system. The host builds the first disk from this and the release's
-# nixpkgs; after that the guest rebuilds itself, from this file (by its
+# system. The host builds the system disk from this and the release's
+# nixpkgs, and again at a start whose release built another (computers.nix,
+# the run script; /home is a disk of its own and stays). In between the
+# guest rebuilds itself, from this file (by its
 # store path, which /etc/nixos/configuration.nix names and dd.guest.base
 # keeps) and the owner's (/etc/nixos/member.nix), and the host never
 # evaluates or builds what the owner wrote.
@@ -113,7 +115,22 @@ in
     };
     # copied out of the share by dd-owner: sshd wants keys root owns
     authorizedKeysFiles = [ "/run/dd/keys/%u" ];
+    # on the owner's disk: a new release's system disk keeps the keys their
+    # ssh knows this computer by
+    hostKeys = [
+      {
+        type = "ed25519";
+        path = "/home/.commonty/ssh_host_ed25519_key";
+      }
+      {
+        type = "rsa";
+        bits = 4096;
+        path = "/home/.commonty/ssh_host_rsa_key";
+      }
+    ];
   };
+  systemd.services.sshd.unitConfig.RequiresMountsFor = [ "/home" ];
+  systemd.services.sshd-keygen.unitConfig.RequiresMountsFor = [ "/home" ];
 
   # the owner is made at boot, from the share, not in Nix: their name and
   # keys need no rebuild, and the disk the host made works for anyone
@@ -126,7 +143,8 @@ in
   # The Commonty network, for a computer kept to its owner's own boxes: the
   # box that runs it hands a single-use key into the share (net.json) as it
   # starts it. Tagged a computer, it reaches the boxes as the owner's
-  # devices do and none of their admin ports. Through the front door, as a
+  # devices do and, unless the release lists it (policy.json computers.admin),
+  # none of their admin ports. Through the front door, as a
   # box's tailscaled is (netbridge).
   services.tailscale.enable = true;
   # its node key in memory only: it never travels with the disk, and a
@@ -137,14 +155,20 @@ in
     after = [ "run-dd-config.mount" ];
     wantedBy = [ "multi-user.target" ];
     unitConfig.ConditionPathExists = "${config9p}/net.json";
-    path = [ pkgs.jq ];
     script = ''
-      url=$(jq -r .control_url ${config9p}/net.json)
+      url=$(cat "$RUNTIME_DIRECTORY"/control_url)
       case "$url" in https://*) ;; *) echo "not a control server: $url"; exit 1 ;; esac
       exec ${config.dd.guest.netbridge}/bin/netbridge -listen 127.0.0.1:41643 -control "$url"
     '';
     serviceConfig = {
       DynamicUser = true;
+      RuntimeDirectory = "dd-netbridge";
+      # net.json is root's alone (the host writes it 0600: it holds the
+      # key): root reads the control server's address out of it, and the
+      # bridge's own user never sees the key
+      ExecStartPre = "+${pkgs.writeShellScript "dd-netbridge-url" ''
+        ${pkgs.jq}/bin/jq -er .control_url ${config9p}/net.json > "$RUNTIME_DIRECTORY"/control_url
+      ''}";
       Restart = "always";
       RestartSec = 5;
     };
@@ -235,8 +259,10 @@ in
       "dd-owner.service"
     ];
     wants = [ "network-online.target" ];
-    wantedBy = [ "multi-user.target" ];
-    # it runs the switch that would restart it
+    # its timer starts it, never multi-user.target: a target is ordered after
+    # what it wants, and the switch below starts every active target and
+    # waits for it, so a live apply waited on itself for good. And it runs
+    # the switch that would restart it
     restartIfChanged = false;
     path = [
       pkgs.jq
@@ -280,6 +306,10 @@ in
   };
   systemd.timers.dd-apply = {
     wantedBy = [ "timers.target" ];
-    timerConfig.OnUnitActiveSec = "30s";
+    timerConfig = {
+      # the first just after boot, then every 30s
+      OnActiveSec = "10s";
+      OnUnitActiveSec = "30s";
+    };
   };
 }

@@ -401,6 +401,11 @@ pub struct Door {
     /// each computer's last fresh agreed state, and when it was read (ms):
     /// what its node is kept or taken off by while dd-control is unread
     last_good: Mutex<HashMap<String, (Snapshot, i64)>>,
+    /// the computers the release lets at the boxes' admin ports
+    /// (policy.json computers.admin)
+    admin_computers: std::collections::HashSet<String>,
+    /// the fleet's admin: only their computers count on that list
+    admin: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -417,6 +422,9 @@ pub struct Bound {
 
 /// a remote computer's node's tag (nix/modules/net/headscale.nix)
 const COMPUTER_TAG: &str = "tag:computer";
+/// a computer the release lists (policy.json computers.admin), its owner the
+/// fleet's admin: beside tag:computer, the box-admin ports that tag has not
+const ADMIN_COMPUTER_TAG: &str = "tag:admin-computer";
 
 pub struct BoxKeys {
     signs: VerifyingKey,
@@ -461,6 +469,13 @@ pub fn from_env() -> Result<Option<Door>> {
         ),
         bound_file,
         last_good: Mutex::default(),
+        admin_computers: std::env::var("VERIFY_NETWORK_ADMIN_COMPUTERS")
+            .unwrap_or_default()
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect(),
+        admin: std::env::var("VERIFY_ADMIN").ok().filter(|s| !s.is_empty()),
     }))
 }
 
@@ -584,9 +599,29 @@ impl Door {
             .collect()
     }
 
+    /// a remote computer's node, by either of a computer's tags
+    fn is_computer(tags: &[&str]) -> bool {
+        tags.contains(&COMPUTER_TAG) || tags.contains(&ADMIN_COMPUTER_TAG)
+    }
+
+    /// the tags a computer's key carries: an id on the release's list that
+    /// is not the fleet's admin's own gets no key at all, whoever made a
+    /// computer by that id
+    fn computer_tags(&self, id: &str, owner: &str) -> Result<&'static [&'static str], String> {
+        if !self.admin_computers.contains(id) {
+            return Ok(&[COMPUTER_TAG]);
+        }
+        if self.admin.as_deref() != Some(owner) {
+            return Err(format!(
+                "computer {id} is listed for the admin ports and is not the fleet's admin's"
+            ));
+        }
+        Ok(&[COMPUTER_TAG, ADMIN_COMPUTER_TAG])
+    }
+
     /// whose remote computer a node is, by the key it joined with
     fn bound_to(&self, n: &serde_json::Value) -> Option<Bound> {
-        if !Self::tags(n).contains(&COMPUTER_TAG) {
+        if !Self::is_computer(&Self::tags(n)) {
             return None;
         }
         let kid = id_of(&n["preAuthKey"]).ok()?.to_string();
@@ -687,7 +722,7 @@ impl Door {
                 .unwrap_or("?")
                 .to_string();
             let whose;
-            let user = if tags.contains(&COMPUTER_TAG) {
+            let user = if Self::is_computer(&tags) {
                 let b = self.bound_to(n);
                 if let Ok(k) = id_of(&n["preAuthKey"]) {
                     used.insert(k.to_string());
@@ -702,6 +737,11 @@ impl Door {
                         let judge = |snap: &Snapshot| {
                             qualifies(snap, &b.on).is_ok_and(|o| o == b.owner)
                                 && member(&b.owner) != Answer::No
+                                // the admin ports only while the release says
+                                && (!tags.contains(&ADMIN_COMPUTER_TAG)
+                                    || self
+                                        .computer_tags(&b.id, &b.owner)
+                                        .is_ok_and(|t| t.contains(&ADMIN_COMPUTER_TAG)))
                         };
                         match read_snapshot(&self.http, c, &b.id).await {
                             Read::Refused => false,
@@ -769,7 +809,7 @@ impl Door {
                 id,
                 label,
                 why: user,
-                person: !tags.contains(&COMPUTER_TAG),
+                person: !Self::is_computer(&tags),
                 whose,
             });
         }
@@ -1181,6 +1221,9 @@ pub(crate) async fn computer_key(
         )
     })?;
     let owner = grant(&snap, &ask.name, now.saturating_mul(1000) as i64)?;
+    let tags = door
+        .computer_tags(&ask.id, &owner)
+        .map_err(|why| (StatusCode::FORBIDDEN, why))?;
     {
         let mut asked = door.asked.lock().unwrap();
         let at = format!("computer:{}:{}", ask.name, ask.id);
@@ -1233,7 +1276,7 @@ pub(crate) async fn computer_key(
         .map_err(bad)?;
         door.bound.lock().unwrap().remove(&k);
     }
-    let (key, expires, kid) = door.mint_id("boxes", &[COMPUTER_TAG]).await.map_err(bad)?;
+    let (key, expires, kid) = door.mint_id("boxes", tags).await.map_err(bad)?;
     door.bound.lock().unwrap().insert(
         kid.to_string(),
         Bound {
@@ -1505,6 +1548,8 @@ mod tests {
             bound: Mutex::default(),
             bound_file: None,
             last_good: Mutex::default(),
+            admin_computers: Default::default(),
+            admin: None,
         };
         let gone = door
             .reap(
@@ -1567,6 +1612,8 @@ mod tests {
             bound: Mutex::default(),
             bound_file: None,
             last_good: Mutex::default(),
+            admin_computers: Default::default(),
+            admin: None,
         };
         (door, deleted)
     }
@@ -2020,6 +2067,8 @@ mod tests {
             bound: Mutex::default(),
             bound_file: None,
             last_good: Mutex::default(),
+            admin_computers: Default::default(),
+            admin: None,
         };
         let sign = |k: &SigningKey, name: &str, t: u64| {
             let s: Signature = k.sign(&join_message(name, t));
@@ -2218,6 +2267,8 @@ mod tests {
             bound: Mutex::default(),
             bound_file: None,
             last_good: Mutex::default(),
+            admin_computers: Default::default(),
+            admin: None,
         }
     }
 
@@ -2265,6 +2316,74 @@ mod tests {
     fn computer_node(id: &str, kid: &str, ip: &str) -> serde_json::Value {
         serde_json::json!({ "id": id, "givenName": format!("n{id}"), "user": { "name": "boxes" },
             "tags": ["tag:computer"], "preAuthKey": { "id": kid }, "ipAddresses": [ip] })
+    }
+
+    /// A computer on the release's list gets the admin ports' tag beside its
+    /// own, if it is the fleet's admin's; another's by that id gets no key,
+    /// and one not listed its own tag alone. Off the list, its node goes.
+    #[tokio::test]
+    async fn the_admin_ports_tag_goes_to_the_admins_listed_computer_alone() {
+        let mut door = door_at("http://unused".into(), HashMap::new(), "age".into());
+        door.admin_computers = ["aa".to_string()].into();
+        door.admin = Some("david".into());
+        assert_eq!(
+            door.computer_tags("aa", "david").unwrap(),
+            [COMPUTER_TAG, ADMIN_COMPUTER_TAG]
+        );
+        assert!(door.computer_tags("aa", "ann").is_err());
+        assert_eq!(door.computer_tags("bb", "david").unwrap(), [COMPUTER_TAG]);
+        assert_eq!(door.computer_tags("bb", "ann").unwrap(), [COMPUTER_TAG]);
+        door.admin = None;
+        assert!(door.computer_tags("aa", "david").is_err());
+
+        let f = Arc::new(Fake::default());
+        let api = fake_headscale(f.clone()).await;
+        let mut door = door_at(api.clone(), HashMap::new(), "age".into());
+        door.admin_computers = ["a".to_string()].into();
+        door.admin = Some("ann".into());
+        for (kid, id) in [("1", "a"), ("2", "b")] {
+            door.bound.lock().unwrap().insert(
+                kid.into(),
+                Bound {
+                    owner: "ann".into(),
+                    id: id.into(),
+                    on: "node1".into(),
+                    made: 0,
+                },
+            );
+        }
+        let tagged = |id: &str, kid: &str| {
+            let mut n = computer_node(id, kid, "100.64.0.10");
+            n["tags"] = serde_json::json!([COMPUTER_TAG, ADMIN_COMPUTER_TAG]);
+            n
+        };
+        // an admin tag with no computer's beside it is still a computer's
+        let mut bare = computer_node("12", "99", "100.64.0.12");
+        bare["tags"] = serde_json::json!([ADMIN_COMPUTER_TAG]);
+        *f.nodes.lock().unwrap() = vec![tagged("10", "1"), tagged("11", "2"), bare];
+        let by = door.addresses_by_owner().await.unwrap();
+        assert_eq!(
+            by["ann"].len(),
+            2,
+            "both its owner's, by the keys they used"
+        );
+        let ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let up = serde_json::json!({ "height": 3, "leaseHeight": 3, "time": ms,
+            "computer": { "owner": "ann", "up": true, "consent": "own" },
+            "lease": { "holder": "node1", "expires": ms + 15_000 }, "hostOwner": "ann" });
+        *f.snaps.lock().unwrap() =
+            HashMap::from([("a".to_string(), up.clone()), ("b".to_string(), up)]);
+        door.reap(|_| crate::ident::Answer::Yes, Some(&api), &Guard::open())
+            .await
+            .unwrap();
+        // a is listed and stays; b holds the tag and is off the list; the
+        // bare one no key of the gate's ever made
+        let mut gone = f.deleted.lock().unwrap().clone();
+        gone.sort();
+        assert_eq!(gone, ["11", "12"].map(String::from).to_vec());
     }
 
     /// A remote computer's network key: only to the box that signed for it,

@@ -399,4 +399,47 @@ left = node_names()
 assert "other" not in left and {"laptop", "tablet"} <= left, left
 assert not seen("NOT removing other"), "NOT removing other"
 box.succeed("grep -qx 'dd_reap_brake 0' /var/lib/dd-facts/reap-brake.prom")
+# A remote computer on the boxes' admin ports: only with the tag the gate
+# gives a computer the release lists (network.rs computer_tags). Tagged by
+# hand here, so the gate's reaper, which knows it did not make that key,
+# stands aside. Its address reaches the firewall by the tag alone
+box.succeed("systemctl stop dd-verify.service")
+boxes_id = box.succeed(
+    "headscale users list -o json | jq -r '.[] | select(.name == \"boxes\") | .id'"
+).strip()
+
+
+def join_as_computer(tags):
+    k = (
+        box.succeed(
+            f"headscale preauthkeys create --user {boxes_id} --expiration 10m --tags {tags}"
+        )
+        .strip()
+        .splitlines()[-1]
+    )
+    # a new node, as a computer's is at each start (its key in memory only)
+    other.succeed(
+        "systemctl stop tailscaled && rm -f /var/lib/tailscale/tailscaled.state"
+        " && systemctl start tailscaled"
+    )
+    other.wait_until_succeeds("tailscale status --json > /dev/null", timeout=30)
+    other.succeed(
+        f"tailscale up --login-server http://box:8085 --auth-key {k} --accept-dns=false --timeout=60s"
+    )
+    ip = other.succeed("tailscale ip -4").strip()
+    box.wait_until_succeeds(
+        "tailscale --socket /run/commonty-net/tailscaled.sock status --json"
+        f" > /tmp/st && grep -c '{ip}' /tmp/st",
+        timeout=60,
+    )
+    box.succeed("systemctl start dd-owner-devices.service")
+    return ip
+
+
+ip = join_as_computer("tag:computer")
+assert ip not in box.succeed("ipset list dd-owner")
+other.fail(f"nc -z -w 5 {box_ip} 22")
+ip = join_as_computer("tag:computer,tag:admin-computer")
+assert ip in box.succeed("ipset list dd-owner")
+other.wait_until_succeeds(f"nc -z -w 5 {box_ip} 22", timeout=60)
 box.succeed("systemctl stop dd-control-standin.service")

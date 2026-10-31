@@ -38,9 +38,13 @@ let
       # device, joined by the gate in the boxes user so the reaper leaves it
       tagOwners."tag:controller" = [ "boxes@" ];
       # a member's own remote computer (docs/dev/remote-computers.md), joined
-      # by the gate in the boxes user: tagged, so no one's device, and never
+      # by the gate in the boxes user: tagged, so no one's device, and not
       # its owner's box-admin ports
       tagOwners."tag:computer" = [ "boxes@" ];
+      # but for one the release lists (policy.json computers.admin), its owner
+      # the fleet's admin: the gate gives its key this tag too, and it
+      # administers the boxes as the admin's devices do
+      tagOwners."tag:admin-computer" = [ "boxes@" ];
       # a box that joined on its own key (state/join.go): a stranger, which
       # keeps copies and nothing else
       tagOwners."tag:joined" = [ "boxes@" ];
@@ -107,6 +111,13 @@ let
         src = [ "${cfg.admin}@" ];
         dst = map (p: "tag:box:${p}") adminPorts;
       }
+      ++ [
+        {
+          action = "accept";
+          src = [ "tag:admin-computer" ];
+          dst = map (p: "tag:box:${p}") adminPorts;
+        }
+      ]
       ++ lib.mapAttrsToList (addr: host: {
         action = "accept";
         src = [ "${host}@" ];
@@ -161,6 +172,11 @@ in
       type = lib.types.str;
       default = "";
       description = "the fleet's admin (policy.json owner): whose devices administer every box - ssh, dns, the cache push";
+    };
+    adminComputers = lib.mkOption {
+      type = lib.types.listOf (lib.types.strMatching "[0-9a-f]{16}");
+      default = [ ];
+      description = "the remote computers, by id, the fleet's admin administers the boxes from (policy.json computers.admin); the gate refuses any that is not the admin's";
     };
     boxes = lib.mkOption {
       type = (lib.types.attrsOf lib.types.attrs);
@@ -295,7 +311,7 @@ in
           api = "http://127.0.0.1:${toString port}";
           url = cfg.url;
           keyFile = cfg.apiKeyFile;
-          inherit (cfg) boxes;
+          inherit (cfg) boxes adminComputers;
         };
         # the verifier starts after the key exists
         systemd.services.dd-verify.after = [ "headscale-seed.service" ];

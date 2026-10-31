@@ -6,6 +6,8 @@
 {
   subject,
   names,
+  # addresses it is for too, for a client that dials one by address
+  ips ? [ ],
   name ? "test-cert",
 }:
 let
@@ -28,6 +30,6 @@ pkgs.runCommand name
     openssl req -x509 -new -key $out/key.pem -sha256 -sigopt nonce-type:1 -set_serial 1 \
       -not_before 20260101000000Z -not_after 20360101000000Z \
       -subj ${q "/CN=${subject}"} \
-      -addext ${q "subjectAltName=${pkgs.lib.concatMapStringsSep "," (n: "DNS:${n}") names}"} \
+      -addext ${q "subjectAltName=${pkgs.lib.concatStringsSep "," (map (n: "DNS:${n}") names ++ map (i: "IP:${i}") ips)}"} \
       -out $out/cert.pem
   ''

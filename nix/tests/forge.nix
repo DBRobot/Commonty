@@ -39,6 +39,7 @@ in
         pkgs.jq
         pkgs.postgresql
         pkgs.age
+        pkgs.git
       ];
       # nginx in front, as on a box: a run is cancelled through it
       services.nginx.enable = true;

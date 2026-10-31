@@ -606,17 +606,25 @@
    "nix/modules/box/placed-fence.sh",
    "servers/computers/src/**",
    "servers/computers/Cargo.toml",
-   "fleet/policy.json"
+   "fleet/policy.json",
+   "nix/lib/test-cert.nix",
+   "app/net/bridge/**",
+   "app/net/cmd/netbridge/**",
+   "client/cli/src/computercmd.rs"
   ],
   "why": {
-   "nix/modules/computers/computers.nix": "dd-computers.service/socket, dd-computer@/dd-computer-prepare@ units, share/usage/access/facts units, uid mapping, memory total refusal",
+   "nix/modules/computers/computers.nix": "dd-computers.service/socket, dd-computer@/dd-computer-prepare@ units, share/usage/access/facts units, uid mapping, memory total refusal, the system disk made again when its image is another",
    "nix/modules/computers/computer-facts.sh": "dd-computer-facts -> /var/lib/dd-facts/computers.prom, draining zeros",
-   "nix/modules/computers/guest/**": "guest base/member config: ssh keys, wheel+sudo, /home on its own disk, no rebuild on first boot",
+   "nix/modules/computers/guest/**": "guest base/member config: ssh keys, wheel+sudo, /home on its own disk, no rebuild on first boot, host keys on /home, a live apply that ends, dd-net joining with the key handed in",
    "nix/modules/guests/**": "egress.nix keeps the guest out of loopback/private ranges; usage.sh -> usage-computers.facts",
    "nix/modules/games/games-access.sh": "computers-access.service script: dd-computers iptables chain from the gate's answer, closes all on malformed",
    "nix/modules/box/placed-fence.sh": "dd-placed-fence stops the computer and drops the flag when the lease lapsed",
    "servers/computers/src/**": "dd-computers: /api/state per owner, 401 anonymous, access.json, record.json",
-   "fleet/policy.json": "computers.portBase default (27200 asserted) and other defaults"
+   "fleet/policy.json": "computers.portBase default (27200 asserted) and other defaults",
+   "nix/lib/test-cert.nix": "the test's control server's certificate, by address (ips)",
+   "app/net/bridge/**": "netbridge carries the computer through the test control server, join and map",
+   "app/net/cmd/netbridge/**": "the guest's dd-netbridge, started as its own user from the address root read",
+   "client/cli/src/computercmd.rs": "dd computer config/make/apply/ssh on the whole road"
   },
   "notes": "dd-control (Go, -sign-computer-join) is called by prepare but the test tolerates its failure; left out. servers/computers/web not loaded by the test. nix/lib/fleet-placement.nix only feeds reserveMiB, which the test overrides.",
   "family": "vm"

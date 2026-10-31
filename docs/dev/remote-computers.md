@@ -120,7 +120,17 @@ browser: compute.<domain>        CLI: dd computer ...
 - **Two disks**, in its directory on the box that runs it and nowhere
   else: `system.qcow2`, from the release's image, and
   `home.qcow2`, which nothing but deleting the computer removes. Both are
-  grown to the record's disk size, never shrunk. (A ZFS dataset of its
+  grown to the record's disk size, never shrunk.
+- **The system disk follows the release**: `system.base` beside it names
+  the image it was made from, and a start (`dd-computer-run`) whose
+  release has another image makes the system disk again from the new one.
+  A switch never restarts a running computer, so it takes the new base at
+  its next start: a stop and start, or its box's reboot. Everything
+  outside `/home` goes back to the image (the owner's Nix file is applied
+  again at that first boot, `dd-apply`); `/home` is untouched. The SSH
+  host keys live on `/home` (`/home/.commonty`), so the owner's
+  `known_hosts` still matches. A computer made before `system.base` was
+  kept has none, and is made again at its next start. (A ZFS dataset of its
   own, `tank/enc/computers/<id>`, with the disk size as its quota, comes
   with the snapshots.)
 - **The guest** is the same NixOS base for every computer, built by the
@@ -188,12 +198,38 @@ browser: compute.<domain>        CLI: dd computer ...
   unused, is expired, so a computer has one way onto the network at a
   time.
   - **What it reaches**: a tagged node is no one's device, so none of the
-    owner's box-admin ports (22, 53, 80, 3900); the policy gives
+    owner's box-admin ports (22, 53, 80, 3443), with the one exception below; the policy gives
     `tag:computer` what a member's device reaches of the boxes (443, the
     game and computer ports), and the gate counts its address as its
     owner's, so the owner's game servers and other computers let it in as
     they do their devices. Git goes over https (443); git over ssh is the
-    box's sshd on 22, an admin port, and stays shut to it.
+    box's sshd on 22, an admin port, and stays shut to it, whoever owns
+    the computer, unless it is the exception below. To push from a computer, its owner makes a forge API token
+    (Git, Settings, API tokens, `write:repository`) and gives the
+    computer that: `git push https://<owner>:<token>@git.<domain>/...`
+    (or a credential helper). The gate does not know the token and lets
+    the request through as nobody; the forge takes the token as the
+    owner, and nothing more than the token's scopes. An SSH key on the
+    owner's forge account does nothing from a computer.
+  - **The exception, an admin computer**: `fleet/policy.json`
+    `computers.admin` lists computers by id, today the owner's `claude`
+    (`311fda8dea2d9a20`), which the owner administers the boxes and
+    releases from. The gate tags that computer's key `tag:computer` and
+    `tag:admin-computer`, and only when its agreed owner is the fleet's
+    admin (`policy.owner`); another's computer by a listed id gets no key
+    at all. The policy gives that tag the admin's ports (22, 53, 80, 443,
+    3443), and each box adds whichever node carries it to its `dd-owner`
+    firewall set (`owner-devices.sh`), by the tag, so no address is written
+    down and a rejoin's new one follows. Taken off the list, its node
+    comes off at the next reap, and it rejoins with its plain tag at its
+    next start. Every other computer stays shut out.
+    **What this exposes.** A computer runs as a QEMU process on its box, and
+    nothing in it is hidden from that box: root on the box hosting it can
+    read everything on that computer, its disks and its memory, so its SSH
+    key, and any release key kept there. Whoever has root on that box can
+    then log in to every box as admin, and release if a signing key is there.
+    The fleet treats no box as trusted, and this is a door through that rule,
+    taken knowingly for one computer on a box of the owner's own.
   - **When it goes**: the gate's reaper (every 5 minutes, and when someone
     leaves) takes off every `tag:computer` node that the same rule would
     not give a key now to the box it gave the key to (not agreed up, not

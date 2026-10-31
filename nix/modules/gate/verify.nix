@@ -231,6 +231,11 @@ in
             type = lib.types.str;
             description = "file holding headscale's api key for the gate";
           };
+          adminComputers = lib.mkOption {
+            type = lib.types.listOf lib.types.str;
+            default = [ ];
+            description = "the computers whose key is tagged for the boxes' admin ports, when their agreed owner is the fleet's admin";
+          };
           boxes = lib.mkOption {
             type = lib.types.attrsOf (
               lib.types.submodule {
@@ -459,6 +464,7 @@ in
         # the reaper's brake, as a fact the fleet's alerts mail (network.rs Brake)
         VERIFY_REAP_FACTS = "/var/lib/dd-verify-facts/reap-brake.prom";
         VERIFY_NETWORK_BOXES = "${pkgs.writeText "network-boxes.json" (builtins.toJSON cfg.network.boxes)}";
+        VERIFY_NETWORK_ADMIN_COMPUTERS = lib.concatStringsSep "," cfg.network.adminComputers;
         # the boxes' recipients are TPM keys: age needs the plugin to seal to one
         VERIFY_AGE = "${pkgs.writeShellScript "age-for-boxes" ''
           PATH=${lib.makeBinPath [ pkgs.age-plugin-tpm ]}:$PATH exec ${pkgs.age}/bin/age "$@"

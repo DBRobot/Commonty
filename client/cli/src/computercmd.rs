@@ -62,7 +62,7 @@ pub enum ComputerCmd {
     },
     /// Start it; it stays up across reboots until stopped
     Start { name: String },
-    /// Shut it down cleanly; /home and its system are kept
+    /// Shut it down cleanly; /home is kept, and its system unless a new release changes its base
     Stop { name: String },
     /// Its config again: packages and keys now, size and ports at its next start
     Apply {

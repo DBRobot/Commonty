@@ -46,6 +46,53 @@ let
 
     http.server.HTTPServer(("127.0.0.1", 4195), H).serve_forever()
   '';
+  # The Commonty network as a computer sees it: a control server somewhere
+  # on the web (the test's web namespace, below), by address, with its own
+  # relay, and the rules a computer and a box get from the real one
+  # (net/headscale.nix): a computer reaches a box's 443, and no more
+  control = "198.51.100.2";
+  controlCert = import ../lib/test-cert.nix { inherit pkgs; } {
+    subject = control;
+    names = [ ];
+    ips = [ control ];
+    name = "control-cert";
+  };
+  netPolicy = pkgs.writeText "policy.json" (
+    builtins.toJSON {
+      tagOwners."tag:box" = [ "boxes@" ];
+      tagOwners."tag:computer" = [ "boxes@" ];
+      acls = [
+        {
+          action = "accept";
+          src = [ "tag:computer" ];
+          dst = [ "tag:box:443" ];
+        }
+        {
+          action = "accept";
+          src = [ "tag:box" ];
+          dst = [ "tag:box:*" ];
+        }
+      ];
+    }
+  );
+  # An owner's Nix file applied live (`dd computer apply`). The guest builds
+  # its system itself, and has no cache in here: what that build takes
+  # beyond the image (a stdenv, and the like; the bridge is a store path to
+  # the guest and a derivation here, so those few derivations differ from
+  # the image's) is handed in first, as its owner could (nix copy, as a
+  # trusted user of its nix)
+  applied = ./computers/applied.nix;
+  appliedGuest =
+    (import ../modules/computers/guest/system.nix {
+      inherit pkgs;
+      inherit (pkg) netbridge;
+      member = applied;
+    }).config;
+  appliedInputs = map (d: d.inputDerivation) [
+    appliedGuest.system.build.toplevel
+    appliedGuest.system.build.etc
+    appliedGuest.environment.etc."systemd/system".source
+  ];
   # the gate's answer of whose devices may reach a computer, as the test
   # writes it, well formed or not
   fakeGate = pkgs.writeText "fake-gate.py" ''
@@ -170,6 +217,50 @@ in
         ExecStart = "${pkgs.python3}/bin/python3 -m http.server 80 --bind 198.51.100.2 --directory /srv/web";
       };
       networking.dhcpcd.denyInterfaces = [ "web0" ];
+      # the control server, out there with the web: started once the test
+      # has made the namespace
+      services.headscale = {
+        enable = true;
+        address = control;
+        port = 443;
+        settings = {
+          server_url = "https://${control}";
+          tls_cert_path = "${controlCert}/cert.pem";
+          tls_key_path = "${controlCert}/key.pem";
+          derp = {
+            urls = [ ];
+            server = {
+              enabled = true;
+              region_id = 999;
+              region_code = "test";
+              region_name = "Test";
+              stun_listen_addr = "${control}:3478";
+              automatically_add_embedded_derp_region = true;
+            };
+          };
+          dns = {
+            magic_dns = false;
+            override_local_dns = false;
+            base_domain = "net.${domain}";
+          };
+          policy = {
+            mode = "file";
+            path = "${netPolicy}";
+          };
+        };
+      };
+      systemd.services.headscale = {
+        wantedBy = lib.mkForce [ ];
+        serviceConfig.NetworkNamespacePath = "/run/netns/web";
+      };
+      # the box on the network too, as a box joins it (tag:box)
+      services.tailscale.enable = true;
+      security.pki.certificateFiles = [ "${controlCert}/cert.pem" ];
+      networking.firewall.interfaces.tailscale0.allowedTCPPorts = [
+        443
+        4998
+      ];
+      system.extraDependencies = appliedInputs;
       # the fence as box/placed.nix has it
       environment.etc."dd-placed/carries.json".text = "{}";
       environment.etc."dd-placed/starts.json".text = "{}";
@@ -202,5 +293,8 @@ in
     control = "${pkg.dd-control}/bin/dd-control";
     worker = "${pkg.control-worker}";
     fleet = ./computers/fleet.py;
+    inherit applied;
+    appliedInputs = lib.concatStringsSep " " appliedInputs;
+    ca = "${controlCert}/cert.pem";
   };
 }

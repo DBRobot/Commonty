@@ -331,6 +331,38 @@ box.wait_until_succeeds(
     timeout=30,
 )
 
+# Git over https with a forge token and nothing of the gate's: how a
+# member's remote computer pushes (docs/dev/remote-computers.md; ssh is the
+# box's sshd on an admin port, shut to a computer). The gate does not know
+# the token and lets it through as nobody; the forge takes it as sarah,
+# who made it as the Settings page does
+made = json.loads(
+    box.succeed(
+        "curl -sf --unix-socket %s -X POST -H 'X-WEBAUTH-USER: sarah' -H 'content-type: application/json' "
+        '-d \'{"name":"computer","scopes":["write:repository"]}\' '
+        "http://forgejo/api/v1/users/sarah/tokens" % nix["sock"]
+    )
+)
+pat = made["sha1"]
+gitc = "GIT_SSL_NO_VERIFY=1 git -c http.curloptResolve=git.test.invalid:443:127.0.0.1"
+remote = f"git.test.invalid/{nix['owner']}/commonty.git"
+box.succeed(
+    f"rm -rf /tmp/push && {gitc} clone -q https://{remote} /tmp/push"
+    " && cd /tmp/push && git -c user.name=sarah -c user.email=s@test.invalid"
+    " commit -q --allow-empty -m 'from a computer'"
+)
+box.fail(
+    f"cd /tmp/push && {gitc} push -q https://sarah:wrong@{remote} HEAD:refs/heads/from-computer"
+)
+box.succeed(
+    f"cd /tmp/push && {gitc} push -q https://sarah:{pat}@{remote} HEAD:refs/heads/from-computer"
+)
+pushed = box.succeed("cd /tmp/push && git rev-parse HEAD").strip()
+assert (
+    json.loads(box.succeed(f"{as_admin} {api}/branches/from-computer"))["commit"]["id"]
+    == pushed
+)
+
 # A failed run is stopped by the boxes' CI identity (ci-cancel.py, and
 # ci-resume.py reruns one the same way): no person, and no admin. The
 # forge's own setup lets it write to the fleet's repository, once that is

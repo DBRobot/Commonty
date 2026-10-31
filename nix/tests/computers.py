@@ -209,7 +209,15 @@ assert box.succeed(f"stat -c %U /var/lib/dd-computer-owners/{ID}").strip() == "r
 # cut off: its lease may have lapsed, and the fence stops it and takes its
 # flag down, whether dd-control is there or not
 box.succeed(f"{two_ssh} 'echo kept > ~/kept'")
-box.succeed(f"{two_ssh} sync")
+# and something of the system's own, outside /home, with the key its ssh
+# knows it by
+box.succeed(f"{two_ssh} 'sudo touch /var/lib/dd/old-system && sync'")
+hostkey = lambda: box.succeed(
+    "ssh-keyscan -t ed25519 -p 27200 127.0.0.1 2>/dev/null | grep -v '^#' | cut -d' ' -f2-"
+).strip()
+known = hostkey()
+assert known.startswith("ssh-ed25519 "), known
+assert box.succeed(f"cat {d}/system.base").strip().endswith("-dd-computer-image")
 hold(until=uptime_ms() - 1)
 box.succeed("systemctl start dd-placed-fence.service")
 assert "inactive" in box.succeed(
@@ -217,11 +225,17 @@ assert "inactive" in box.succeed(
 )
 box.fail(f"test -e {flag}")
 
-# held again: it comes back with /home as it was
+# held again: it comes back with /home as it was. Its system disk is
+# the release's: one made from another image (or before the image it came
+# from was kept, as here) is made again, and /home and its host keys stay
+box.succeed(f"rm {d}/system.base")
 hold()
 box.succeed(f"systemctl start --no-block dd-computer@{ID}.service")
 box.wait_until_succeeds(f"{two_ssh} true", timeout=600)
 assert box.succeed(f"{two_ssh} cat kept").strip() == "kept"
+box.fail(f"{two_ssh} test -e /var/lib/dd/old-system")
+assert hostkey() == known
+box.succeed(f"test -e $(cat {d}/system.base)/nixos.qcow2")
 
 # powered off: dd-control stops it, waits, then its flag goes; a clean stop
 agree(record(up=False, keys=[two]))
@@ -398,6 +412,59 @@ assert (
 )
 box.fail(f"{ssh} test -e /var/lib/dd/apply.log")
 
+# ---- the Commonty network: a control server out on the web (in the web
+# namespace), the box on it as a box, and a key for the computer handed
+# into its share as its box hands one in (computers.nix, netJoin), as the
+# computer's own user, 0600
+box.succeed("systemctl start headscale.service")
+box.wait_until_succeeds("headscale users list >/dev/null", timeout=60)
+box.succeed("headscale users create boxes")
+boxes = box.succeed(
+    "headscale users list -o json | jq -r '.[] | select(.name == \"boxes\") | .id'"
+).strip()
+
+
+def net_key(tag):
+    return (
+        box.succeed(
+            f"headscale preauthkeys create --user {boxes} --expiration 30m --tags tag:{tag}"
+        )
+        .strip()
+        .splitlines()[-1]
+    )
+
+
+box.succeed(
+    f"tailscale up --login-server=https://198.51.100.2 --auth-key={net_key('box')}"
+    " --hostname=box --accept-dns=false --timeout=60s"
+)
+box_ip = box.succeed("tailscale ip -4").strip()
+# a port of the box's that the rules give a computer no way to (its
+# firewall lets it in: the rules decide)
+box.succeed(
+    f"systemd-run --unit fleet-4998 python3 -m http.server --bind {box_ip} 4998 --directory /srv/web"
+)
+box.wait_until_succeeds(f"curl -sf -m 3 http://{box_ip}:4998/hello")
+net = json.dumps(
+    {
+        "key": net_key("computer"),
+        "control_url": "https://198.51.100.2",
+        "hostname": f"computer-{cid}",
+        "expires": 0,
+    }
+)
+box.succeed(f"echo '{net}' > /root/net.json")
+share = f"/var/lib/private/dd-computer/{cid}/config"
+# in the computer's own mount namespace: there alone is its directory its
+# user's (systemd's id-mapped StateDirectory)
+box.succeed(
+    f"nsenter -t $(systemctl show -p MainPID --value dd-computer@{cid}.service) -m --"
+    f' runuser -u dd-computer-{cid} -- sh -c \'umask 077 && cat > "$1.new" && mv "$1.new" "$1"\''
+    f" - {share}/net.json < /root/net.json"
+)
+box.succeed("rm /root/net.json")
+assert box.succeed(f"stat -c %a {share}/net.json").strip() == "600"
+
 # stopped and started again from the laptop: /home is as it was
 box.succeed(f"{ssh} 'echo kept > ~/kept && sync'")
 box.succeed(f"{tom} stop dev")
@@ -411,3 +478,98 @@ box.wait_until_succeeds(
 box.succeed(f"{tom} start dev")
 box.wait_until_succeeds(f"{ssh} true", timeout=900)
 assert box.succeed(f"{ssh} cat kept").strip() == "kept"
+
+# the bridge to the control server reads the key's file as root and runs as
+# its own user: up, never restarted (it once could not read the file, 0600,
+# and restarted for good)
+box.wait_until_succeeds(f"{ssh} systemctl is-active -q dd-netbridge", timeout=60)
+assert (
+    box.succeed(f"{ssh} systemctl show -p NRestarts --value dd-netbridge").strip()
+    == "0"
+)
+assert box.succeed(f"{ssh} sudo cat /run/dd-netbridge/control_url").strip() == (
+    "https://198.51.100.2"
+)
+# the test's control server has the test's certificate, which the owner
+# tells their computer to trust (a real one's is the web's)
+box.succeed(f"{ssh} 'sudo tee /etc/ssl/certs/dd-test.pem >/dev/null' < {nix['ca']}")
+box.succeed(f"{ssh} sudo systemctl restart dd-netbridge tailscaled")
+try:
+    box.wait_until_succeeds(
+        f"{ssh} sudo systemctl start dd-net && {ssh} sudo tailscale status --json"
+        " | jq -e '.BackendState == \"Running\"'",
+        timeout=300,
+    )
+except Exception:
+    print(
+        box.execute(
+            f"{ssh} 'systemctl status --no-pager -n 30 dd-net dd-netbridge tailscaled'"
+        )[1]
+    )
+    raise
+# joined as itself, a computer, and on to a box's door; nothing else of it
+node = json.loads(
+    box.succeed(
+        f"headscale nodes list -o json | jq -c '.[] | select(.name == \"computer-{cid}\")'"
+    )
+)
+assert "tag:computer" in json.dumps(node), node
+box.wait_until_succeeds(
+    f"{ssh} curl -sk -m 10 -o /dev/null -w '%{{http_code}}'"
+    f" --resolve compute.test.invalid:443:{box_ip} https://compute.test.invalid/api/state"
+    " > /tmp/code && grep -cx 302 /tmp/code",
+    timeout=180,
+)
+box.fail(f"{ssh} curl -sf -m 10 http://{box_ip}:4998/hello")
+
+# ---- a live apply: a changed Nix file reaches the running computer, is
+# built and switched to without a restart, and the apply ends (once, the
+# switch waited on multi-user.target, which waited on the apply)
+boot = box.succeed(f"{ssh} cat /proc/sys/kernel/random/boot_id").strip()
+system = box.succeed(f"{ssh} readlink /run/current-system").strip()
+box.succeed(
+    "NIX_SSHOPTS='-p 27200 -i /root/.config/commonty/computers/dev.device-key -o IdentitiesOnly=yes'"
+    " nix --extra-experimental-features nix-command copy --no-check-sigs"
+    " --to 'ssh-ng://tom@127.0.0.1?remote-program=/run/current-system/sw/bin/nix-daemon'"
+    f" {nix['appliedInputs']}"
+)
+box.succeed(
+    f"{tom} config dev --memory 1024 --threads 1 --disk 8 --nix {nix['applied']}"
+)
+# apply reads the config as agreed: not before the new one is
+box.wait_until_succeeds(
+    "curl -sf http://127.0.0.1:4195/computers > /tmp/view && grep -c dd-applied /tmp/view",
+    timeout=120,
+)
+box.succeed(f"{tom} apply dev")
+try:
+    box.wait_until_succeeds(
+        f"{ssh} cat /etc/dd-applied > /tmp/out && grep -cx applied /tmp/out",
+        timeout=900,
+    )
+    box.wait_until_succeeds(
+        f"{ssh} systemctl show -p ActiveState --value dd-apply > /tmp/out"
+        " && grep -cx inactive /tmp/out",
+        timeout=300,
+    )
+except Exception:
+    print(
+        box.execute(
+            f"{ssh} 'systemctl list-jobs; sudo tail -40 /var/lib/dd/apply.log'"
+        )[1]
+    )
+    raise
+assert box.succeed(f"{ssh} cat /proc/sys/kernel/random/boot_id").strip() == boot
+assert box.succeed(f"{ssh} readlink /run/current-system").strip() != system
+assert (
+    box.succeed(f"{ssh} systemctl show -p Result --value dd-apply").strip() == "success"
+)
+want = box.succeed(f"sha256sum < {nix['applied']} | cut -d' ' -f1").strip()
+said = json.loads(
+    box.succeed(
+        f"head -c 4096 /var/lib/private/dd-computer/{cid}/report.img | tr -d '\\0'"
+    )
+)
+assert said["hash"] == want and said["ok"] is True, said
+# and the next one runs: the apply is not stuck
+box.succeed(f"{ssh} sudo systemctl start dd-apply")

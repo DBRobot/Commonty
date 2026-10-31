@@ -37,25 +37,14 @@ let
   baseMiB = 2048;
   budgetMiB = baseMiB + builtins.ceil (keptGiB * 1024);
   # the guest's own nixpkgs, without the box's overlays: the guest rebuilds
-  # from plain nixpkgs (guest/base.nix), so the host's first system is the
-  # one the guest would build
-  guestSystem = import "${pkgs.path}/nixos" {
-    system = pkgs.stdenv.hostPlatform.system;
-    # the shape the guest's own configuration.nix has (below): one module
-    # importing the two, so the system is the very one the guest builds
-    # (the order of its packages follows the order of the imports)
-    configuration = {
-      imports = [
-        ./guest/base.nix
-        ./guest/member.nix
-      ];
-      dd.guest.base = ./guest/base.nix;
-      dd.guest.nixpkgs = pkgs.path;
-      dd.guest.netbridge = netbridge;
-    };
+  # from plain nixpkgs (guest/base.nix), so the host's first system is what
+  # the guest would build (guest/system.nix says how it differs)
+  guestSystem = import ./guest/system.nix {
+    inherit pkgs netbridge;
+    member = ./guest/member.nix;
   };
-  # the first disk every computer starts from; each copies it once, and
-  # from then on it is the instance's own
+  # the system disk every computer starts from: copied at its first start,
+  # and again at a start whose release made another (the run script)
   image = reproducible madeImage;
   # Every box rebuilds and signs what it runs, so the image must be the
   # same bytes on each; make-disk-image's is not. Its tree is kept and the
@@ -224,9 +213,15 @@ let
     # what the guest says of its last apply: a raw disk of fixed size, not
     # a share it could fill; nothing on the box reads it
     [ -e "$d"/report.img ] || ${pkgs.coreutils}/bin/truncate -s 1M "$d"/report.img
-    if [ ! -e "$d"/system.qcow2 ]; then
+    # the system disk is the release's: made again from its image when the
+    # image is not the one this disk was made from (a computer from before
+    # this was kept has no record of it, and is made again too). /home is
+    # its own disk and stays; the guest's host keys are on it
+    if [ ! -e "$d"/system.qcow2 ] || [ "$(cat "$d"/system.base 2>/dev/null)" != ${image} ]; then
+      rm -f "$d"/system.base
       img convert -O qcow2 ${image}/nixos.qcow2 "$d"/system.qcow2.new
       mv "$d"/system.qcow2.new "$d"/system.qcow2
+      echo ${image} > "$d"/system.base
     fi
     [ -e "$d"/home.qcow2 ] || img create -q -f qcow2 "$d"/home.qcow2 "$disk"G
     for f in system home; do

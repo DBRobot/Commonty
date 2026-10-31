@@ -757,9 +757,14 @@
                 };
                 # what members' remote computers may take, and their ports'
                 # pool (state/computers): fleet/policy.json computers
-                computers = (builtins.fromJSON (builtins.readFile ./fleet/policy.json)).computers // {
-                  owners = nixpkgs.lib.unique (builtins.filter (o: o != "") (builtins.attrValues computerHosts));
-                };
+                # (not computers.admin: the gate's, and no part of what validators agree)
+                computers =
+                  builtins.removeAttrs (builtins.fromJSON (builtins.readFile ./fleet/policy.json)).computers [
+                    "admin"
+                  ]
+                  // {
+                    owners = nixpkgs.lib.unique (builtins.filter (o: o != "") (builtins.attrValues computerHosts));
+                  };
                 rules = ctl.rules // {
                   leases = (ctl.rules.leases or { }) // leases;
                   inherit computerHosts;
@@ -1554,6 +1559,7 @@
                 # the fleet's admin's devices administer every box; each box's
                 # host's ask it for dns alone
                 dd.headscale.admin = (lib.importJSON ./fleet/policy.json).owner;
+                dd.headscale.adminComputers = (lib.importJSON ./fleet/policy.json).computers.admin or [ ];
                 dd.headscale.owners = lib.mapAttrs' (
                   n: b: lib.nameValuePair b.net (lib.importJSON ./fleet/boxes/${n}/box.json).owner
                 ) (lib.filterAttrs (n: b: b ? net && builtins.pathExists ./fleet/boxes/${n}/box.json) boxes);
