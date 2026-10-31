@@ -43,17 +43,41 @@ running until the member quits it
   it, and the Nix build puts it on the library path. Where none loads (a
   GNOME without the AppIndicator extension shows no icon either), there
   is no tray, and launching the app again brings the window back.
-- **It starts at login, hidden.** At every start the app writes its login
-  entry, or removes it, as the setting says: an XDG autostart file
-  (`~/.config/autostart/commonty.desktop`) on Linux, naming the AppImage's
-  own file when it is one, and the per-user `Run` key on Windows (the
-  uninstaller removes it, an update keeps it). Both start it with
-  `--background`: no window, the tray and the servers alone. No macOS
-  build exists, so nothing is written there. The window is made hidden
-  (`tauri.conf.json`) and shown in `setup` unless the start was
-  `--background` or a `commonty://` link.
+- **It starts at login, hidden, and comes back.** At every start the app
+  writes its login entries, or removes them, as the setting says. All of
+  them start it with `--background`: no window, the tray and the servers
+  alone. The window is made hidden (`tauri.conf.json`) and shown in
+  `setup` unless the start was `--background` or a `commonty://` link.
+  - **Linux, with a systemd user manager:** a user unit,
+    `~/.config/systemd/user/commonty.service`, enabled by hand into
+    `graphical-session.target.wants` (no `systemctl enable` at every
+    start; `daemon-reload` only when its text changed). `Restart=always`
+    with `RestartPreventExitStatus=0`: a crash, a kill or `SIGTERM` brings
+    it back after 2 s, Quit (exit 0) and a stop (logging out, the setting
+    turned off) do not; five starts in a minute and systemd gives up. It
+    is `Type=dbus` on single-instance's bus name
+    (`org.commonty.app.SingleInstance`), so `systemctl --user start`
+    returns once that copy can take a second launch's arguments. Started
+    any other way (the menu, a link, an autostart entry the session read
+    itself), the app first starts the unit, if it names this very program,
+    then hands its arguments over through single-instance and ends
+    (`into_unit`): the copy that runs is the one systemd watches. A debug
+    build never does. The XDG autostart file
+    (`~/.config/autostart/commonty.desktop`, naming the AppImage's own
+    file when it is one) stays for a session without systemd; with the
+    unit in place it says `X-systemd-skip=true`, so a session that turns
+    autostart files into units (GNOME, Plasma) leaves it to the unit. The
+    `.deb` ships nothing for this: the app writes both for its user.
+  - **Windows:** the per-user `Run` key (the uninstaller removes it, an
+    update keeps it) starts `commonty.exe --keep`, the keeper: no window
+    and no Tauri, only the app as a child with `--background`, started
+    again after 2 s when it ended by anything but Quit, and given up on
+    after five ends in a minute.
+  - **macOS:** `~/Library/LaunchAgents/org.commonty.app.plist`, with
+    `RunAtLoad` and `KeepAlive` unless the exit was successful. No macOS
+    build is published yet, so this is written but untried.
 - **A link wakes it.** A `commonty://` link to a running app goes to it
-  through single-instance; started cold by the link, it comes up hidden.
+  through single-instance (Linux, Windows and macOS); started cold by the link, it comes up hidden.
   Either way the window shows only at "Link this browser", the click a
   new browser's pairing needs; a browser let in before opens its page
   with no window at all.
