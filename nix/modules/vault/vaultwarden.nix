@@ -74,9 +74,69 @@ let
         sed -i 's|A modified version of the Bitwarden® Web Vault for Vaultwarden (an unofficial rewrite of the Bitwarden® server).|Built on Vaultwarden, open-source.|g' "$f"
       done
       for f in $v/*.json; do sed -i 's|"Vaultwarden Web"|"Commonty Passwords"|g; s|"Vaultwarden"|"Commonty Passwords"|g' "$f"; done
-      ${pkgs.imagemagick}/bin/magick ${../../../app/icons/icon.png} -resize 32x32 $v/images/favicon-32x32.png
-      ${pkgs.imagemagick}/bin/magick ${../../../app/icons/icon.png} -resize 16x16 $v/images/favicon-16x16.png
-      ${pkgs.imagemagick}/bin/magick ${../../../app/icons/icon.png} -resize 180x180 $v/images/apple-touch-icon.png
+      # the site's icon, and its mark beside "Passwords" where the
+      # Vaultwarden and Bitwarden logos were; the bitmaps drawn from them here
+      fav=${../../../servers/web-shared/favicon.svg}
+      cp $fav $v/images/favicon.svg
+      cp $fav $v/images/icon-white.svg
+      cp $fav $v/images/safari-pinned-tab.svg
+      cp $fav $v/images/icons/safari-pinned-tab.svg
+      cp ${../../../servers/vault/web/logo.svg} $v/images/logo.svg
+      cp ${../../../servers/vault/web/logo-white.svg} $v/images/logo-white.svg
+      export XDG_CACHE_HOME=$TMPDIR FONTCONFIG_FILE=${
+        pkgs.makeFontsConf { fontDirectories = [ pkgs.public-sans ]; }
+      }
+      png() { ${pkgs.librsvg}/bin/rsvg-convert "$@"; }
+      for s in 16 32; do png -w $s -h $s $fav -o $v/images/favicon-''${s}x$s.png; cp $v/images/favicon-''${s}x$s.png $v/images/icons/; done
+      for f in apple-touch-icon:180 android-chrome-192x192:192 android-chrome-512x512:512 mstile-150x150:270; do
+        png -w ''${f#*:} -h ''${f#*:} $fav -o $v/images/''${f%:*}.png
+        cp $v/images/''${f%:*}.png $v/images/icons/
+      done
+      png -w 32 -h 32 $fav -o $v/images/icon-dark.png
+      cp $v/images/icon-dark.png $v/images/icon-white.png
+      png -h 86 $v/images/logo.svg -o $v/images/logo-dark@2x.png
+      png -h 86 $v/images/logo-white.svg -o $v/images/logo-white@2x.png
+      ${pkgs.imagemagick}/bin/magick $v/images/favicon-16x16.png $v/images/favicon-32x32.png -strip $v/favicon.ico
+      # every page's tab: the site's icon, and Passwords where it said Bitwarden
+      for f in $v/*.html; do
+        sed -i -E 's#<link rel="icon" type="image/png" sizes="32x32" href="images/favicon-32x32.png"/?>#<link rel="icon" type="image/svg+xml" href="images/favicon.svg"/>#; s#<title>([^<]*)Bitwarden( Web vault)?([^<]*)</title>#<title>\1Commonty Passwords\3</title>#; s#alt="(Bitwarden|Vaultwarden)"#alt="Passwords"#g' "$f"
+      done
+      grep -q 'images/favicon.svg' $v/index.html || { echo "the web vault's icon links moved" >&2; exit 1; }
+      if grep -q '<title>[^<]*Bitwarden' $v/*.html; then echo "a page's title still says Bitwarden" >&2; exit 1; fi
+      for f in $(grep -rl --include='*.js' '"alt","Bitwarden"' $v); do sed -i 's|"alt","Bitwarden"|"alt","Passwords"|g' "$f"; done
+      for f in $(grep -rl --include='*.js' '"alt","Vaultwarden"' $v); do sed -i 's|"alt","Vaultwarden"|"alt","Passwords"|g' "$f"; done
+      # what an authenticator app names the account its code is for
+      for f in $(grep -rl --include='*.js' 'otpauth://totp/Vaultwarden:' $v); do
+        sed -i 's|otpauth://totp/Vaultwarden:|otpauth://totp/Commonty:|g; s|&issuer=Vaultwarden|\&issuer=Commonty|g' "$f"
+      done
+      # the words on the sign-in and welcome pages, in English: the rest
+      # still say Bitwarden where they mean Bitwarden's own apps
+      for l in en en_GB en_IN; do
+        ${pkgs.jq}/bin/jq --indent 2 '
+          def set($k; $m): if has($k) then .[$k].message = $m else error("no \($k) in messages.json") end;
+          set("loginPageEmailEntryScreenTitle"; "Log in to Passwords")
+          | set("bitWebVault"; "Passwords")
+          | set("bitwardenPasswordManager"; "Passwords")
+          | set("vaultWelcomeDialogTitle"; "You'"'"'re in! Welcome to Passwords")
+          | set("vaultWelcomeDialogDescription"; "Store all your passwords and personal info in Passwords. We'"'"'ll show you around.")
+          | set("individualUpgradeWelcomeMessage"; "Welcome to Passwords")
+        ' $v/locales/$l/messages.json > messages.json
+        mv messages.json $v/locales/$l/messages.json
+      done
+      # Vaultwarden renders /css/vaultwarden.css for every request, but the
+      # app serves this web vault itself and runs no code a box sends: the
+      # same stylesheet, made here from its template with this server's
+      # settings (and grass, the compiler Vaultwarden uses)
+      mkdir -p $v/css $v/fonts
+      cp ${../../../servers/web-shared/fonts/public-sans.woff2} $v/fonts/public-sans.woff2
+      ${
+        pkgs.python3.withPackages (p: [ p.pybars3 ])
+      }/bin/python3 -I ${../../../servers/vault/web/vaultwarden-css.py} \
+        ${vaultwarden.src}/src/static/templates/scss/vaultwarden.scss.hbs \
+        ${../../../servers/vault/web/user.vaultwarden.scss.hbs} \
+        ${pkgs.writeText "vaultwarden-css.json" (builtins.toJSON cssSettings)} \
+        ${pkgs.vaultwarden.webvault.version} > vaultwarden.scss
+      ${pkgs.grass-sass}/bin/grass -s compressed vaultwarden.scss $v/css/vaultwarden.css
       # a `!` command never stops the build under set -e: these test and exit
       if grep -q 'Vaultwarden Web' $v/index.html; then echo "the web vault's title moved" >&2; exit 1; fi
       # master passwords from 8 characters, as Bitwarden had them before
@@ -92,12 +152,22 @@ let
       inherit (pkgs.vaultwarden.webvault) version;
     };
 
-  # Commonty's look, through Vaultwarden's own hook for it: a stylesheet
-  # template it serves with the web vault. Their pages, our colours and type.
-  templates = pkgs.runCommand "dd-vault-templates" { } ''
-    mkdir -p $out/scss
-    cp ${../../../servers/vault/web/user.vaultwarden.scss.hbs} $out/scss/user.vaultwarden.scss.hbs
-  '';
+  # what Vaultwarden's own /css/vaultwarden.css is rendered with (its
+  # src/api/web.rs), from this server's settings, for the copy made below
+  vw = config.services.vaultwarden.config;
+  cssSettings = {
+    load_user_scss = true;
+    emergency_access_allowed = vw.EMERGENCY_ACCESS_ALLOWED;
+    mail_2fa_enabled = vw.USE_SENDMAIL;
+    sends_allowed = vw.SENDS_ALLOWED;
+    remember_2fa_disabled = false;
+    password_hints_allowed = vw.PASSWORD_HINTS_ALLOWED;
+    signup_disabled = vw.SSO_ENABLED && vw.SSO_ONLY;
+    sso_enabled = vw.SSO_ENABLED;
+    sso_only = vw.SSO_ENABLED && vw.SSO_ONLY;
+    webauthn_2fa_supported = true;
+    yubico_enabled = false;
+  };
 
 in
 {
@@ -250,7 +320,6 @@ in
             # taking over makes its own; members sign in again, through SSO
             RSA_KEY_FILENAME = "/var/lib/vaultwarden/rsa_key";
             TMP_FOLDER = "/var/lib/vaultwarden/tmp";
-            TEMPLATES_FOLDER = "${templates}";
 
             # members only, and only through Commonty: the gate signs them in
             SSO_ENABLED = true;

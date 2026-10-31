@@ -1,12 +1,13 @@
-/* Commonty's look on Vaultwarden's own pages, through the hook it keeps for
-   this (TEMPLATES_FOLDER, modules/vault/vaultwarden.nix): the web vault is
-   themed by Tailwind colour variables, space-separated rgb, and these set
-   them to the Commonty palette (servers/web-shared/home.css). Only colours and type
-   change; every page and control is still Bitwarden's. */
+/* Commonty's look on Vaultwarden's own pages, in Vaultwarden's stylesheet
+   (/css/vaultwarden.css, made at build in modules/vault/vaultwarden.nix):
+   the web vault is themed by Tailwind colour variables, space-separated
+   rgb, and these set them to the Commonty palette
+   (servers/web-shared/home.css). Colours, type and the logo change; every
+   page and control is still Bitwarden's. */
 
 @font-face {
   font-family: "Public Sans";
-  src: url("/_dd/static/public-sans.woff2") format("woff2");
+  src: url("../fonts/public-sans.woff2") format("woff2");
   font-weight: 100 900;
   font-display: swap;
 }
@@ -91,20 +92,32 @@ a[bitbutton] {
 /* The sign-in and sign-up pages: no Bitwarden vault safe, no background
    illustrations, no brand footer. A password manager's own login screen at
    a domain that is not its own is what browsers' phishing checks look for;
-   these pages are Commonty's, under its bar. */
+   these pages are Commonty's: its mark and Passwords at the top. */
 auth-anon-layout bit-svg,
 bit-landing-hero bit-svg,
 bit-landing-layout bit-svg,
-auth-anon-layout footer {
+auth-anon-layout footer,
+app-root > div > .tw-relative {
   display: none !important;
 }
-bit-landing-hero h1::before {
-  content: "Commonty Passwords";
+/* the logo: the page's own (bit-svg, hidden above) gives way to ours, as
+   in the side bar, open (the wordmark) or closed (the mark alone) */
+bit-landing-header a::before,
+bit-nav-logo a::before {
+  content: "";
   display: block;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  color: rgb(var(--color-text-muted));
-  margin-bottom: 6px;
+  height: 32px;
+  background: url("../images/logo.svg") no-repeat left center / contain;
+}
+.theme_dark bit-landing-header a::before,
+bit-nav-logo a::before {
+  background-image: url("../images/logo-white.svg");
+}
+bit-nav-logo a bit-svg {
+  display: none !important;
+}
+bit-nav-logo a[class*="tw-h-[55px]"]::before {
+  height: 26px;
+  background-image: url("../images/icon-white.svg");
+  background-position: center;
 }

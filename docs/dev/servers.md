@@ -222,7 +222,8 @@ same pull request.
 - **Passwords** is Vaultwarden, patched
   (`servers/vault/vaultwarden-hash-refresh.patch` and
   `servers/vault/vaultwarden-app-loopback.patch`) and restyled
-  (`user.vaultwarden.scss.hbs`). nginx puts the bar into its pages with a
+  (`user.vaultwarden.scss.hbs`, built into the web vault's own
+  `/css/vaultwarden.css` by `servers/vault/web/vaultwarden-css.py`). nginx puts the bar into its pages with a
   `sub_filter`, and sends `/_dd/static/` on `vault.<domain>` to the gate.
   The app serves its own copy of the web vault from its release
   ([`app/src/local.rs`](../../app/src/local.rs)).

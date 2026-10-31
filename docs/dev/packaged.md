@@ -357,11 +357,21 @@ Edits to the web vault, made in the module:
 
 - breach checks ask `/pwned/range/` on this box instead of
   `api.pwnedpasswords.com` (the build fails if that URL is gone);
-- its name, colour and icons are Commonty's: Bitwarden's name and mark on
-  a domain that is not Bitwarden's got the site flagged as phishing;
+- its name, colour, icons and logos are Commonty's (the site's
+  `favicon.svg`, and the mark beside "Passwords",
+  `servers/vault/web/logo.svg`): Bitwarden's name and mark on a domain
+  that is not Bitwarden's got the site flagged as phishing. The English
+  sign-in and welcome lines say Passwords; the rest still say Bitwarden
+  where they mean Bitwarden's own apps;
 - master passwords from 8 characters, not 12;
-- our colours and type through Vaultwarden's own stylesheet hook
+- our colours, type and logo through Vaultwarden's own stylesheet
   ([user.vaultwarden.scss.hbs](../../servers/vault/web/user.vaultwarden.scss.hbs)).
+  Vaultwarden renders `/css/vaultwarden.css` for each request, but the app
+  serves the web vault and runs no code a box sends, so the same file is
+  made at build ([vaultwarden-css.py](../../servers/vault/web/vaultwarden-css.py):
+  upstream's template, this server's settings, grass). Without it the
+  app's vault showed Vaultwarden's logo, Bitwarden's safe and every
+  sign-in button `SSO_ONLY` hides.
 
 ### Sign-in
 
