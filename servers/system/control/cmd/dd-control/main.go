@@ -540,6 +540,7 @@ func main() {
 	joinRecipientFile := flag.String("join-recipient-file", "", "with -join-key: a file holding -join-recipient")
 	joinHouse := flag.String("join-house", "", "with -join-key: its house, as it found it (dd-locate)")
 	joinTicket := flag.String("join-ticket-file", "", "with -join-key: a file with the member's join ticket the box was set up with (a base64 biscuit); absent or empty, it joins as a stranger")
+	enlistedFile := flag.String("enlisted-file", "", "a joined box: where to say whose it is by the agreed state, for its next build (nix/lib/joined-own.nix); empty: nowhere")
 	placedCopies := flag.String("placed-copies", "", "where to write the plan's copies, which boxes' stores keep each bucket (nix/modules/storage/store.nix); empty: nowhere")
 	printKey := flag.Bool("print-validator-key", false, "make the validator key if missing, print its public half, exit")
 	softKey := flag.String("box-key", "", "tests only: sign as the box with this PKCS#8 P-256 key file instead of the TPM")
@@ -1118,6 +1119,9 @@ func main() {
 						continue
 					}
 					placed.reconcile(decide(s), s)
+					if *enlistedFile != "" {
+						writeEnlisted(*enlistedFile, boxOwners(ids, s)[*box])
+					}
 				}
 			}()
 		}
