@@ -15,3 +15,6 @@ pub fn client(origin: &str) -> Result<AccountsClient> {
 }
 
 pub mod gallery;
+pub mod session;
+
+pub use session::Session;

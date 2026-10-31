@@ -1,5 +1,6 @@
 //! Against a real museum and store (nix/tests/photos.nix): an account made
-//! with the fleet's code, a file saved as Mail saves one, read back whole
+//! with the fleet's code, the session the app hands its pages opened and
+//! dropped once signed out, a file saved as Mail saves one, read back whole
 //! with its small picture, and a link made to it. Exits non-zero on the
 //! first thing that is not so.
 //!
@@ -33,6 +34,28 @@ async fn main() -> Result<()> {
         .await
         .context("making the account")?;
     let g = Gallery::sign_in(&api, &email, &password).await?;
+
+    // the session the app opens for its pages, held while museum takes it
+    let t = std::time::Instant::now();
+    let s = ente::Session::sign_in(&api, &email, &password)
+        .await
+        .context("opening the session")?;
+    println!("session opened in {} ms", t.elapsed().as_millis());
+    ensure!(s.still_good(&api).await?, "a new session is not good");
+    let seeded = s.seed();
+    ensure!(
+        seeded["email"] == email.as_str(),
+        "seeded for {}",
+        seeded["email"]
+    );
+    let c = ente::session::web_client(&api)?;
+    c.set_auth_token(Some(s.token.to_string()));
+    c.logout().await.context("signing the session out")?;
+    ensure!(
+        !s.still_good(&api).await?,
+        "a session signed out is still good"
+    );
+    println!("session held, then dropped");
 
     // past one 4 MiB message, so the file goes as Ente's apps send a big one
     let data: Vec<u8> = (0..(5 << 20) + 123).map(|i| (i * 7 % 251) as u8).collect();
@@ -72,7 +95,7 @@ async fn main() -> Result<()> {
     println!("read back whole");
 
     let link = g
-        .share("Shared from Mail", &[p.clone()])
+        .share("Shared from Mail", std::slice::from_ref(p))
         .await
         .context("sharing")?;
     let (at, key) = link

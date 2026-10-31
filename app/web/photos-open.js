@@ -4,12 +4,12 @@
 // keeps, made at random by the app, never by a passkey; and with it, the
 // first time, whether to make the account or move one off the password a
 // passkey used to make. No address carries any of it, so no history or
-// synced history keeps it. It opens the account with our Rust in the page
-// (dd_web) straight against museum, seeds what Ente's client reads to be
-// signed in, and goes to the gallery. The box serves none of this code; it
-// answers museum's calls and keeps the files.
-
-import init, { ente_login, ente_create, ente_rekey } from '/_dd/web/dd_web.js';
+// synced history keeps it. An account it would only open the app opens
+// itself, once for every page, and hands this page the session instead.
+// Making or moving one it does with our Rust in the page (dd_web) straight
+// against museum. Either way it seeds what Ente's client reads to be signed
+// in and goes to the gallery. The box serves none of this code; it answers
+// museum's calls and keeps the files.
 
 const $ = (id) => document.getElementById(id);
 const say = (t) => { $('msg').textContent = t; };
@@ -121,10 +121,15 @@ async function go() {
     location.replace(next);
     return;
   }
+  say('Opening your photos…');
   const given = await hand();
   if (!given) throw new Error('open Photos from the Commonty app');
+  if (given.session) {
+    if (given.session.email !== cfg.email) throw new Error('the app opened another account');
+    return seed(given.session);
+  }
+  const { default: init, ente_login, ente_create, ente_rekey } = await import('/_dd/web/dd_web.js');
   await init();
-  say('Opening your photos…');
   if (given.next) {
     // the account a passkey made, moved to the app's password before
     // anything else; the old one opens nothing after this

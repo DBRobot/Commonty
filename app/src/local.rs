@@ -838,15 +838,16 @@ fn enter_browser<R: Runtime>(app: &AppHandle<R>, req: &Request, which: Which) ->
 }
 
 /// What the page that opens Photos is handed, once, to the window or the
-/// browser the app let in with it (photos.rs, `hand`).
+/// browser the app let in with it (photos.rs, `hand`, and `handed` for
+/// what it becomes on the way out).
 fn photos_key<R: Runtime>(
     app: &AppHandle<R>,
     req: &Request,
     via: &Via,
     who: Option<&str>,
-) -> Response {
+) -> Result<serde_json::Value, (StatusCode, &'static str)> {
     if req.method() != "POST" {
-        return plain(StatusCode::METHOD_NOT_ALLOWED, "POST");
+        return Err((StatusCode::METHOD_NOT_ALLOWED, "POST"));
     }
     let now = Instant::now();
     let hand = match via {
@@ -856,10 +857,8 @@ fn photos_key<R: Runtime>(
         }),
         Via::Pair => None,
     };
-    match hand.and_then(|h| serde_json::from_str::<serde_json::Value>(&h).ok()) {
-        Some(v) => json(StatusCode::OK, v),
-        None => plain(StatusCode::NOT_FOUND, "open Photos from the Commonty app"),
-    }
+    hand.and_then(|h| serde_json::from_str::<serde_json::Value>(&h).ok())
+        .ok_or((StatusCode::NOT_FOUND, "open Photos from the Commonty app"))
 }
 
 async fn photos<R: Runtime>(
@@ -882,7 +881,12 @@ async fn photos<R: Runtime>(
         return app_asset(&site.app, "photos-confirm.js");
     }
     match (req.method().as_str(), path) {
-        (_, "/_dd/app/photos-key") => return photos_key(&site.app, &req, via, who),
+        (_, "/_dd/app/photos-key") => {
+            return match photos_key(&site.app, &req, via, who) {
+                Ok(v) => json(StatusCode::OK, crate::photos::handed(&site.app, v).await),
+                Err((status, why)) => plain(status, why),
+            };
+        }
         ("POST", "/_dd/app/photos-keyed") => {
             let Ok(body) = axum::body::to_bytes(req.into_body(), 4096).await else {
                 return plain(StatusCode::BAD_REQUEST, "too much");

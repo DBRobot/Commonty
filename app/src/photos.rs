@@ -11,6 +11,8 @@
 //! {pw, fresh: true}  open it, or make it when there is none
 //! {pw, next}         an account a passkey made: open it with pw (the old
 //!                    password), give it next, then say so (photos-keyed)
+//! {session}          what {pw} becomes on its way to the page: the account
+//!                    opened here, once for every page (`handed`)
 //! ```
 //!
 //! Beside the member's disk images, as `dd-photos.json`, the password is
@@ -23,11 +25,13 @@
 //! hands the old password to this app sealed to a key made for it.
 
 use std::sync::Mutex;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use auth::KeyStore as _;
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64U;
+use sha2::{Digest as _, Sha256};
 use tauri::http::{Response, header};
 use tauri::{AppHandle, Manager as _, Runtime};
 
@@ -43,6 +47,24 @@ const WHAT: &str = "photos";
 static PENDING: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// a move under way: the gate's slot and the key only this app opens with
 static MOVING: Mutex<Option<(String, library::Key)>> = Mutex::new(None);
+
+/// The account, opened here once for every Photos page this app opens, so
+/// no page spends seconds deriving its key again. In memory alone, for the
+/// member signed in and the password it was opened with.
+struct Opened {
+    who: [u8; 32],
+    epoch: u64,
+    api: String,
+    session: ente::Session,
+    checked: Instant,
+}
+
+static OPENED: tokio::sync::Mutex<Option<Opened>> = tokio::sync::Mutex::const_new(None);
+/// moves on at every sign-out, so a sign-in under way then keeps nothing
+static EPOCH: AtomicU64 = AtomicU64::new(0);
+/// museum took it this recently: not asked again (the door's warm-up, then
+/// the page)
+const CHECKED: Duration = Duration::from_secs(10);
 
 fn store<R: Runtime>(app: &AppHandle<R>) -> tauri::State<'_, crate::account::Keys> {
     app.state::<crate::account::Keys>()
@@ -64,11 +86,13 @@ fn blob_url() -> Result<String, String> {
 pub async fn hand<R: Runtime>(app: &AppHandle<R>) -> Result<String, String> {
     let keys = store(app);
     if let Some(k) = keys.0.get(KEY).map_err(|e| e.to_string())? {
+        warm(app, &k);
         return Ok(serde_json::json!({ "pw": k.as_str() }).to_string());
     }
     match from_blob(app).await {
         Ok(Some(k)) => {
             keys.0.set(KEY, &k).map_err(|e| e.to_string())?;
+            warm(app, &k);
             return Ok(serde_json::json!({ "pw": k }).to_string());
         }
         Ok(None) => {}
@@ -107,6 +131,129 @@ pub async fn keyed<R: Runtime>(app: &AppHandle<R>, pw: &str) -> Result<(), Strin
 /// The password, again, for Ente's own "confirm it's you"
 pub fn current<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
     store(app).0.get(KEY).ok().flatten().map(|k| k.to_string())
+}
+
+/// What a page is handed when it asks (local.rs, photos-key): an account it
+/// would only open is opened here, and the page is handed the session in
+/// place of the password. Making, moving, or a sign-in that did not work
+/// here, the page does itself.
+pub async fn handed<R: Runtime>(app: &AppHandle<R>, v: serde_json::Value) -> serde_json::Value {
+    if let Some(pw) = to_open(&v) {
+        match session(app, pw).await {
+            Ok(s) => return serde_json::json!({ "session": s }),
+            Err(e) => eprintln!("photos: {e}; the page signs in itself"),
+        }
+    }
+    v
+}
+
+/// the password of an account the page would only open
+fn to_open(v: &serde_json::Value) -> Option<&str> {
+    if v.get("fresh").is_some() || v.get("next").is_some() {
+        return None;
+    }
+    v["pw"].as_str()
+}
+
+/// the sign-in under way while the door opens, so the page waits less
+fn warm<R: Runtime>(app: &AppHandle<R>, pw: &str) {
+    let app = app.clone();
+    let pw = zeroize::Zeroizing::new(pw.to_string());
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = session(&app, &pw).await {
+            eprintln!("photos: {e}");
+        }
+    });
+}
+
+/// Signing out: the open account goes with the name it was for
+pub fn forget_session() {
+    EPOCH.fetch_add(1, Ordering::SeqCst);
+    if let Ok(mut o) = OPENED.try_lock() {
+        *o = None;
+    }
+}
+
+fn who(user: &str, pw: &str) -> [u8; 32] {
+    Sha256::new()
+        .chain_update(user)
+        .chain_update([0])
+        .chain_update(pw)
+        .finalize()
+        .into()
+}
+
+/// museum's address and the account's, as the gate gives them to the page
+pub(crate) async fn config<R: Runtime>(app: &AppHandle<R>) -> Result<(String, String), String> {
+    let cfg: serde_json::Value = directory::http()
+        .map_err(|e| e.to_string())?
+        .post(format!("{}/_dd/photos/config", base()?))
+        .bearer_auth(crate::site::token(app)?)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| format!("Photos is not set up here: {e}"))?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+    let api = cfg["api"].as_str().ok_or("no Photos address")?;
+    let email = cfg["email"].as_str().ok_or("no Photos account")?;
+    Ok((api.to_string(), email.to_string()))
+}
+
+/// The session for one page, in the shape it seeds: the account opened
+/// before while museum still takes its token and its keys are as they were
+/// (a token signed out, revoked or expired, a password changed on another
+/// device), else opened again now.
+async fn session<R: Runtime>(app: &AppHandle<R>, pw: &str) -> Result<serde_json::Value, String> {
+    let user = store(app)
+        .0
+        .get(crate::account::USER)
+        .map_err(|e| e.to_string())?
+        .ok_or("no one is signed in on this device")?;
+    let who = who(&user, pw);
+    let epoch = EPOCH.load(Ordering::SeqCst);
+    let mut held = OPENED.lock().await;
+    if let Some(o) = held.as_mut().filter(|o| o.who == who && o.epoch == epoch)
+        && (o.checked.elapsed() < CHECKED || still_good(&o.api, &o.session).await)
+    {
+        o.checked = Instant::now();
+        return Ok(o.session.seed());
+    }
+    *held = None;
+    let (api, email) = config(app).await?;
+    let (login, relay) = crate::export::relay(&api).await?;
+    let t = Instant::now();
+    let opened = ente::Session::sign_in(&login, &email, pw).await;
+    relay.abort();
+    let session = opened.map_err(|e| format!("signing in to Photos: {e}"))?;
+    eprintln!("photos: signed in in {} ms", t.elapsed().as_millis());
+    let seed = session.seed();
+    if EPOCH.load(Ordering::SeqCst) == epoch {
+        *held = Some(Opened {
+            who,
+            epoch,
+            api,
+            session,
+            checked: Instant::now(),
+        });
+    }
+    Ok(seed)
+}
+
+/// whether museum still takes it; a question it did not answer is a no,
+/// so a page is never handed a token that may be dead
+async fn still_good(api: &str, session: &ente::Session) -> bool {
+    let Ok((login, relay)) = crate::export::relay(api).await else {
+        return false;
+    };
+    let r = session.still_good(&login).await;
+    relay.abort();
+    r.unwrap_or_else(|e| {
+        eprintln!("photos: museum did not say whether the session holds: {e}");
+        false
+    })
 }
 /// The member's own entry, as this device vouches for it (the root it holds
 /// or pinned), with this device's keys
@@ -344,4 +491,31 @@ pub async fn state<R: Runtime>(app: &AppHandle<R>) -> Result<Response<Vec<u8>>, 
     );
     crate::local::set_window_key(&hand);
     json(serde_json::json!({ "ready": true, "url": url }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_an_account_the_page_would_just_open_is_opened_here() {
+        assert_eq!(to_open(&serde_json::json!({ "pw": "a" })), Some("a"));
+        assert_eq!(
+            to_open(&serde_json::json!({ "pw": "a", "fresh": true })),
+            None
+        );
+        assert_eq!(
+            to_open(&serde_json::json!({ "pw": "a", "next": "b" })),
+            None
+        );
+        assert_eq!(to_open(&serde_json::json!({})), None);
+    }
+
+    #[test]
+    fn the_session_kept_is_for_one_member_and_one_password() {
+        assert_eq!(who("ann", "pw"), who("ann", "pw"));
+        assert_ne!(who("ann", "pw"), who("bob", "pw"));
+        assert_ne!(who("ann", "pw"), who("ann", "pw2"));
+        assert_ne!(who("ann", "xpw"), who("annx", "pw"));
+    }
 }

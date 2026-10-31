@@ -364,25 +364,7 @@ fn name_of(p: &ente::gallery::Photo) -> String {
 async fn make_photos<R: Runtime>(app: &AppHandle<R>, j: &Job) -> Result<(), String> {
     let pw = crate::photos::current(app)
         .ok_or("Photos does not open on this device yet: open Photos once in the app")?;
-    let token = crate::site::token(app)?;
-    let base = media::gate::files_base(&crate::account::dirs()).map_err(|e| e.to_string())?;
-    let cfg: serde_json::Value = directory::http()
-        .map_err(|e| e.to_string())?
-        .post(format!("{base}/_dd/photos/config"))
-        .bearer_auth(token)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .error_for_status()
-        .map_err(|e| format!("Photos is not set up here: {e}"))?
-        .json()
-        .await
-        .map_err(|e| e.to_string())?;
-    let api = cfg["api"].as_str().ok_or("no Photos address")?.to_string();
-    let email = cfg["email"]
-        .as_str()
-        .ok_or("no Photos account")?
-        .to_string();
+    let (api, email) = crate::photos::config(app).await?;
     // the downloads: over the fleet's network, as long as each takes
     let http = directory::builder()
         .map_err(|e| e.to_string())?
@@ -429,7 +411,9 @@ async fn make_photos<R: Runtime>(app: &AppHandle<R>, j: &Job) -> Result<(), Stri
 /// nothing of the fleet's network. For the moment it takes, an address on
 /// this computer passes it on: under a path no one else knows, to museum
 /// alone, and carrying no credential of this device's.
-async fn relay(api: &str) -> Result<(String, tauri::async_runtime::JoinHandle<()>), String> {
+pub(crate) async fn relay(
+    api: &str,
+) -> Result<(String, tauri::async_runtime::JoinHandle<()>), String> {
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await
         .map_err(|e| e.to_string())?;
