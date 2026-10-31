@@ -14,6 +14,8 @@ let
   # user can enter)
   dir = "/var/lib/dd-computer";
   private = "/var/lib/private/dd-computer";
+  # the network key each computer here was last handed, root's alone
+  netKeys = "/run/dd-computer-net";
   # whose each computer here is, as the agreed state said when it was last
   # prepared: root's, outside every computer's directory, what the usage
   # count goes by
@@ -230,6 +232,14 @@ let
         img resize -q "$d/$f.qcow2" "$disk"G
       fi
     done
+    ${lib.optionalString cfg.network ''
+      # the network key prepare was handed for this start, or none
+      rm -f "$d"/config/net.json
+      if jq -e '(.key | type) == "string"' "$CREDENTIALS_DIRECTORY"/net.json >/dev/null 2>&1; then
+        (umask 077 && cp "$CREDENTIALS_DIRECTORY"/net.json "$d"/config/net.json.new \
+          && mv "$d"/config/net.json.new "$d"/config/net.json)
+      fi
+    ''}
     rm -f "$qmp" "$serial"
     if [ -w /dev/kvm ]; then accel="accel=kvm -cpu host"; else accel="accel=tcg -cpu max"; fi
     exec ${pkgs.qemu_kvm}/bin/qemu-system-x86_64 \
@@ -250,18 +260,20 @@ let
   '';
   # A network key for a computer kept to its owner's own boxes, asked of
   # the gate by this box, which holds its lease, signed by its TPM; the
-  # answer opens only with the box's secrets key, and goes into the guest's
-  # share alone. Single use, ten minutes; none, and the guest is simply not
-  # on the Commonty network this time.
+  # answer opens only with the box's secrets key. Root's alone, outside the
+  # computer's directory: dd-computer@ is handed it as a credential and
+  # puts it in the guest's share as its own user (its directory is
+  # systemd's idmapped one, nobody's on disk, so root never writes in it).
+  # Single use, ten minutes; none, and the guest is simply not on the
+  # Commonty network this time.
   netJoin = pkgs.writeShellScript "dd-computer-net" ''
     set -u
     id="$1"
     case "$id" in *[!0-9a-f]* | "") exit 1 ;; esac
-    # all of it as the computer's own user: root reads and writes nothing
-    # in a directory that user could have planted a link in
-    as() { ${pkgs.util-linux}/bin/runuser -u dd-computer-"$id" -- "$@"; }
-    share=${private}/"$id"/config
-    as rm -f "$share"/net.json
+    ${pkgs.coreutils}/bin/install -d -m 0700 ${netKeys}
+    out=${netKeys}/"$id".json
+    # always one, so dd-computer@'s credential is there: empty, no key
+    (umask 077 && echo '{}' > "$out.new" && ${pkgs.coreutils}/bin/mv "$out.new" "$out")
     # where it may run, as agreed: never what its own directory says
     [ "$(${pkgs.curl}/bin/curl -fsS --max-time 10 http://127.0.0.1:4195/computers \
       | ${pkgs.jq}/bin/jq -r --arg id "$id" '.computers[$id].consent // empty')" = own ] || exit 0
@@ -278,17 +290,18 @@ let
     tmp=$(mktemp)
     trap 'rm -f "$tmp"' EXIT
     # the door or the TPM can be busy a moment (a release switching): a few
-    # tries before the computer starts without one
-    for try in 1 2 3 4 5; do
+    # tries before the computer starts without one, a minute apart, as the
+    # door answers one a minute for a computer
+    for try in 1 2 3; do
       if ${control}/bin/dd-control -box ${config.networking.hostName} -sign-computer-join "$id" \
         | curl -fsS --max-time 30 -H 'content-type: application/json' --data-binary @- ${cfg.networkDoor} \
         | age -d -i /var/lib/dd/secrets-key.txt > "$tmp" \
         && jq -e '(.key | type) == "string" and (.control_url | startswith("https://")) and (.hostname | test("^computer-[0-9a-f]{16}$"))' "$tmp" >/dev/null \
-        && as ${pkgs.runtimeShell} -c 'umask 077 && cat > "$1.new" && mv "$1.new" "$1"' - "$share"/net.json < "$tmp"; then
+        && (umask 077 && cp "$tmp" "$out.new" && mv "$out.new" "$out"); then
         echo "computer-$id: a key to the Commonty network handed in"
         exit 0
       fi
-      [ "$try" = 5 ] || sleep 10
+      [ "$try" = 3 ] || sleep 65
     done
     echo "computer-$id: no key to the Commonty network this time"
   '';
@@ -465,6 +478,7 @@ in
         RuntimeDirectoryMode = "0700";
         ExecStart = "${run} %i";
         ExecStop = "${stop} %i";
+        LoadCredential = lib.optional cfg.network "net.json:${netKeys}/%i.json";
         TimeoutStopSec = 90;
         Restart = "on-failure";
         RestartSec = 20;

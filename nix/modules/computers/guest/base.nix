@@ -150,6 +150,10 @@ in
   # its node key in memory only: it never travels with the disk, and a
   # computer started again joins with the key its box hands in then
   services.tailscale.extraDaemonFlags = [ "--state=mem:" ];
+  # tailscale's own firewall drops fleet addresses on any other interface,
+  # and qemu's forwards (ssh among them) come in on the NIC from the
+  # owner's fleet address: this firewall alone, the network's ACL decides
+  networking.firewall.trustedInterfaces = [ "tailscale0" ];
   systemd.services.dd-netbridge = {
     description = "The fleet's control server, through the front door";
     after = [ "run-dd-config.mount" ];
@@ -198,7 +202,7 @@ in
       name=$(jq -r .hostname ${config9p}/net.json)
       case "$name" in computer-*) ;; *) exit 1 ;; esac
       tailscale up --login-server=http://127.0.0.1:41643 --auth-key=file:"$key" \
-        --hostname="$name" --accept-dns=false --accept-routes=false --timeout=60s
+        --hostname="$name" --accept-dns=false --accept-routes=false --netfilter-mode=off --timeout=60s
     '';
   };
   systemd.timers.dd-net = {
