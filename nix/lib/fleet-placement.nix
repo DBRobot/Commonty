@@ -144,7 +144,12 @@ let
       # what its tier gives it; the fleet owner's own box, by the file its
       # dd-control writes from the agreed state, what its capability says.
       # The plan only ever narrows this (place.Decide)
-      tier = s: builtins.elem s (inputs.joined.services ++ (inputs.joined.own or [ ])) || cap.owner == policy.owner;
+      # and computers, which nothing but placement switches, once it has an owner
+      tier =
+        s:
+        builtins.elem s (inputs.joined.services ++ (inputs.joined.own or [ ]))
+        || (s == "computers" && cap.owner != null)
+        || cap.owner == policy.owner;
       cap =
         (import ./capability.nix {
           inherit lib needs policy;
