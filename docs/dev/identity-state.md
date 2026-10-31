@@ -85,7 +85,12 @@ ticket, which is a bearer token and stays on the box. It is how the judge
 knows, in log order, which ticket a box came with; a second box with an
 id already joined is not kept. No gate
 can put one: the state machine refuses a directory item with `joined` at
-its top, and the judge takes one only under the name its key gives. Once the readers have switched the judge no longer needs acks (the
+its top, and the judge takes one only under the name its key gives. A
+box joins only once its TPM has proved itself
+([attestation.md](attestation.md)); one refused that came with a ticket
+gets `{"refused": {"key", "ticket", "block", "why"}}` instead, as
+state-machine-only as `joined`, kept a week while its ticket is good.
+Once the readers have switched the judge no longer needs acks (the
 agreement is the acknowledgement); they are accepted and ignored after that.
 
 ### The old format (v1), during the move
@@ -165,6 +170,10 @@ The judge keeps, per name:
 - **waiting**: the joined boxes no one has enlisted whose ticket a device
   of `owner`'s signed, for them, good now and unused: theirs to enlist
   (`since`, when it joined). What Your boxes shows as waiting.
+- **refused** (top level, by box): a box that came with a ticket of
+  `owner`'s and was refused, `why` in the person's words, `since` when;
+  the same checks as waiting, gone once it joins or after a week. What
+  Your boxes shows as refused.
 - **grace_until**: the admin's extension, while it runs.
 - **removed**: the release's `removed` date for any of their ids (the
   newest), whatever their status: what a reader that forgets a removed
@@ -265,7 +274,8 @@ moved, not changed. Each item is judged at its agreed time `at`.
   is left, suspended or revoked enlists nothing. A box already someone's is
   refused while that enlistment stands (see **boxes** above); unenlist only
   by its owner. Which boxes count for access is the view's (state/ident
-  access.go, docs/dev/joining.md "Access").
+  access.go, docs/dev/joining.md "Access"; their proof of real hardware
+  [attestation.md](attestation.md)).
 - **extend**: signed by the root on file for the release's admin; dated
   like a leave, the newest standing; an `until` already past takes it back.
   It keeps a member's access while their enlisted boxes are gone, until

@@ -41,6 +41,8 @@ import (
 
 	"commonty/control/place"
 	"commonty/control/state"
+	"commonty/control/state/attest"
+	"commonty/control/tpm"
 	"commonty/control/validator"
 	"commonty/control/wire"
 
@@ -557,6 +559,7 @@ func main() {
 	testSlow := flag.String("test-slow-proposals", "", "tests only: while this file exists, a proposal this validator sends goes out 2.5 s late")
 	checkSignFlag := flag.Bool("check-sign", false, "sign a test message with the box's TPM-held key (-tpm-keys), check it under the key the fleet has for -box (-config, else -join-key), print \"ok <alg> <key's fingerprint>\" and exit; touches no state, relay or lease")
 	testSignFail := flag.String("test-sign-fail", "", "tests only: while this file exists, every signature this box makes fails as a TPM out of room for contexts does")
+	attestBegin := flag.Bool("attest-begin", false, "print this box's attestation Begin (state/attest) for its request to enlist, and exit")
 	flag.Parse()
 	log.SetFlags(0)
 
@@ -608,6 +611,17 @@ func main() {
 			log.Fatal(err)
 		}
 		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"box": *box, "time": now, "sig": sig})
+		return
+	}
+
+	if *attestBegin {
+		t := tpm.Default()
+		t.Keys = *tpmKeys
+		b, err := t.Begin()
+		if err != nil {
+			log.Fatal(err)
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(b)
 		return
 	}
 
@@ -849,21 +863,66 @@ func main() {
 	}
 
 	// a box the release does not list asks to join until the agreed state
-	// has it; its heartbeats count from then. Below the hardware minimum the
-	// validators refuse it, and it says why here (and in join-refused)
+	// has it; its heartbeats count from then. Its join carries the start of
+	// its TPM's proof (docs/dev/attestation.md); the attesting loop below
+	// answers the box voters' challenges. Refused - below the hardware
+	// minimum, its TPM, its boot - it says why here and in join-refused,
+	// by the same judgement the validators make (state.JoinRefusal), or by
+	// their word kept in the agreed state
 	if joining != nil {
 		refused := filepath.Join(*dir, "join-refused")
+		say := func(why string) {
+			log.Printf("join: refused: %s", state.Sentence(why))
+			_ = os.WriteFile(refused, []byte(state.Sentence(why)+"\n"), 0o644)
+		}
 		go func() {
+			var begin *attest.Begin
 			for {
-				if s := n.State(); s != nil && s.Joined[*box] != nil {
+				s := n.State()
+				if s != nil && s.Joined[*box] != nil {
 					log.Printf("joined the fleet as %s", *box)
 					_ = os.Remove(refused)
 					return
 				}
+				if s != nil && s.Joining[*box] != nil {
+					time.Sleep(10 * time.Second) // proving its TPM: the attesting loop's
+					continue
+				}
+				// a proof only where one is asked for: never before version 3
+				if begin == nil && s != nil && s.Version() >= 3 && !state.Unattested(s.In(cfg)) {
+					t := tpm.Default()
+					t.Keys = *tpmKeys
+					b, err := t.Begin()
+					if err != nil {
+						log.Printf("join: reading its TPM: %v", err)
+						say("it could not read its TPM")
+						time.Sleep(time.Minute)
+						continue
+					}
+					begin = &b
+				}
 				joining.Facts = facts()
-				if why := ident.Minimum(joining.Facts); why != "" {
-					log.Printf("join: refused: this box %s", why)
-					_ = os.WriteFile(refused, []byte("this box "+why+"\n"), 0o644)
+				joining.Attest = begin
+				now := time.Now().UnixMilli()
+				// refused as before, there is nothing new to tell anyone: a
+				// whole proof is not sent through consensus to say it again,
+				// nor is the fleet's hourly room for joins spent on a box
+				// whose proof did not hold
+				if s != nil && s.Refused[*box] != nil && now-s.Refused[*box].At < attest.RetryEvery {
+					say(s.Refused[*box].Why)
+					time.Sleep(time.Minute)
+					continue
+				}
+				var rf *state.Refusal
+				in := cfg
+				if s != nil {
+					in = s.In(cfg)
+				}
+				if err := state.JoinRefusal(in, s, *box, *joining, now); errors.As(err, &rf) {
+					log.Printf("join: %v", err)
+					say(rf.Why)
+				} else if s != nil && s.Refused[*box] != nil {
+					say(s.Refused[*box].Why)
 				}
 				body, _ := json.Marshal(joining)
 				if _, err := submit("join", body); err != nil {
@@ -927,6 +986,10 @@ func main() {
 			time.Sleep(*every)
 		}
 	}()
+
+	att := &attesting{box: *box, voters: func(s *state.State) []string { return s.In(cfg).BoxVoters() }, tpm: tpm.Default(), state: n.State, submit: submit, sent: map[string]int64{}}
+	att.tpm.Keys = *tpmKeys
+	go att.loop(10 * time.Second)
 
 	// The gate's way in: a directory item, sent as this box's request. Only
 	// the gate may open the socket; the validators bound what any box adds

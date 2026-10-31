@@ -773,6 +773,21 @@
                 # under until the fleet agrees a config (state/machine.go),
                 # so one on this release decides alike with one still on 359
                 before = builtins.fromJSON (builtins.readFile ./fleet/control-before.json);
+                # the TPM makers' roots a box's attestation chains to
+                # (state/attest), by TCG vendor id: fleet/tpm-roots
+                attest.roots =
+                  let
+                    dir = ./fleet/tpm-roots;
+                    vendors = nixpkgs.lib.filterAttrs (_: t: t == "directory") (builtins.readDir dir);
+                  in
+                  nixpkgs.lib.mapAttrs (
+                    v: _:
+                    map (f: builtins.readFile (dir + "/${v}/${f}")) (
+                      builtins.filter (nixpkgs.lib.hasSuffix ".pem") (
+                        builtins.attrNames (builtins.readDir (dir + "/${v}"))
+                      )
+                    )
+                  ) vendors;
               };
               src = pkgs.lib.fileset.toSource {
                 root = ./servers/system/control;
@@ -813,6 +828,25 @@
                   ! go version -m $out/bin/dd-control | grep -q testswitches
                 '';
               };
+              # the same with attest.test read: only a test's fleet runs it,
+              # with its test's own config (a stranger with no TPM)
+              dd-control-test = pkgs.buildGoModule {
+                pname = "dd-control-test";
+                version = "0.1.0";
+                inherit src vendorHash;
+                tags = [ "testswitches" ];
+                subPackages = [ "cmd/dd-control" ];
+                doCheck = false;
+              };
+              # attestation end to end against a test's swtpm (nix/tests/attest.nix)
+              attest-check = pkgs.buildGoModule {
+                pname = "attest-check";
+                version = "0.1.0";
+                inherit src vendorHash;
+                tags = [ "testswitches" ];
+                subPackages = [ "cmd/attest-check" ];
+                doCheck = false;
+              };
               # the join key across updates (cmd/boot-key, docs/dev/attestation.md)
               dd-boot-key = pkgs.buildGoModule {
                 pname = "dd-boot-key";
@@ -822,14 +856,50 @@
                 doCheck = false;
                 postInstall = "mv $out/bin/boot-key $out/bin/dd-boot-key";
               };
-            in
-            {
-              configFile = pkgs.writeText "control-config.json" (builtins.toJSON config);
-              inherit dd-control dd-boot-key;
-              # wasm for the relay's Durable Object, from the same vendored
-              # modules (buildGoModule lists packages for the build machine,
-              # which leaves out a js-only one)
-              witness =
+              # what a box's attestation must find in PCR 4 (state/attest
+              # Boot): each lanzaboote box's systemd-boot, the release's
+              # stub, kernel and kernel parameters, from the very closures
+              # the boxes boot. Not their initrds: a box's own build, which
+              # a release cannot list for a box it has not seen
+              attestBoot =
+                let
+                  boxes = builtins.filter (c: c.config.boot.lanzaboote.enable or false) (
+                    builtins.attrValues self.nixosConfigurations
+                  );
+                  # a joined box: built on itself from its own report, so
+                  # the release has none of its own. Its boot is a box's
+                  # (lib.joinedBoxModules) with whatever its hardware adds to
+                  # the kernel's parameters: a USB network link's
+                  joined = nixpkgs.lib.nixosSystem {
+                    specialArgs = fleetBoxes.boxArgs;
+                    modules =
+                      fleetBoxes.joinedModules {
+                        name = "jattest";
+                        dir = ./nix/tests/joined-box-vm;
+                      }
+                      ++ [ { nixpkgs.hostPlatform = system; } ];
+                  };
+                  stub = "${lanzaboote.packages.${system}.stub}/bin/lanzaboote_stub.efi";
+                  one =
+                    c: params:
+                    "${attest-check}/bin/attest-check boot -loader ${c.config.systemd.package}/lib/systemd/boot/efi/systemd-bootx64.efi -stub ${stub} -kernel ${c.config.boot.kernelPackages.kernel}/${c.config.system.boot.loader.kernelFile} -params ${nixpkgs.lib.escapeShellArg (builtins.concatStringsSep " " params)}";
+                  runs =
+                    map (c: one c c.config.boot.kernelParams) boxes
+                    ++ map (one joined) [
+                      joined.config.boot.kernelParams
+                      ([ "usbcore.autosuspend=-1" ] ++ joined.config.boot.kernelParams)
+                    ];
+                in
+                pkgs.runCommand "attest-boot.json" { nativeBuildInputs = [ pkgs.jq ]; } ''
+                  { ${nixpkgs.lib.concatStringsSep "\n" runs}; } | jq -s '{
+                    loaders: (map(.loaders[]) | unique),
+                    stubs: (map(.stubs[]) | unique),
+                    kernels: (map(.kernels[]) | unique),
+                    params: (map(.params[]) | unique)
+                  }' >$out
+                '';
+              witnessWith =
+                tags:
                 pkgs.runCommand "dd-control-witness"
                   {
                     nativeBuildInputs = [ pkgs.go ];
@@ -839,9 +909,48 @@
                     cp -r ${src} src && chmod -R u+w src && cd src
                     cp -r ${dd-control.goModules} vendor
                     mkdir -p $out
-                    go build -trimpath -ldflags="-s -w" -o $out/witness.wasm ./cmd/witness
+                    go build ${tags} -trimpath -ldflags="-s -w" -o $out/witness.wasm ./cmd/witness
                   '';
+            in
+            {
+              configFile =
+                pkgs.runCommand "control-config.json"
+                  {
+                    nativeBuildInputs = [ pkgs.jq ];
+                    base = builtins.toJSON config;
+                    passAsFile = [ "base" ];
+                  }
+                  ''
+                    jq -c --slurpfile boot ${attestBoot} '.attest.boot = $boot[0]' "$basePath" >$out
+                  '';
+              inherit
+                dd-control
+                dd-control-test
+                attest-check
+                dd-boot-key
+                ;
+              # wasm for the relay's Durable Object, from the same vendored
+              # modules (buildGoModule lists packages for the build machine,
+              # which leaves out a js-only one)
+              witness = witnessWith "";
+              witness-test = witnessWith "-tags testswitches";
             };
+          controlWorker =
+            witness:
+            pkgs.runCommand "dd-control-worker" { } ''
+              mkdir -p $out
+              cp ${./servers/system/control/worker/worker.js} $out/worker.js
+              cp ${pkgs.go}/share/go/lib/wasm/wasm_exec.js $out/wasm_exec.js
+              cp ${witness}/witness.wasm $out/witness.wasm
+              echo "export default $(cat ${control.configFile});" > $out/config.js
+              # the release's placement inputs: the witness plans on the agreed
+              # state with them, for the DNS Worker (cmd/witness controlPlaced)
+              echo "export default $(cat ${
+                pkgs.writeText "placement-inputs.json" (
+                  builtins.toJSON (import ./nix/lib/fleet-placement.nix { lib = nixpkgs.lib; }).inputs
+                )
+              });" > $out/placement.js
+            '';
           # What the app carried for its window, never fetched from a box:
           # the wasm bundle and the players (app/src/site.rs), and Photos'
           # and Passwords' clients (app/src/local.rs): the very builds the
@@ -1128,21 +1237,12 @@
           web = webDist;
           # The relay Worker: what `dd release publish` uploads as
           # control.<domain>, with this release's config inside
-          control-worker = pkgs.runCommand "dd-control-worker" { } ''
-            mkdir -p $out
-            cp ${./servers/system/control/worker/worker.js} $out/worker.js
-            cp ${pkgs.go}/share/go/lib/wasm/wasm_exec.js $out/wasm_exec.js
-            cp ${control.witness}/witness.wasm $out/witness.wasm
-            echo "export default $(cat ${control.configFile});" > $out/config.js
-            # the release's placement inputs: the witness plans on the agreed
-            # state with them, for the DNS Worker (cmd/witness controlPlaced)
-            echo "export default $(cat ${
-              pkgs.writeText "placement-inputs.json" (
-                builtins.toJSON (import ./nix/lib/fleet-placement.nix { lib = nixpkgs.lib; }).inputs
-              )
-            });" > $out/placement.js
-          '';
+          control-worker = controlWorker control.witness;
+          # for a test's fleet, whose validators run dd-control-test
+          control-worker-test = controlWorker control.witness-test;
           dd-control = control.dd-control;
+          dd-control-test = control.dd-control-test;
+          attest-check = control.attest-check;
           dd-boot-key = control.dd-boot-key;
           control-config = control.configFile;
           # what the control plane places from: each box's capability and

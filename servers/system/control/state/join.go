@@ -8,7 +8,13 @@ package state
 // how fast, is bounded, and one unheard for thirty days is gone again
 // (docs/dev/joining.md).
 //
-// Below the hardware minimum (ident.Minimum) a box can't join at all.
+// Below the hardware minimum (ident.Minimum) a box can't join at all, nor
+// without proving its TPM (docs/dev/attestation.md): its join carries the
+// attestation's Begin, judged at once (the EK's chain to its maker, Secure
+// Boot, the release's boot), and the box is joined only once its answer to
+// the box voters' challenges holds. Until then it is Joining; refused, the
+// reason is kept (Refused), and said to its member where the join carried
+// their ticket.
 //
 // A box a member set up carries the member's join ticket, a biscuit one of
 // their devices signed. It joins with the ticket's claim, never the ticket
@@ -21,6 +27,7 @@ package state
 
 import (
 	"bytes"
+	"commonty/control/state/attest"
 	"commonty/control/state/ident"
 	"crypto/sha256"
 	"encoding/base64"
@@ -29,6 +36,9 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
+	"strings"
+	"sync"
 )
 
 type Joined struct {
@@ -43,7 +53,56 @@ type Joined struct {
 	IPv4 uint32 `json:"ipv4,omitempty"`
 	// the id of the member's join ticket it came with
 	Ticket string `json:"ticket,omitempty"`
+	// joined on its word alone, under the release's test switch
+	// (attest.Test.UnattestedJoin): never in a real fleet
+	Unattested bool `json:"unattested,omitempty"`
 }
+
+// Joining is a join waiting for its TPM's proof (Attest.Pending)
+type Joining struct {
+	Req JoinReq `json:"req"` // without its Begin, which the attestation keeps
+	At  int64   `json:"at"`
+}
+
+// Refused is why a box's join was refused, kept a week for the box and its
+// member to read
+type Refused struct {
+	Why string `json:"why"`
+	At  int64  `json:"at"`
+	// its ticket and that ticket's member, only where the identity state
+	// held the ticket good when it was refused (ticketOwner)
+	Ticket string `json:"ticket,omitempty"`
+	Owner  string `json:"owner,omitempty"`
+	// the newest Seq of that box's judged: a replay at or below is stale
+	Seq uint64 `json:"seq,omitempty"`
+}
+
+// Refusal is a join (or its proof) refused for what the box is - its
+// hardware, its TPM, its boot - rather than for how it was sent: the
+// agreed state keeps why (Refused). Why is in words for the person who set
+// the box up (ident.Minimum, attest.Why).
+type Refusal struct {
+	Why string
+	Err error
+}
+
+func (r *Refusal) Error() string {
+	if r.Err != nil {
+		return "refused: " + r.Why + " (" + r.Err.Error() + ")"
+	}
+	return "refused: this box " + r.Why
+}
+
+// Sentence: a refusal's why as a sentence about the box - the minimum's
+// say what it needs ("needs 8 GiB of memory"), the rest are whole
+func Sentence(why string) string {
+	if strings.HasPrefix(why, "needs ") {
+		return "this box " + why
+	}
+	return why
+}
+
+func (r *Refusal) Unwrap() error { return r.Err }
 
 // NetAddr: where a joined box is on the fleet's network, said by a box of
 // the release that runs the network's control server
@@ -64,6 +123,8 @@ type JoinReq struct {
 	Facts map[string]float64 `json:"facts"`
 	// its member's join ticket's claim, or nothing for a stranger
 	Claim *ident.Claim `json:"claim,omitempty"`
+	// the start of its TPM's proof (state/attest)
+	Attest *attest.Begin `json:"attest,omitempty"`
 }
 
 const (
@@ -80,6 +141,26 @@ const (
 	MaxTicket = 2048
 	// maxJoinFacts bounds what a join says of itself
 	maxJoinFacts = 512
+	// MaxRefused: refusals kept at once, a ticketless one given up first;
+	// RefusedPerHour: new ones with a ticket the fleet keeps in an hour (each
+	// told to the identity judge), one a ticket; StrangersRefusedPerHour:
+	// ticketless ones, a bucket of their own, so junk joins cannot spend
+	// what a member's refusal needs; RefusedFor: how long one is kept, ms.
+	// A box sends its join again every minute: the same refusal is kept
+	// again only after a day
+	MaxRefused              = 64
+	RefusedPerHour          = 16
+	StrangersRefusedPerHour = 4
+	RefusedFor              = 7 * 24 * 3600 * 1000
+	RefusedAgain            = 24 * 3600 * 1000
+	// MaxRequest: the largest request a validator's pool takes: a join with
+	// a whole Begin (attest.MaxBegin), and what its JSON adds
+	MaxRequest = attest.MaxBegin + 64<<10
+	// JoinFresh: a join's Seq is its sender's clock, ms (dd-control's
+	// sequence starts there); one further than this from the agreed time is
+	// stale, and so is one not above the last a refusal of that box kept:
+	// an old signed join replayed is never judged again
+	JoinFresh = 10 * 60 * 1000
 )
 
 var houseName = regexp.MustCompile(`^[a-z0-9-]{1,64}$`)
@@ -134,14 +215,25 @@ func (s *State) checkJoin(cfg *Config, verify Verify, r Request, now int64) erro
 	if !verify(j.Key, r.Bytes(), r.Sig) {
 		return ErrBadSig
 	}
+	v3 := s.Version() >= 3
+	if v3 {
+		if err := s.freshJoin(name, r, now); err != nil {
+			return err
+		}
+	}
 	if j.Recipient == "" || len(j.Recipient) > 512 || !houseName.MatchString(j.House) {
 		return errors.New("a join names its recipient and its house")
 	}
 	if len(j.Facts) > maxJoinFacts {
 		return fmt.Errorf("%d facts; at most %d", len(j.Facts), maxJoinFacts)
 	}
-	if why := ident.Minimum(j.Facts); why != "" {
-		return fmt.Errorf("refused: this box %s", why)
+	if !v3 {
+		if why := ident.Minimum(j.Facts); why != "" {
+			return fmt.Errorf("refused: this box %s", why)
+		}
+	}
+	if jn := s.Joining[name]; jn != nil {
+		return fmt.Errorf("%s is proving its TPM already", name)
 	}
 	if c := j.Claim; c != nil {
 		if len(c.Block) > MaxTicket || len(c.Sig) > 128 || len(c.ID) > 64 {
@@ -157,38 +249,386 @@ func (s *State) checkJoin(cfg *Config, verify Verify, r Request, now int64) erro
 				return errors.New("that ticket came with another box")
 			}
 		}
+		for _, o := range s.Joining {
+			if o.Req.Claim != nil && o.Req.Claim.ID == c.ID {
+				return errors.New("that ticket came with another box")
+			}
+		}
 	}
-	if len(s.Joined) >= MaxJoined {
-		return fmt.Errorf("%d boxes have joined; no more", len(s.Joined))
+	if len(s.Joined)+len(s.Joining) >= MaxJoined {
+		return fmt.Errorf("%d boxes have joined; no more", len(s.Joined)+len(s.Joining))
 	}
 	if now-s.JoinWindow < 3_600_000 && s.JoinCount >= JoinsPerHour {
 		return fmt.Errorf("%d boxes joined this hour", s.JoinCount)
 	}
+	if !v3 {
+		return nil
+	}
+	return JoinRefusal(cfg, s, name, j, now)
+}
+
+// freshJoin: a join is its box's now - its Seq within JoinFresh of the
+// agreed time and above any of that box's kept (a refusal's, a join's)
+func (s *State) freshJoin(box string, r Request, now int64) error {
+	if d := int64(r.Seq) - now; d < -JoinFresh || d > JoinFresh {
+		return fmt.Errorf("%w: a join's sequence %d is not within ten minutes of %d", ErrStale, r.Seq, now)
+	}
+	if rf := s.Refused[box]; rf != nil && r.Seq <= rf.Seq {
+		return ErrStale
+	}
+	if b := s.Boxes[box]; b != nil && r.Seq <= b.Seq {
+		return ErrStale
+	}
 	return nil
 }
 
-func (s *State) applyJoin(r Request, now int64) {
+// JoinRefusal: why a join of box with j would be refused for what the box
+// is, or nil. The validators judge a join by it from version 3, and the box
+// itself before it asks (dd-control), so it can say why where it can be
+// read. Before version 3, or with s nil (the box does not know the agreed
+// state yet), only the minimum: no proof is asked for or looked at.
+func JoinRefusal(cfg *Config, s *State, box string, j JoinReq, now int64) error {
+	if why := ident.Minimum(j.Facts); why != "" {
+		return &Refusal{Why: why}
+	}
+	if s == nil || s.Version() < 3 || Unattested(cfg) {
+		return nil
+	}
+	if j.Attest == nil {
+		return &Refusal{Why: "it sent no proof of its TPM", Err: errors.New("no Begin")}
+	}
+	if err := s.CheckAttestOpen(cfg, box, j.Key, *j.Attest, now); err != nil {
+		return &Refusal{Why: attest.Why(err), Err: err}
+	}
+	if err := attest.JudgeBoot(cfg.Attest, *j.Attest); err != nil {
+		return &Refusal{Why: attest.Why(err), Err: err}
+	}
+	return nil
+}
+
+// Unattested: the release's test switch lets a box join on its word. Only a
+// build with the testswitches tag reads it (attest.TestSwitches)
+func Unattested(cfg *Config) bool {
+	return attest.TestSwitches && cfg.Attest != nil && cfg.Attest.Test != nil && cfg.Attest.Test.UnattestedJoin
+}
+
+// applyJoin: the box proves its TPM next (Joining), or, under the test
+// switch alone, is joined now
+func (s *State) applyJoin(cfg *Config, r Request, now int64) {
 	var j JoinReq
 	_ = json.Unmarshal(r.Body, &j)
-	_, id, _ := JoinName(j.Key)
 	if now-s.JoinWindow >= 3_600_000 {
 		s.JoinWindow, s.JoinCount = now, 0
 	}
 	s.JoinCount++
+	if s.Version() < 3 {
+		s.joined(r.Box, j, now, false)
+		return
+	}
+	if Unattested(cfg) {
+		s.joined(r.Box, j, now, true)
+		return
+	}
+	s.AttestOpen(cfg, r.Box, j.Key, *j.Attest, now)
+	j.Attest = nil
+	if s.Joining == nil {
+		s.Joining = map[string]*Joining{}
+	}
+	s.Joining[r.Box] = &Joining{Req: j, At: now}
+}
+
+// joined: the box is one of the fleet's strangers from now, and its
+// member's to enlist where it came with their ticket
+func (s *State) joined(box string, j JoinReq, now int64, unproven bool) {
+	_, id, _ := JoinName(j.Key)
 	if s.Joined == nil {
 		s.Joined = map[string]*Joined{}
 	}
-	s.Joined[r.Box] = &Joined{ID: id, Key: j.Key, Recipient: j.Recipient, House: j.House, At: now}
+	s.Joined[box] = &Joined{ID: id, Key: j.Key, Recipient: j.Recipient, House: j.House, At: now, Unattested: unproven}
 	if c := j.Claim; c != nil {
-		s.Joined[r.Box].Ticket = c.ID
+		s.Joined[box].Ticket = c.ID
 		rec, _ := json.Marshal(map[string]map[string]string{"joined": {"key": j.Key, "ticket": c.ID, "block": c.Block}})
-		s.Directory = append(s.Directory, DirItem{Height: s.Height, Time: now, Box: r.Box, Item: rec})
+		s.Directory = append(s.Directory, DirItem{Height: s.Height, Time: now, Box: box, Item: rec})
+	}
+	delete(s.Refused, box)
+}
+
+// attested: a box Joining that has just proved its TPM joins
+func (s *State) attested(box string, now int64) {
+	jn := s.Joining[box]
+	if jn == nil || s.Attested(box) == nil {
+		return
+	}
+	delete(s.Joining, box)
+	if len(s.Joining) == 0 {
+		s.Joining = nil
+	}
+	s.joined(box, jn.Req, now, false)
+}
+
+// ticketOwner: the member whose ticket claim is, where the identity state
+// the log holds now says a current device of theirs signed it, for them,
+// and it is unexpired and unused (ident.TicketOwner); "" otherwise. The
+// claim's id is the joining box's word: a ticket counts only once its
+// member's signature on it does.
+func (s *State) ticketOwner(cfg *Config, claim *ident.Claim, now int64) string {
+	if claim == nil || cfg.Identity == nil {
+		return ""
+	}
+	rp := identReplayOf(cfg)
+	rp.mu.Lock()
+	defer rp.mu.Unlock()
+	n := len(s.Directory)
+	if rp.r == nil || n < rp.n || (rp.n > 0 && !sameItem(s.Directory[rp.n-1], rp.last)) {
+		rp.r = ident.NewReplayer(cfg.Identity, cfg.BoxVoters())
+	}
+	ids := rp.r.CatchN(n, func(i int) ident.Item {
+		d := s.Directory[i]
+		return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item, Boxes: d.Boxes}
+	})
+	rp.n = n
+	if n > 0 {
+		rp.last = s.Directory[n-1]
+	}
+	if owner, id := ids.TicketOwner(cfg.Identity, claim.Block, uint64(now/1000)); id == claim.ID {
+		return owner
+	}
+	return ""
+}
+
+// identReplay: the identity state judged from a log, kept per release so
+// each refusal judges only what is new (its own, never the computers'
+// replay, whose state its callers read outside its lock)
+type identReplay struct {
+	mu   sync.Mutex
+	r    *ident.Replayer
+	n    int
+	last DirItem
+}
+
+var (
+	identReplaysMu sync.Mutex
+	identReplays   = map[*Config]*identReplay{}
+)
+
+func identReplayOf(c *Config) *identReplay {
+	identReplaysMu.Lock()
+	defer identReplaysMu.Unlock()
+	r := identReplays[c]
+	if r == nil {
+		r = &identReplay{}
+		identReplays[c] = r
+	}
+	return r
+}
+
+// refuse keeps why box was refused (claim: the ticket it came with, if
+// any), within the bounds above. A ticket counts only where its member's
+// device signed it (ticketOwner): then it is in the ticketed bound, one a
+// ticket and member an hour, the identity judge is told too ({"refused":
+// ...}), and says it to the ticket's member alone (ident's View.Refused).
+// Any other claim, which anyone can make up, is a stranger's.
+func (s *State) refuse(cfg *Config, box string, claim *ident.Claim, key, why string, seq uint64, now int64) {
+	old := s.Refused[box]
+	if old != nil {
+		old.Seq = max(old.Seq, seq) // a replay of what was judged is stale either way
+	}
+	if old != nil && old.Why == why && now-old.At < RefusedAgain {
+		return
+	}
+	owner := s.ticketOwner(cfg, claim, now)
+	if owner == "" {
+		claim = nil
+		if now-s.StrangerWindow >= 3_600_000 {
+			s.StrangerWindow, s.StrangerCount = now, 0
+		}
+		if s.StrangerCount >= StrangersRefusedPerHour {
+			return
+		}
+		s.StrangerCount++
+	} else {
+		// one a ticket an hour, whatever box comes with it
+		for b, x := range s.Refused {
+			if b != box && x.Ticket == claim.ID && x.Owner == owner && now-x.At < 3_600_000 {
+				return
+			}
+		}
+		if now-s.RefuseWindow >= 3_600_000 {
+			s.RefuseWindow, s.RefuseCount = now, 0
+		}
+		if s.RefuseCount >= RefusedPerHour {
+			return
+		}
+		s.RefuseCount++
+	}
+	if s.Refused == nil {
+		s.Refused = map[string]*Refused{}
+	}
+	rf := &Refused{Why: why, At: now, Seq: seq}
+	if old != nil {
+		rf.Seq = max(rf.Seq, old.Seq)
+	}
+	if claim != nil {
+		rf.Ticket, rf.Owner = claim.ID, owner
+	}
+	s.Refused[box] = rf
+	for len(s.Refused) > MaxRefused {
+		// the oldest ticketless one first: a member's never goes for junk
+		oldest, ticketless := "", false
+		for b, x := range s.Refused {
+			tl := x.Ticket == ""
+			o := s.Refused[oldest]
+			if oldest == "" || tl && !ticketless || tl == ticketless && (x.At < o.At || x.At == o.At && b < oldest) {
+				oldest, ticketless = b, tl
+			}
+		}
+		delete(s.Refused, oldest)
+	}
+	if claim != nil {
+		rec, _ := json.Marshal(map[string]map[string]string{"refused": {"key": key, "ticket": claim.ID, "block": claim.Block, "why": why}})
+		s.Directory = append(s.Directory, DirItem{Height: s.Height, Time: now, Box: box, Item: rec})
+	}
+}
+
+// refused: a request Check refused for what the box is (a Refusal), kept
+func (s *State) refused(cfg *Config, r Request, rf *Refusal, now int64) {
+	switch r.Kind {
+	case "join":
+		var j JoinReq
+		if json.Unmarshal(r.Body, &j) != nil {
+			return
+		}
+		s.refuse(cfg, r.Box, j.Claim, j.Key, rf.Why, r.Seq, now)
+	case "attest-response", "attest-begin":
+		// a box that has joined stays, its proof no longer counting for
+		// what it may run; it tries again within the hour. Nothing replays
+		// this: its sequence is used
+		if s.Joined[r.Box] != nil {
+			if b := s.Boxes[r.Box]; b != nil {
+				b.Seq = max(b.Seq, r.Seq)
+			}
+			if s.Attest != nil {
+				s.Attest.Failed(r.Box, rf.Why, now)
+			}
+			s.refuse(cfg, r.Box, nil, s.Joined[r.Box].Key, rf.Why, r.Seq, now)
+			return
+		}
+		// its proof did not hold: it starts again, from its join
+		jn := s.Joining[r.Box]
+		if jn == nil {
+			return
+		}
+		s.refuse(cfg, r.Box, jn.Req.Claim, jn.Req.Key, rf.Why, r.Seq, now)
+		s.dropJoining(r.Box)
+	}
+}
+
+// checkProveAgain: a joined box, its TPM's proof again, judged as a join's
+// is, except that the boot it last proved passes whatever the release has
+// moved on to: an update it has not restarted into is no fault of its own
+func (s *State) checkProveAgain(cfg *Config, r Request, now int64) error {
+	j := s.Joined[r.Box]
+	if j == nil {
+		return fmt.Errorf("%s has not joined", r.Box)
+	}
+	var b attest.Begin
+	if err := json.Unmarshal(r.Body, &b); err != nil {
+		return err
+	}
+	if s.Attest != nil {
+		if err := s.Attest.CheckAgain(r.Box, now); err != nil {
+			return err
+		}
+	}
+	if err := s.CheckAttestOpen(cfg, r.Box, j.Key, b, now); err != nil {
+		return &Refusal{Why: attest.Why(err), Err: err}
+	}
+	if s.Attest != nil && s.Attest.SameBoot(r.Box, b) {
+		return nil
+	}
+	if err := attest.JudgeBoot(cfg.Attest, b); err != nil {
+		return &Refusal{Why: attest.Why(err), Err: err}
+	}
+	return nil
+}
+
+func (s *State) applyProveAgain(cfg *Config, r Request, now int64) {
+	var b attest.Begin
+	_ = json.Unmarshal(r.Body, &b)
+	s.AttestOpen(cfg, r.Box, s.Joined[r.Box].Key, b, now)
+	s.Attest.Tried(r.Box, now)
+}
+
+// dropTaken: box was this machine before it was set up again, under a key
+// that is gone with its disk; its place is the new one's (attest.ApplyResponse)
+func (s *State) dropTaken(box string) {
+	delete(s.Joined, box)
+	delete(s.Boxes, box)
+	delete(s.Joining, box)
+	delete(s.Refused, box)
+	if len(s.Joined) == 0 {
+		s.Joined = nil
+	}
+}
+
+// Proved: joined box's TPM proof counts now for what it may run: it has
+// one, its last try held, and it is no older than attest.ProofFresh. A
+// test's build counts a box joined under the test switch as proved.
+func (s *State) Proved(box string, now int64) bool {
+	j := s.Joined[box]
+	if j == nil {
+		return false
+	}
+	if attest.TestSwitches && j.Unattested {
+		return true
+	}
+	rec := s.Attested(box)
+	return rec != nil && rec.Failed == "" && now-rec.At <= attest.ProofFresh
+}
+
+// dropJoining: a join that did not prove its TPM is gone, and every trace
+// of the box with it
+func (s *State) dropJoining(box string) {
+	delete(s.Joining, box)
+	if s.Attest != nil {
+		delete(s.Attest.Pending, box)
+	}
+	if s.Joined[box] == nil {
+		delete(s.Boxes, box)
+	}
+	if len(s.Joining) == 0 {
+		s.Joining = nil
+	}
+}
+
+// expireJoining: joins whose proof did not come within the attestation's
+// hour are refused, and refusals a week old are forgotten
+func (s *State) expireJoining(cfg *Config, now int64) {
+	var gone []string
+	for box, jn := range s.Joining {
+		if s.Attest == nil || s.Attest.Pending[box] == nil || now-jn.At >= attest.TTL {
+			gone = append(gone, box)
+		}
+	}
+	sort.Strings(gone)
+	for _, box := range gone {
+		jn := s.Joining[box]
+		s.refuse(cfg, box, jn.Req.Claim, jn.Req.Key, "it did not finish proving its TPM within an hour", 0, now)
+		s.dropJoining(box)
+	}
+	for box, rf := range s.Refused {
+		if now-rf.At >= RefusedFor {
+			delete(s.Refused, box)
+		}
+	}
+	if len(s.Refused) == 0 {
+		s.Refused = nil
 	}
 }
 
 // joinedRecord: whether a directory item a box sends says "joined" at its
-// top, which only the state machine writes
-func joinedRecord(body []byte) bool {
+// top, which only the state machine writes; from version 3 "refused" too
+func joinedRecord(body []byte, version int) bool {
 	d := json.NewDecoder(bytes.NewReader(body))
 	if t, err := d.Token(); err != nil || t != json.Delim('{') {
 		return false
@@ -198,7 +638,7 @@ func joinedRecord(body []byte) bool {
 		if err != nil {
 			return true
 		}
-		if k == "joined" {
+		if k == "joined" || k == "refused" && version >= 3 {
 			return true
 		}
 		var skip json.RawMessage
@@ -230,7 +670,13 @@ func (s *State) IdentBoxes() ident.Boxes {
 		if b == nil {
 			return ident.BoxInfo{}, false
 		}
-		return ident.BoxInfo{LastSeen: b.LastSeen, Facts: b.Facts, Fleet: fleet}, true
+		// a box of the release's proves nothing here; a joined one has
+		// (its record stands, however old: a stale proof narrows what it
+		// runs, never its member's access), unless it joined under the
+		// test switch. Before version 3 no one has proved anything
+		j := s.Joined[name]
+		unproven := s.Version() >= 3 && j != nil && !j.Unattested && s.Attested(name) == nil
+		return ident.BoxInfo{LastSeen: b.LastSeen, Facts: b.Facts, Fleet: fleet, Unattested: unproven}, true
 	}
 }
 
@@ -267,6 +713,10 @@ func (s *State) dropGone(now int64) {
 		if now-last > JoinedGoneAfter && !ours || now-last > ident.OurFaultFor*1000 {
 			delete(s.Joined, name)
 			delete(s.Boxes, name)
+			// its TPM and its Secure Boot key may be another box's now
+			if s.Attest != nil {
+				s.Attest.Forget(name)
+			}
 		}
 	}
 	if len(s.Joined) == 0 {

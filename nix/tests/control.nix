@@ -24,7 +24,8 @@ pkgs.runCommand "control-e2e"
     cp -r ${../../servers/system/control} src && chmod -R u+w src
     cp -r ${self.packages.${sys}.dd-control.goModules} src/vendor
     (cd src && GOFLAGS=-mod=vendor GOCACHE=$TMPDIR/go-cache CGO_ENABLED=0 go test ./...)
-    mkdir w && cp ${self.packages.${sys}.control-worker}/{worker.js,wasm_exec.js,witness.wasm} w/
+    (cd src && GOFLAGS=-mod=vendor GOCACHE=$TMPDIR/go-cache CGO_ENABLED=0 go test -tags testswitches ./state/... ./cmd/...)
+    mkdir w && cp ${self.packages.${sys}.control-worker-test}/{worker.js,wasm_exec.js,witness.wasm} w/
     # the test fleet's placement inputs, for the witness as for the boxes
     echo "export default $(cat ${./control/placement.json});" > w/placement.js
     # and /leases, which only the DNS Worker reaches (by its binding), here
@@ -40,7 +41,7 @@ pkgs.runCommand "control-e2e"
     };
     JS
     sed -i 's/^    //' w/front.js
-    cp ${self.packages.${sys}.dd-control}/bin/dd-control . && chmod u+w w/*
+    cp ${self.packages.${sys}.dd-control-test}/bin/dd-control . && chmod u+w w/*
     # each box's gate, for the directory over the agreed log
     cp ${self.packages.${sys}.verify}/bin/verify .
     # a test fleet: three boxes that each vote, and the witness
@@ -75,6 +76,8 @@ pkgs.runCommand "control-e2e"
     cfg["identity"]["members"]["members"].append(hashlib.sha256(croot.encode()).hexdigest())
     cfg["computers"] = {"memory": 16384, "threads": 8, "disk": 200, "portBase": 27200, "portCount": 8, "owners": ["cara"]}
     cfg["rules"]["computerHosts"] = {"node2": "", "node3": "cara"}
+    # the stranger here has no TPM; a join's proof of one is join-attest's
+    cfg["attest"] = {"test": {"unattestedJoin": True}}
     json.dump(cfg, open("config.json", "w"))
     open("w/config.js", "w").write("export default " + json.dumps(cfg) + ";\n")
     open("w/.dev.vars", "w").write("WITNESS_KEY=" + base64.b64encode(w.private_bytes(S.Encoding.Raw, S.PrivateFormat.Raw, S.NoEncryption())).decode() + "\n")

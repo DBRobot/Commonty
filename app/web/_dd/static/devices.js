@@ -43,6 +43,7 @@ let entry = null;
 let signins = null;
 let boxes = []; // the boxes this person set up (member_boxes.rs)
 let waiting = []; // boxes that joined with a ticket of theirs, not yet theirs
+let refused = []; // boxes that came with a ticket of theirs and were refused, with why
 let lib = null; // the library, once the app has handed its key
 let names = null; // { key: name }, once opened
 
@@ -80,6 +81,7 @@ async function load(changed = true) {
   signins = s;
   boxes = b.boxes || [];
   waiting = b.waiting || [];
+  refused = b.refused || [];
 }
 
 // the passkey, once more: what ends a session elsewhere asks for it
@@ -217,6 +219,25 @@ function waitingRow(b) {
   return li;
 }
 
+// a box that came with a ticket of this person's and was refused: why, in
+// the judge's words, until it joins or a week has passed
+function refusedRow(b) {
+  const li = el('li', 'dv-item');
+  const ico = el('span', 'dv-ico');
+  ico.innerHTML = ICON.laptop;
+  const text = el('div');
+  text.append(
+    el('div', 'dv-name', b.name),
+    el('div', 'dv-meta', `refused ${day(Math.floor(b.refused / 1000))} · ${why(b.why)}`),
+  );
+  li.append(ico, text);
+  return li;
+}
+
+// the judge says what the box lacks ("needs 8 GiB of memory", "Secure Boot
+// is off"): a sentence about the box
+const why = (w) => (w.startsWith('needs ') ? `it ${w}` : w);
+
 const canSignBoxes = () => rootHere || (entry.entry.root.startsWith('webauthn:') && !servedByApp);
 
 // A box item, signed by the account's main key: by the app where it holds a
@@ -310,8 +331,8 @@ function render() {
   let d = 0;
   let p = 0;
   $('dv-keys').replaceChildren(...keys().map((k) => keyRow(k, k.passkey ? ++p : ++d)));
-  $('dv-boxes').replaceChildren(...boxes.map(boxRow), ...waiting.map(waitingRow));
-  $('dv-boxes-box').hidden = boxes.length + waiting.length === 0;
+  $('dv-boxes').replaceChildren(...boxes.map(boxRow), ...waiting.map(waitingRow), ...refused.map(refusedRow));
+  $('dv-boxes-box').hidden = boxes.length + waiting.length + refused.length === 0;
   $('dv-show').hidden = names !== null;
   $('dv-hint').hidden = names !== null;
   drawConfirm();

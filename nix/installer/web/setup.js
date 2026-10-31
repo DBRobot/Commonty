@@ -67,7 +67,7 @@ function clock(s) {
 const CHECK = {
   uefi: ['Starts by UEFI', 'Set the boot mode to UEFI (not Legacy or CSM) in the firmware settings.'],
   tpm: ['Has a TPM 2.0', 'Turn on the TPM: on Intel it is often called PTT, on AMD fTPM, under Security.'],
-  setupMode: ['Secure Boot is ready for this box\'s own keys', 'Put Secure Boot in setup mode: under Boot or Security, “Reset to setup mode”, “Clear Secure Boot keys” or “Delete all keys”. The box then enrolls keys of its own and starts nothing else.'],
+  setupMode: ['Secure Boot is ready for this box\'s own keys', 'Put Secure Boot in setup mode: under Boot or Security, “Reset to setup mode”, “Clear Secure Boot keys” or “Delete all keys”, and leave Secure Boot itself on. The box then enrolls keys of its own and starts nothing else.'],
   raid: ['Its disks can be seen', 'Set the disk controller (SATA mode) to AHCI, not RAID or RST, under Storage.'],
   virt: ['Can run virtual machines', 'Turn on virtualisation: Intel VT-x or AMD-V (SVM), under CPU or Advanced.'],
 };

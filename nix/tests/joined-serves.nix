@@ -48,6 +48,8 @@ in
         networking.networkmanager.enable = lib.mkForce false;
         dd.unlock.waits.enrolment = 1;
         dd.control.relay = "ws://fleet:8789/relay";
+        # what comes after a join is judged here; its proof is join-attest's
+        dd.control.package = pkg.dd-control-test;
         environment.etc."dd-control/config.json".source = lib.mkForce "/run/dd-test/config.json";
         # the plan's inputs: the test puts the release's there, then the
         # same with joined boxes attested
@@ -80,9 +82,9 @@ in
   };
   scriptEnv = {
     inherit keyName;
-    control = "${pkg.dd-control}/bin/dd-control";
+    control = "${pkg.dd-control-test}/bin/dd-control";
     verify = "${pkg.verify}/bin/verify";
-    worker = "${pkg.control-worker}";
+    worker = "${pkg.control-worker-test}";
     pages = "${pkg.pages}";
     fleet = ./joined-box/fleet.py;
     # the key joined-box joins with (its name is the same box's)

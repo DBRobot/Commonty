@@ -46,6 +46,8 @@ let
       # its disk's boot is join-install's test; this one boots the test's
       dd.unlock.waits.enrolment = 1;
       dd.control.relay = "ws://fleet:8789/relay";
+      # what comes after a join is judged here; its proof is join-attest's
+      dd.control.package = pkg.dd-control-test;
       environment.etc."dd-control/config.json".source = lib.mkForce "/run/dd-test/config.json";
       dd.agent.url = lib.mkForce "http://fleet/release/current.json";
       dd.agent.publicKeyFile = lib.mkForce "/run/dd-test/release.pub";
@@ -94,9 +96,9 @@ in
   scriptEnv = {
     inherit keyName;
     dd = "${pkg.dd}/bin/dd";
-    control = "${pkg.dd-control}/bin/dd-control";
+    control = "${pkg.dd-control-test}/bin/dd-control";
     verify = "${pkg.verify}/bin/verify";
-    worker = "${pkg.control-worker}";
+    worker = "${pkg.control-worker-test}";
     pages = "${pkg.pages}";
     fleet = ./joined-box/fleet.py;
     key = ./joined-box-vm/test-sig.pem;

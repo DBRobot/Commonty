@@ -377,17 +377,17 @@ state's JSON holds, follows these rules:
    after that it is read by nothing and can go.
 4. **Test it from the release before.** `checks.control-upgrade`
    ([nix/tests/control-upgrade.nix](../../nix/tests/control-upgrade.nix))
-   builds release 359's dd-control and witness from its commit, starts a
-   fleet on them, and switches it a box at a time in two orders. It checks
-   that every box holds the same state at each height, that `svc/db`
-   keeps its holder and epoch, that decisions keep coming, and that
-   version 2 and the new lease rule arrive only after the last switch.
-   After a change to the state machine, point `old` at the release the
-   fleet runs. The validators' own test
+   builds the release the fleet runs (371, state machine 2) from its
+   commit, starts a fleet on them, and switches it a box at a time in two
+   orders. It checks that every box holds the same state at each height,
+   that `svc/db` keeps its holder and epoch, that decisions keep coming,
+   and that the new version and the new lease rule arrive only after the
+   last switch. After a change to the state machine, point `old` at the
+   release the fleet runs. The validators' own test
    (`TestVersionsSwitchOneAtATime`) does the same in one process.
    `checks.control-together` (the same script, `SCENARIO=together`) is
-   release 360's switch: the witness in the config and off, both boxes
-   switched at once from 359's programs and config. Decisions must come
+   a switch like release 360's: the witness in the config and off, both
+   boxes switched at once from the old programs and config. Decisions must come
    within 30 s, and postgresql and forgejo must run on their lease's box
    within 75 s (`TestSwitchTogetherWithTheWitnessOff` in one process).
 

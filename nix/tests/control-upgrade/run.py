@@ -1,11 +1,12 @@
-# Release 359's control plane switched to this release's while it decides.
-# Validators node1, node2 and the witness, and node3, which only reads, all
-# start on 359's programs; each switches to this release's in turn, a gap
-# between, in two orders. Throughout: decisions keep coming (the longest
+# The control plane of the release the fleet runs (nix/tests/control-upgrade.nix,
+# its state machine version 2, called "359" below where it was that first)
+# switched to this release's while it decides. Validators node1, node2 and
+# the witness, and node3, which only reads, all start on the old programs;
+# each switches to this release's in turn, a gap between, in two orders. Throughout: decisions keep coming (the longest
 # wait is measured and bounded), every box at a height holds the same
 # state as every other there, old and new alike, and svc/db stays with its
 # holder at its epoch. Release 359's config has no rule for svc/next and
-# this one's has: it is granted only once version 2 is agreed, and that is
+# this one's has: it is granted only once version 3 is agreed, and that is
 # only once every validator and every live box runs this release.
 #
 # SCENARIO=together is release 360's switch of 2026-10-24 instead: the
@@ -21,6 +22,8 @@ from cryptography.hazmat.primitives import serialization as S
 
 T = os.getcwd()
 failed = []
+# the state machine each release runs (state/machine.go)
+OLD, NEW = 2, 3
 
 
 def ok(c, m):
@@ -85,6 +88,8 @@ old_cfg = cfg
 new_cfg = json.loads(json.dumps(cfg))
 new_cfg["rules"]["leases"]["svc/next"] = {"eligible": ["node1"]}
 new_cfg["before"] = old_cfg
+# attestation's config, new with version 3: no maker's root in a test
+new_cfg["attest"] = {"roots": {}}
 json.dump(old_cfg, open(f"{T}/old/config.json", "w"))
 json.dump(new_cfg, open(f"{T}/new/config.json", "w"))
 witness_key = base64.b64encode(
@@ -419,8 +424,8 @@ class Fleet:
         )
         s = self.state(1)
         ok(
-            not s.get("machine") and not s.get("leases"),
-            f"{self.name}: on 359 nothing new is agreed and no writer's lease granted",
+            s.get("machine") in (None, OLD) and not s.get("leases"),
+            f"{self.name}: on the old release nothing new is agreed and no writer's lease granted",
         )
         t = threading.Thread(target=self.watch)
         t.start()
@@ -490,11 +495,11 @@ class Fleet:
             s["height"]
             for _, _, _, s in self.samples
             if any((s.get("leases") or {}).get(f"svc/{w}") for w in WRITERS)
-            and s.get("machine") != 2
+            and s.get("machine") != NEW
         ]
         ok(
             not early,
-            f"{self.name}: a writer's lease granted only under version 2 (early at {early[:3]})",
+            f"{self.name}: a writer's lease granted only under the new version (early at {early[:3]})",
         )
 
     # node1's TPM stops signing, as on 2026-10-24 23:52: heartbeats and
@@ -780,12 +785,12 @@ class Fleet:
             phases.append((who, t0, time.time()))
             agreed = [self.state(i).get("machine") for i in (1, 2, 3)]
             ok(
-                who == order[-1] or not any(agreed),
+                who == order[-1] or all(m in (None, OLD) for m in agreed),
                 f"{self.name}: nothing new agreed with {who} switched and {order[order.index(who) + 1 :]} not",
             )
         wait(
-            f"{self.name}: version 2 agreed",
-            lambda: all(self.state(i).get("machine") == 2 for i in (1, 2, 3)),
+            f"{self.name}: version {NEW} agreed",
+            lambda: all(self.state(i).get("machine") == NEW for i in (1, 2, 3)),
         )
         nxt = lambda: self.state(1).get("leases", {}).get("svc/next") or {}
         wait(
@@ -837,27 +842,29 @@ class Fleet:
             dbe == {held},
             f"{self.name}: svc/db held by {held[0]} at epoch {held[1]} from height {self.held_at} on (saw {sorted(dbe, key=str)}, none at {lapsed[:5]})",
         )
-        # svc/next: never before version 2
+        # svc/next: never before the new version
         early = [
             s["height"]
             for _, _, _, s in self.samples
-            if s.get("leases", {}).get("svc/next") and s.get("machine") != 2
+            if s.get("leases", {}).get("svc/next") and s.get("machine") != NEW
         ]
         ok(
             not early,
-            f"{self.name}: svc/next granted only under version 2 (early at {early[:3]})",
+            f"{self.name}: svc/next granted only under version {NEW} (early at {early[:3]})",
         )
-        before2 = [s["height"] for _, _, _, s in self.samples if s.get("machine")]
+        before2 = [
+            s["height"] for _, _, _, s in self.samples if s.get("machine") == NEW
+        ]
         first2 = min(before2) if before2 else None
         last_switch = phases[-1][1]
         at2 = min(
-            (t for t, _, _, s in self.samples if s.get("machine") == 2), default=None
+            (t for t, _, _, s in self.samples if s.get("machine") == NEW), default=None
         )
         ok(
             at2 is not None and at2 >= last_switch,
-            f"{self.name}: version 2 agreed at height {first2}, {at2 - last_switch:.1f}s after the last switch"
+            f"{self.name}: version {NEW} agreed at height {first2}, {at2 - last_switch:.1f}s after the last switch"
             if at2
-            else f"{self.name}: version 2 never agreed",
+            else f"{self.name}: version {NEW} never agreed",
         )
         # the longest wait between two decisions, by phase
         times = sorted({(round(t, 1), s["height"]) for t, _, _, s in self.samples})

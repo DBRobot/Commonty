@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -15,6 +16,8 @@ import (
 	"time"
 
 	"commonty/control/state"
+	"commonty/control/state/attest"
+	"commonty/control/state/ident"
 	"commonty/control/wire"
 )
 
@@ -378,5 +381,134 @@ func TestSwitchTogetherWithTheWitnessOff(t *testing.T) {
 	}
 	for _, id := range live {
 		val(id).Stop()
+	}
+}
+
+// A join big enough to carry a whole TPM proof reaches a block through the
+// validators' pools from version 3, and only then, and not anything else
+// that large; and an answer from a box still proving its TPM, which has no
+// key in the state but its attestation's, passes their check of who signed
+// it. Neither is seen by state.Block alone.
+func TestARequestAsBigAsAProofIsJudged(t *testing.T) {
+	t.Parallel()
+	cfg := &state.Config{Boxes: map[string]state.Box{}, Rules: state.Rules{LeaseTTL: 15000, GoneAfter: 90000}}
+	keys := map[uint64]ed25519.PrivateKey{}
+	for id := uint64(1); id <= 3; id++ {
+		pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+		keys[id] = priv
+		cfg.Validators = append(cfg.Validators, state.Validator{ID: id, Name: fmt.Sprint("v", id), Key: base64.StdEncoding.EncodeToString(pub)})
+	}
+	k, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	der, _ := x509.MarshalPKIXPublicKey(&k.PublicKey)
+	spki := base64.StdEncoding.EncodeToString(der)
+	name, _, _ := state.JoinName(spki)
+	r := &relay{in: map[uint64]chan [3]any{}, down: map[uint64]bool{}}
+	vals := map[uint64]*Validator{}
+	for id := uint64(1); id <= 3; id++ {
+		r.in[id] = make(chan [3]any, 4096)
+		v, err := New(Options{Config: cfg, ID: id, Key: keys[id], Transport: tp{r, id}, Logger: quiet{}, WAL: memWAL{}, Persist: func(Saved) {}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		vals[id] = v
+		go func(v *Validator, ch chan [3]any) {
+			for f := range ch {
+				v.Receive(f[0].(uint64), f[1].(byte), f[2].([]byte))
+			}
+		}(v, r.in[id])
+	}
+	for _, v := range vals {
+		if err := v.Start(); err != nil {
+			t.Fatal(err)
+		}
+		defer v.Stop()
+	}
+	facts := map[string]float64{"tpm_major": 2, "uefi": 1, "secure_boot_capable": 1, "arch_x86_64": 1,
+		"threads": ident.MinThreads, "mem_total_bytes": ident.MinMemTotal, "system_disk_bytes": ident.MinSystemDisk, "nics": 1}
+	sign := func(q state.Request) []byte {
+		d := sha256.Sum256(q.Bytes())
+		sig, err := ecdsa.SignASN1(rand.Reader, k, d[:])
+		if err != nil {
+			t.Fatal(err)
+		}
+		q.Sig = base64.RawURLEncoding.EncodeToString(sig)
+		raw, _ := json.Marshal(q)
+		if len(raw) > state.MaxRequest {
+			t.Fatalf("%d bytes, over the pool's %d", len(raw), state.MaxRequest)
+		}
+		return raw
+	}
+	// as large as a Begin may be, and no proof at all: refused for that,
+	// and kept, which only a block does
+	log := base64.StdEncoding.EncodeToString(make([]byte, attest.MaxBegin*3/4-4096))
+	body, _ := json.Marshal(state.JoinReq{Key: spki, Recipient: "age1x", House: "h", Facts: facts, Attest: &attest.Begin{Log: log}})
+	if len(body) <= attest.MaxBegin/2 {
+		t.Fatalf("a request of %d bytes proves little", len(body))
+	}
+	raw := sign(state.Request{Kind: "join", Box: name, Seq: uint64(time.Now().UnixMilli()), Body: body})
+	if vals[1].admit(raw) {
+		t.Fatal("before version 3, a request above the old limit let in")
+	}
+	deadline := time.Now().Add(60 * time.Second)
+	// a config is agreed in a block, and a block needs a request: any small one
+	short, _ := json.Marshal(state.JoinReq{Key: spki, Recipient: "age1x", House: "h"})
+	tick := state.Request{Kind: "join", Box: name, Body: short}
+	for vals[1].State().Version() < 3 {
+		if time.Now().After(deadline) {
+			t.Fatal("version 3 was not agreed")
+		}
+		tick.Seq++
+		for id, v := range vals {
+			v.Receive(id, wire.Submit, sign(tick))
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	for seq := uint64(time.Now().UnixMilli()); vals[1].State().Refused[name] == nil; seq++ {
+		if time.Now().After(deadline) {
+			t.Fatal("the join never reached a block")
+		}
+		raw = sign(state.Request{Kind: "join", Box: name, Seq: seq, Body: body})
+		for id, v := range vals {
+			v.Receive(id, wire.Submit, raw)
+		}
+		time.Sleep(time.Second)
+	}
+	// refused for that already: not carried again
+	time.Sleep(1100 * time.Millisecond)
+	if vals[1].admit(sign(state.Request{Kind: "join", Box: name, Seq: uint64(time.Now().UnixMilli()) + 10_000, Body: body})) {
+		t.Fatal("the same refusal carried again")
+	}
+	// nor anything else that large
+	time.Sleep(1100 * time.Millisecond)
+	big, _ := json.Marshal(map[string]string{"x": log})
+	if vals[1].admit(sign(state.Request{Kind: "directory", Box: name, Seq: 1, Body: big})) {
+		t.Fatal("a directory item that large let in")
+	}
+
+	// a box still proving its TPM: signed by the key it started with
+	k2, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	der2, _ := x509.MarshalPKIXPublicKey(&k2.PublicKey)
+	spki2 := base64.StdEncoding.EncodeToString(der2)
+	name2, _, _ := state.JoinName(spki2)
+	v := vals[1]
+	v.mu.Lock()
+	v.st.Attest = attest.New()
+	v.st.Attest.Pending[name2] = &attest.Pending{Key: spki2}
+	v.mu.Unlock()
+	a := state.Request{Kind: "attest-response", Box: name2, Seq: 1, Body: []byte("{}")}
+	d := sha256.Sum256(a.Bytes())
+	sig, _ := ecdsa.SignASN1(rand.Reader, k2, d[:])
+	a.Sig = base64.RawURLEncoding.EncodeToString(sig)
+	rawA, _ := json.Marshal(a)
+	if _, err := v.VerifyRequest(rawA); err != nil {
+		t.Fatalf("an answer from a box still proving: %v", err)
+	}
+	a.Kind = "heartbeat"
+	d = sha256.Sum256(a.Bytes())
+	sig, _ = ecdsa.SignASN1(rand.Reader, k2, d[:])
+	a.Sig = base64.RawURLEncoding.EncodeToString(sig)
+	rawA, _ = json.Marshal(a)
+	if _, err := v.VerifyRequest(rawA); err == nil {
+		t.Fatal("a heartbeat from a box still proving passed")
 	}
 }

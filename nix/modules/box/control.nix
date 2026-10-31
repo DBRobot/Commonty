@@ -23,6 +23,14 @@ in
       type = lib.types.str;
       default = "wss://control.${config.dd.domain}/relay";
     };
+    # a test's fleet runs dd-control-test, which reads its config's test
+    # switches; a box's never does
+    package = lib.mkOption {
+      type = lib.types.package;
+      default = pkg.dd-control;
+      defaultText = "the release's dd-control";
+      description = "the program dd-control runs";
+    };
     placement = lib.mkOption {
       type = lib.types.path;
       default = pkg.placement-inputs;
@@ -33,7 +41,7 @@ in
 
   config = lib.mkIf cfg.enable {
     environment.systemPackages = [
-      pkg.dd-control
+      cfg.package
       # dd-drain on: this box is given nothing new, and what may move moves
       # off it; what stays on failure stays until it leaves (control-plane.md)
       (pkgs.writeShellScriptBin "dd-drain" ''
@@ -77,10 +85,15 @@ in
       wants = [ "network-online.target" ];
       # where the network's control server runs: where each box that joined
       # on its own key is on the network, into the agreed state
-      path = lib.optional config.services.headscale.enable config.services.headscale.package;
+      # and tpm2-tools: a joined box's proof of its TPM (control/tpm); signing
+      # is in process
+      path = [
+        pkgs.tpm2-tools
+      ]
+      ++ lib.optional config.services.headscale.enable config.services.headscale.package;
       serviceConfig = {
         ExecStart = lib.concatStringsSep " " [
-          "${pkg.dd-control}/bin/dd-control"
+          "${cfg.package}/bin/dd-control"
           "-config /etc/dd-control/config.json"
           "-box ${config.networking.hostName}"
           "-relay ${cfg.relay}"
