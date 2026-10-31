@@ -32,6 +32,7 @@
     "joined-serves"
     "joined-games"
     "joined-reach"
+    "joined-store-tls"
     "photos"
     "llm"
     "vault"

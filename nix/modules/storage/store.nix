@@ -261,7 +261,7 @@ let
           # state has it: its store is at its name
           curl -fsS --max-time 10 ${cfg.control}/state \
             | jq -e --arg n "$1" '.joined[$n] // empty' >/dev/null \
-            && echo "https://store.$1.${base}:${toString cfg.publicPort}"
+            && echo "https://store.$1.${config.dd.joinedDomain or base}:${toString cfg.publicPort}"
           ;;
         *) return 1 ;;
         esac
@@ -874,45 +874,48 @@ in
         "https:443" "";
       }
     '';
-    services.nginx.virtualHosts."store.${box}.${base}" = {
-      useACMEHost = base;
-      onlySSL = true;
-      listen = [
-        {
-          addr = "0.0.0.0";
-          port = cfg.publicPort;
-          ssl = true;
-        }
-        {
-          addr = "[::]";
-          port = cfg.publicPort;
-          ssl = true;
-        }
-      ];
-      locations."/".proxyPass = "http://127.0.0.1:${toString cfg.port}";
-      # s3 signs its requests; no cookie of anyone's goes to the store
-      locations."/".ddCookie = "";
-      # the Host a box signed: the recommended headers send $host, which
-      # drops the port, and since the store moved off 443 every copy in
-      # failed "Invalid signature" (2026-10-20). The port it came in on, not
-      # the client's $http_host (gixy refuses it), so the name is still
-      # server_name's
-      locations."/".recommendedProxySettings = false;
-      # nearly full, nothing more from other boxes: what they send is
-      # refused, what they read still served
-      locations."/".extraConfig = ''
-        set $dd_store_refuse "";
-        if (-f ${full}) { set $dd_store_refuse "full"; }
-        if ($request_method ~ ^(PUT|POST)$) { set $dd_store_refuse "''${dd_store_refuse}-write"; }
-        if ($dd_store_refuse = "full-write") { return 507; }
-        client_max_body_size 0;
-        proxy_request_buffering off;
-        proxy_set_header Host $host$dd_store_port;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-      '';
-      locations."/_keys/".alias = "${sealed}/";
-    };
+    services.nginx.virtualHosts."store.${box}.${
+      if config.dd.box.joined or false then config.dd.joinedDomain or base else base
+    }" =
+      {
+        useACMEHost = base;
+        onlySSL = true;
+        listen = [
+          {
+            addr = "0.0.0.0";
+            port = cfg.publicPort;
+            ssl = true;
+          }
+          {
+            addr = "[::]";
+            port = cfg.publicPort;
+            ssl = true;
+          }
+        ];
+        locations."/".proxyPass = "http://127.0.0.1:${toString cfg.port}";
+        # s3 signs its requests; no cookie of anyone's goes to the store
+        locations."/".ddCookie = "";
+        # the Host a box signed: the recommended headers send $host, which
+        # drops the port, and since the store moved off 443 every copy in
+        # failed "Invalid signature" (2026-10-20). The port it came in on, not
+        # the client's $http_host (gixy refuses it), so the name is still
+        # server_name's
+        locations."/".recommendedProxySettings = false;
+        # nearly full, nothing more from other boxes: what they send is
+        # refused, what they read still served
+        locations."/".extraConfig = ''
+          set $dd_store_refuse "";
+          if (-f ${full}) { set $dd_store_refuse "full"; }
+          if ($request_method ~ ^(PUT|POST)$) { set $dd_store_refuse "''${dd_store_refuse}-write"; }
+          if ($dd_store_refuse = "full-write") { return 507; }
+          client_max_body_size 0;
+          proxy_request_buffering off;
+          proxy_set_header Host $host$dd_store_port;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+        '';
+        locations."/_keys/".alias = "${sealed}/";
+      };
   };
 }

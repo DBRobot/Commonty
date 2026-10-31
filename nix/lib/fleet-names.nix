@@ -8,6 +8,7 @@ let
 in
 {
   zone = config.dd.domain;
+  joinedZone = config.dd.joinedDomain;
   address = config.dd.box.net;
   inherit (cfg) tunnel bare;
   hosts = cfg.hosts ++ map (h: "demo-${h}") cfg.demoDoors;

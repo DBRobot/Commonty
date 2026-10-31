@@ -463,7 +463,7 @@ export class Relay {
         // network's control server gave each (never the box's own word)
         const joined = {};
         for (const [name, j] of Object.entries(s.joined || {})) {
-          if (typeof j.ipv4 === 'number') joined[name] = { ipv4: j.ipv4 };
+          if (typeof j.ipv4 === 'number') joined[name] = { ipv4: j.ipv4, key: j.key };
         }
         // and where the agreed plan puts each placed service: the
         // release's placement inputs planned by the witness on the agreed

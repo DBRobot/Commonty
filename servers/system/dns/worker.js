@@ -19,7 +19,10 @@
 // TXT record at _acme-challenge.<name>, and only this Worker writes one: a
 // box asks with a request its TPM-held key signed (fleet.js BOXES), for a
 // name the release says it serves (fleet.js NAMES, from that box's own
-// nginx). No other kind of record, no other name, no other box's name.
+// nginx). No other kind of record, no other name, no other box's name. A box
+// that joined on its own key asks with the key the agreed state has for it,
+// for its store's name and a name of what the agreed plan gives it: never a
+// public name or one under a lease, never on its own word.
 //
 // Home controllers (controller.js): a household's device given a name by a
 // member's root, which then asks for its own name's challenges with its own
@@ -88,8 +91,12 @@ function rawSig(sig) {
 }
 
 async function signedBy(box, message, sig) {
+  return signedWith(BOXES[box], message, sig);
+}
+
+async function signedWith(spki, message, sig) {
   try {
-    const key = await crypto.subtle.importKey('spki', unb64(BOXES[box]), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+    const key = await crypto.subtle.importKey('spki', unb64(spki), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
     return await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, rawSig(unb64(sig)), enc.encode(message));
   } catch {
     return false;
@@ -131,12 +138,17 @@ export async function holders(env) {
     // a box that joined on its own key: its name, and its address on the
     // fleet's network if it is one (100.64.0.0/10)
     const joined = {};
+    // and the key it joined with, where the relay says (one from before
+    // does not, and no joined box gets a certificate from it)
+    const joinedKeys = {};
     for (const [name, j] of Object.entries(v.joined || {})) {
       const n = j && j.ipv4;
       if (!/^j[0-9a-f]{10}$/.test(name) || !Number.isInteger(n) || n >>> 22 !== (100 << 2) + 1) continue;
       joined[name] = [n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.');
+      if (typeof j.key === 'string' && j.key) joinedKeys[name] = j.key;
     }
     Object.defineProperty(out, 'joined', { value: joined });
+    Object.defineProperty(out, 'joinedKeys', { value: joinedKeys });
     // the boxes the agreed plan gives each placed service: the witness's
     // plan on the agreed state with the release's inputs, as every box
     // plans it - never a box's own word that it runs something
@@ -163,6 +175,19 @@ async function tunnelApi(env, method, path, body) {
 }
 
 const tunnelName = (box) => `commonty-${box}`;
+
+// the names a box that joined may have a certificate for, by the agreed
+// state: its store's, and each of a placed service the agreed plan gives it
+function joinedNames(box, held) {
+  if (!RECORDS || !held || !Object.hasOwn(held.joinedKeys, box)) return [];
+  const { zone, joinedZone = zone, hosts = [], follow = {}, leased = [] } = RECORDS;
+  const out = [`store.${box}.${joinedZone}`];
+  for (const [h, svc] of Object.entries(follow)) {
+    if (hosts.includes(h) || leased.includes(svc)) continue;
+    if (Object.hasOwn(held.placed, svc) && held.placed[svc].includes(box)) out.push(`${h}.${joinedZone}`);
+  }
+  return out;
+}
 
 // each box's own tunnel, by its name at Cloudflare
 async function tunnels(env) {
@@ -254,9 +279,17 @@ export async function handle(req, env) {
     }
     if (!ok) return json({ error: 'not that controller\'s name, or not signed by it' }, 403);
   } else {
-    if (typeof box !== 'string' || !Object.hasOwn(BOXES, box)) return json({ error: 'no such box' }, 403);
-    if (typeof name !== 'string' || !(NAMES[box] || []).includes(name)) return json({ error: 'not a name this box serves' }, 403);
-    if (!(await signedBy(box, `commonty acme v1\0${box}\0${at}\0${op}\0${name}\0${value}`, sig))) return json({ error: 'not signed by that box' }, 403);
+    if (typeof box !== 'string') return json({ error: 'no such box' }, 403);
+    const message = `commonty acme v1\0${box}\0${at}\0${op}\0${name}\0${value}`;
+    if (Object.hasOwn(BOXES, box)) {
+      if (typeof name !== 'string' || !(NAMES[box] || []).includes(name)) return json({ error: 'not a name this box serves' }, 403);
+      if (!(await signedBy(box, message, sig))) return json({ error: 'not signed by that box' }, 403);
+    } else {
+      const held = await holders(env);
+      if (!held || !Object.hasOwn(held.joinedKeys, box)) return json({ error: 'no such box' }, 403);
+      if (typeof name !== 'string' || !joinedNames(box, held).includes(name)) return json({ error: 'not a name this box serves' }, 403);
+      if (!(await signedWith(held.joinedKeys[box], message, sig))) return json({ error: 'not signed by that box' }, 403);
+    }
   }
 
   const fqdn = `_acme-challenge.${name}`;

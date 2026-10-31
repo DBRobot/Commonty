@@ -7,7 +7,41 @@
 let
   base = config.dd.domain;
   cfg = config.dd.acme;
-  names = import ../../lib/https-names.nix lib config;
+  joined = config.dd.box.joined or false;
+  # a box that joined on its own key has its store's name: what else its
+  # nginx serves is no name the DNS Worker gives it, and one name refused
+  # fails a certificate's whole order
+  names =
+    if joined then
+      [ "store.${config.networking.hostName}.${config.dd.joinedDomain}" ]
+    else
+      import ../../lib/https-names.nix lib config;
+  # and a certificate of its own for each name of a service the plan may give
+  # it, ordered only while the plan does (box/placed.nix's flag): what the
+  # Worker gives it moves with the plan, a certificate's names do not
+  needs = import ../../lib/needs.nix {
+    inherit lib;
+    on = config.dd.failover or false;
+  };
+  planned = lib.optionals joined (
+    lib.concatMap (
+      svc:
+      lib.optionals (needs ? ${svc} && needs.${svc}.placed && !needs.${svc}.lease) (
+        map (h: {
+          name = "${h}.${config.dd.joinedDomain}";
+          inherit svc;
+        }) needs.${svc}.hosts
+      )
+    ) (config.dd.placed.services or [ ])
+  );
+  legoEnv = pkgs.writeText "acme-exec.env" ''
+    EXEC_PATH=${pkgs.writeShellScript "acme-exec" ''
+      PATH=${lib.makeBinPath [ pkgs.socat ]}
+      ${builtins.readFile ./acme-exec.sh}
+    ''}
+    EXEC_PROPAGATION_TIMEOUT=300
+    EXEC_POLLING_INTERVAL=5
+  '';
 in
 {
   options.dd.acme = {
@@ -45,14 +79,7 @@ in
           domain = lib.head names;
           extraDomainNames = lib.tail names;
           dnsProvider = "exec";
-          environmentFile = pkgs.writeText "acme-exec.env" ''
-            EXEC_PATH=${pkgs.writeShellScript "acme-exec" ''
-              PATH=${lib.makeBinPath [ pkgs.socat ]}
-              ${builtins.readFile ./acme-exec.sh}
-            ''}
-            EXEC_PROPAGATION_TIMEOUT=300
-            EXEC_POLLING_INTERVAL=5
-          '';
+          environmentFile = legoEnv;
         };
         systemd.services."acme-order-renew-${base}" = {
           requires = [ "dd-acme.socket" ];
@@ -87,7 +114,7 @@ in
           script = (import ../../lib/script.nix { inherit lib; }) ./acme-ask.sh {
             BOX = config.networking.hostName;
             WORKER = cfg.worker;
-            NAMES = lib.concatStringsSep "\n" names;
+            NAMES = lib.concatStringsSep "\n" (names ++ map (p: p.name) planned);
             KEYS = "/boot/dd/unlock";
             SOFT_KEY = if cfg.softKey != null then cfg.softKey else "";
           };
@@ -102,6 +129,46 @@ in
             NoNewPrivileges = true;
           };
         };
+      })
+      (lib.mkIf (cfg.worker != "" && planned != [ ]) {
+        security.acme.certs = lib.listToAttrs (
+          map (
+            p:
+            lib.nameValuePair p.name {
+              domain = p.name;
+              group = "acmecerts";
+              dnsProvider = "exec";
+              environmentFile = legoEnv;
+            }
+          ) planned
+        );
+        services.nginx.virtualHosts = lib.listToAttrs (
+          map (p: lib.nameValuePair p.name { useACMEHost = lib.mkForce p.name; }) planned
+        );
+        dd.remoteJobs = lib.listToAttrs (
+          map (p: lib.nameValuePair "acme-order-renew-${p.name}" { }) planned
+        );
+        systemd.services = lib.mkMerge (
+          map (p: {
+            "acme-${p.name}".wants = lib.mkForce [ "acme-setup.service" ];
+            "acme-order-renew-${p.name}" = {
+              requires = [ "dd-acme.socket" ];
+              after = [ "dd-acme.socket" ];
+              unitConfig.ConditionPathExists = "/run/dd-placed/${p.svc}";
+            };
+          }) planned
+        );
+        # the plan gives it the service: its certificate now, not at the next
+        # renewal's check
+        systemd.paths = lib.listToAttrs (
+          map (
+            p:
+            lib.nameValuePair "acme-order-renew-${p.name}" {
+              wantedBy = [ "multi-user.target" ];
+              pathConfig.PathChanged = "/run/dd-placed/${p.svc}";
+            }
+          ) planned
+        );
       })
       {
         # One wildcard cert for every subdomain and the bare name, until the acme
