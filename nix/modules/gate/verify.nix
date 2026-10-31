@@ -591,9 +591,19 @@ in
     # names a variable nginx does not know stops nginx starting at all, and
     # nginx is the whole box's front door
     services.nginx.appendHttpConfig = lib.mkIf config.services.nginx.enable ''
-      map $http_cookie $dd_cookie_stripped {
+      # both names a session goes by (servers/gate/src/session.rs)
+      map $http_cookie $dd_cookie_no_host {
         default $http_cookie;
+        "~^(?<dd_h_a>.*?)__Host-dd=[^;]*;?[ ]?(?<dd_h_b>.*)$" "$dd_h_a$dd_h_b";
+      }
+      map $dd_cookie_no_host $dd_cookie_stripped {
+        default $dd_cookie_no_host;
         "~^(?<dd_a>.*?)dd_session=[^;]*;?[ ]?(?<dd_b>.*)$" "$dd_a$dd_b";
+      }
+      # nginx has no $cookie_ variable for a name with a hyphen in it
+      map $http_cookie $dd_cookie_host {
+        default "";
+        "~(?:^|; ?)__Host-dd=(?<dd_host_value>[^;]+)" $dd_host_value;
       }
       # Flood limits, per credential: a session cookie, or a device's
       # bearer token. Keyed before the gate has said who it is (limits run
@@ -601,8 +611,8 @@ in
       # either is counted by its address at the public door instead. Sized
       # for a script hammering, never for a person clicking: a page that
       # opens at once fires a few dozen requests, a film a segment a second.
-      map "$cookie_dd_session$http_authorization" $dd_credential {
-        default "$cookie_dd_session$http_authorization";
+      map "$cookie_dd_session$dd_cookie_host$http_authorization" $dd_credential {
+        default "$cookie_dd_session$dd_cookie_host$http_authorization";
       }
       limit_req_zone $dd_credential zone=dd_user:10m rate=30r/s;
       # and by address: the public door's lid on anything at all
