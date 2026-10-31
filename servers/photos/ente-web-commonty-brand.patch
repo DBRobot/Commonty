@@ -1,0 +1,81 @@
+diff --git a/apps/photos/src/pages/_app.tsx b/apps/photos/src/pages/_app.tsx
+index 6f90d1b..4d12493 100644
+--- a/apps/photos/src/pages/_app.tsx
++++ b/apps/photos/src/pages/_app.tsx
+@@ -192,7 +192,8 @@ const App: React.FC<PhotosAppProps> = ({ Component, pageProps }) => {
+         ],
+     );
+ 
+-    const title = isI18nReady ? t("title_photos") : staticAppTitle;
++    // Commonty: the tab says Photos, in every language
++    const title = staticAppTitle;
+ 
+     return (
+         <ThemeProvider theme={photosTheme}>
+diff --git a/apps/photos/src/pages/index.tsx b/apps/photos/src/pages/index.tsx
+index f8a909d..ee148a7 100644
+--- a/apps/photos/src/pages/index.tsx
++++ b/apps/photos/src/pages/index.tsx
+@@ -2,7 +2,6 @@ import { Box, Stack, Typography, styled } from "@mui/material";
+ import { LoginContents } from "ente-accounts/components/LoginContents";
+ import { SignUpContents } from "ente-accounts/components/SignUpContents";
+ import { CenteredFill, CenteredRow } from "ente-base/components/containers";
+-import { EnteLogo } from "ente-base/components/EnteLogo";
+ import { ActivityIndicator } from "ente-base/components/mui/ActivityIndicator";
+ import { FocusVisibleButton } from "ente-base/components/mui/FocusVisibleButton";
+ import { useBaseContext } from "ente-base/context";
+@@ -136,7 +135,7 @@ const Page: React.FC = () => {
+                 <>
+                     <SlideshowPanel>
+                         <Logo_>
+-                            <EnteLogo height={24} />
++                            <CommontyMark />
+                         </Logo_>
+                         <Slideshow />
+                     </SlideshowPanel>
+@@ -280,6 +279,18 @@ const SlideshowPanel = styled("div")`
+     }
+ `;
+ 
++/** Commonty: the site's mark where Ente's wordmark was. */
++const CommontyMark: React.FC = () => (
++    <svg height={24} viewBox="0 0 22 22" aria-label="Commonty">
++        <g fill="none" stroke="currentColor" strokeWidth="1.6">
++            <rect x="1" y="1" width="9" height="9" />
++            <rect x="12" y="1" width="9" height="9" />
++            <rect x="1" y="12" width="9" height="9" />
++        </g>
++        <rect x="12" y="12" width="9" height="9" fill="currentColor" />
++    </svg>
++);
++
+ const Logo_ = styled("div")`
+     /* Bias towards the left for better visual alignment with the slides. */
+     padding-inline-end: 1rem;
+diff --git a/packages/base/app.ts b/packages/base/app.ts
+index 0556caa..01bb068 100644
+--- a/packages/base/app.ts
++++ b/packages/base/app.ts
+@@ -69,7 +69,7 @@ export const staticAppTitle = {
+     cast: "Ente Photos",
+     embed: "Ente Photos",
+     share: "Ente Locker",
+-    photos: "Ente Photos",
++    photos: "Photos",
+     // Ensu (chat) web app.
+     ensu: "Ensu",
+     locker: "Ente Locker",
+diff --git a/packages/base/components/Head.tsx b/packages/base/components/Head.tsx
+index 3317e5c..0ae8ded 100644
+--- a/packages/base/components/Head.tsx
++++ b/packages/base/components/Head.tsx
+@@ -37,7 +37,8 @@ export const CustomHead: React.FC<React.PropsWithChildren<CustomHeadProps>> = ({
+     <Head>
+         {children}
+         <title>{title}</title>
+-        <link rel="icon" href="/images/favicon.png" type="image/png" />
++        {/* Commonty: the site's icon, copied in at build */}
++        <link rel="icon" href="/images/favicon.svg" type="image/svg+xml" />
+         <meta
+             name="description"
+             content="Ente - end-to-end encrypted cloud with open-source apps"

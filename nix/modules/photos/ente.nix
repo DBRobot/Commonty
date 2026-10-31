@@ -142,6 +142,9 @@ in
                   ../../../servers/photos/ente-web-commonty-menu.patch
                   # pictures on screen fetched first, those flung past not at all
                   ../../../servers/photos/ente-web-commonty-thumbs.patch
+                  # the tab says Photos with the site's icon, and the page shown
+                  # while it loads has the site's mark, not Ente's
+                  ../../../servers/photos/ente-web-commonty-brand.patch
                 ];
               # Next names each build at random, and every page carries the
               # name: two builds of the same source never matched, and the
@@ -155,6 +158,9 @@ in
                 + lib.optionalString photos ''
                   # the bar's stylesheet is the site's own file, not a copy of it
                   cp ${../../../servers/web-shared/bar.css} apps/photos/src/styles/commonty-bar.css
+                  # the tab's icon is the site's own, and Ente's goes
+                  cp ${../../../servers/web-shared/favicon.svg} apps/photos/public/images/favicon.svg
+                  rm apps/photos/public/images/favicon.png
                   # The grid drew three rows past the screen, and a picture is only
                   # fetched once it is drawn: scrolling reached pictures still on
                   # their way. Twenty rows is a few screens of warning.
