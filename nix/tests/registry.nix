@@ -68,6 +68,8 @@
     "wired-watch-logic"
     # a box's room for computers, from its services' measured memory
     "computer-facts-logic"
+    # what a joined box removes of a former owner, and nothing else
+    "forget-owner"
     # anything deleted is gone from every box and backup within 90 days
     "retention"
     # every unit our modules define is in some service's needs, and no
@@ -133,6 +135,7 @@
     "wired-watch-logic"
     "garage-setup-pipe"
     "computer-facts-logic"
+    "forget-owner"
     "ci-resume"
   ];
 }

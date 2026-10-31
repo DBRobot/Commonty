@@ -3911,6 +3911,17 @@
   },
   "notes": ""
  },
+ "forget-owner": {
+  "paths": [
+   "nix/tests/forget-owner.nix",
+   "nix/modules/box/forget-owner.sh"
+  ],
+  "why": {
+   "nix/tests/forget-owner.nix": "the check",
+   "nix/modules/box/forget-owner.sh": "the script under test"
+  },
+  "notes": ""
+ },
  "computer-facts-logic": {
   "paths": [
    "nix/tests/computer-facts-logic.nix",
