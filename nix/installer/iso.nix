@@ -65,6 +65,10 @@ let
 in
 {
   boot.supportedFilesystems.zfs = true;
+  # the build is what wants the memory: ZFS's cache would take half of an 8 GB
+  # machine's, and memory compressed is what a machine with no swap has left
+  boot.extraModprobeConfig = "options zfs zfs_arc_max=1073741824";
+  zramSwap.enable = true;
   networking.hostId = "dd000000";
   nix.settings.experimental-features = [
     "nix-command"

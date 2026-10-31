@@ -3,7 +3,7 @@
 //! what the machine's firmware already allows, the join ticket's id, and a
 //! backup's progress. Nothing here writes; the screen does, from these.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -189,6 +189,113 @@ pub fn restic_progress(line: &str) -> Option<(f64, Option<u64>)> {
     }
 }
 
+/// How far a `nix build` is, from its `--log-format internal-json` lines
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
+pub struct Build {
+    pub built: u64,
+    pub to_build: u64,
+    pub fetched: u64,
+    pub to_fetch: u64,
+    /// what it started building last
+    pub building: Option<String>,
+    // activity id -> nix's kind of it, for the kinds counted here
+    #[serde(skip)]
+    kinds: HashMap<u64, u64>,
+}
+
+// nix's ActivityType and ResultType
+const COPY_PATHS: u64 = 103;
+const BUILDS: u64 = 104;
+const BUILD: u64 = 105;
+const PROGRESS: u64 = 105;
+
+impl Build {
+    /// One line the build wrote to stderr. What is for a person comes back:
+    /// a line that is not nix's, or nix's error. The rest is counted or dropped.
+    pub fn line(&mut self, line: &str) -> Option<String> {
+        let Some(json) = line.strip_prefix("@nix ") else {
+            return Some(line.to_string());
+        };
+        let v: serde_json::Value = serde_json::from_str(json).ok()?;
+        let kind = v.get("type").and_then(|t| t.as_u64());
+        let id = v.get("id").and_then(|i| i.as_u64()).unwrap_or(0);
+        match v.get("action")?.as_str()? {
+            "msg" if v.get("level")?.as_u64()? == 0 => {
+                return Some(plain(v.get("msg")?.as_str()?));
+            }
+            "start" => {
+                let kind = kind?;
+                if [COPY_PATHS, BUILDS].contains(&kind) {
+                    self.kinds.insert(id, kind);
+                }
+                if kind == BUILD {
+                    self.building = v.get("fields")?.get(0)?.as_str().map(drv_name);
+                }
+            }
+            "result" if kind == Some(PROGRESS) => {
+                let f = v.get("fields")?.as_array()?;
+                let (done, all) = (f.first()?.as_u64()?, f.get(1)?.as_u64()?);
+                match self.kinds.get(&id) {
+                    Some(&BUILDS) => (self.built, self.to_build) = (done, all),
+                    Some(&COPY_PATHS) => (self.fetched, self.to_fetch) = (done, all),
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+        None
+    }
+
+    /// How much of the work is done, 0..1: a build counted as many fetches,
+    /// since it is what the time goes on
+    pub fn share(&self) -> f64 {
+        const WEIGHT: u64 = 20;
+        let all = self.to_build * WEIGHT + self.to_fetch;
+        if all == 0 {
+            return 0.0;
+        }
+        ((self.built * WEIGHT + self.fetched) as f64 / all as f64).min(1.0)
+    }
+}
+
+fn plain(s: &str) -> String {
+    let mut out = String::new();
+    let mut it = s.chars();
+    while let Some(c) = it.next() {
+        if c == '\u{1b}' {
+            let _ = it.by_ref().find(|c| c.is_ascii_alphabetic());
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+// /nix/store/<hash>-<name>.drv -> <name>
+fn drv_name(path: &str) -> String {
+    let base = path.rsplit('/').next().unwrap_or(path);
+    let name = base.split_once('-').map_or(base, |(_, n)| n);
+    name.strip_suffix(".drv").unwrap_or(name).to_string()
+}
+
+/// How far an install is, 0..1, from its "== " stages said and its build: the
+/// build (the third) is nearly all of it
+pub fn install_share(stages: usize, build: f64) -> f64 {
+    match stages {
+        0..=2 => 0.02 * stages as f64,
+        3 => 0.05 + 0.85 * build,
+        4 => 0.95,
+        _ => 0.98,
+    }
+}
+
+/// Seconds left of a stage `share` done after `elapsed` seconds. Nothing
+/// until there is enough of it to say.
+pub fn eta(elapsed: u64, share: f64) -> Option<u64> {
+    (elapsed >= 60 && (0.02..1.0).contains(&share))
+        .then(|| (elapsed as f64 / share * (1.0 - share)) as u64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,6 +434,60 @@ mod tests {
             Some((1.0, Some(0)))
         );
         assert_eq!(restic_progress("not json"), None);
+    }
+
+    #[test]
+    fn a_builds_numbers_out_of_nixs_lines() {
+        let mut b = Build::default();
+        let said = |b: &mut Build, l: &str| b.line(l);
+        // as nix 2.34 writes them
+        for l in [
+            r#"@nix {"action":"start","id":1,"level":4,"parent":0,"text":"","type":104}"#,
+            r#"@nix {"action":"start","id":2,"level":4,"parent":0,"text":"","type":103}"#,
+            r#"@nix {"action":"start","id":3,"level":5,"parent":0,"text":"copying","type":0}"#,
+            r#"@nix {"action":"result","fields":[0,4,0,0],"id":1,"type":105}"#,
+            r#"@nix {"action":"result","fields":[30,100,1,0],"id":2,"type":105}"#,
+            // another activity's numbers are not these
+            r#"@nix {"action":"result","fields":[9,9,0,0],"id":3,"type":105}"#,
+            r#"@nix {"action":"start","fields":["/nix/store/abc-dd-agent-0.1.0.drv","",1,1],"id":4,"level":3,"parent":1,"text":"building","type":105}"#,
+            r#"@nix {"action":"result","fields":["compiling"],"id":4,"type":101}"#,
+            r#"@nix {"action":"stop","id":4}"#,
+            r#"@nix {"action":"result","fields":[1,4,0,0],"id":1,"type":105}"#,
+            r#"@nix {"action":"msg","level":3,"msg":"these 4 derivations will be built:"}"#,
+        ] {
+            assert_eq!(said(&mut b, l), None, "{l}");
+        }
+        assert_eq!(
+            (b.built, b.to_build, b.fetched, b.to_fetch),
+            (1, 4, 30, 100)
+        );
+        assert_eq!(b.building.as_deref(), Some("dd-agent-0.1.0"));
+        assert!((b.share() - 50.0 / 180.0).abs() < 1e-9);
+        // nix's error, without its colours, and anyone else's line
+        assert_eq!(
+            said(
+                &mut b,
+                r#"@nix {"action":"msg","level":0,"msg":"\u001b[31;1merror:\u001b[0m no space"}"#
+            )
+            .as_deref(),
+            Some("error: no space")
+        );
+        assert_eq!(
+            said(&mut b, "failed: line 9").as_deref(),
+            Some("failed: line 9")
+        );
+        assert_eq!(said(&mut b, "@nix not json"), None);
+    }
+
+    #[test]
+    fn an_installs_share_and_what_is_left() {
+        assert_eq!(Build::default().share(), 0.0);
+        assert_eq!(install_share(0, 0.0), 0.0);
+        assert_eq!(install_share(3, 1.0), 0.9);
+        assert!(install_share(5, 0.0) < 1.0);
+        assert_eq!(eta(30, 0.5), None);
+        assert_eq!(eta(600, 0.01), None);
+        assert_eq!(eta(600, 0.5), Some(600));
     }
 
     #[test]

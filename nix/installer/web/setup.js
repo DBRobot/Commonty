@@ -240,6 +240,8 @@ $('in-go').onclick = async () => {
   try { await api('install', { disk: disk.name }); } catch (e) { return fail('in-error', e); }
   $('in-go').disabled = true;
   $('in-progress').hidden = false;
+  $('in-state').dataset.state = 'working';
+  $('in-state').textContent = 'Working';
   // straight into its first start: that is where it seals its disk and
   // makes its key
   follow('in', () => {
@@ -249,6 +251,13 @@ $('in-go').onclick = async () => {
 };
 $('done-restart').onclick = () => api('restart', {}).catch(() => {});
 
+function building(b, pct) {
+  const counts = [];
+  if (b.to_build) counts.push(`${b.built} of ${b.to_build} built`);
+  if (b.to_fetch) counts.push(`${b.fetched} of ${b.to_fetch} fetched`);
+  return counts.length ? counts.join(', ') : `${pct}%`;
+}
+
 // a running step, every second, until it ends
 function follow(p, done) {
   const tick = async () => {
@@ -257,7 +266,7 @@ function follow(p, done) {
     const pct = Math.round((j.done || 0) * 100);
     $(`${p}-fill`).style.width = `${pct}%`;
     $(`${p}-bar`).setAttribute('aria-valuenow', pct);
-    if ($(`${p}-done`)) $(`${p}-done`).textContent = `${pct}%`;
+    if ($(`${p}-done`)) $(`${p}-done`).textContent = p === 'in' ? building(j.build, pct) : `${pct}%`;
     if ($(`${p}-eta`)) $(`${p}-eta`).textContent = clock(j.eta);
     if (j.stages.length && p === 'in') $('in-phase').textContent = j.stages[j.stages.length - 1];
     if (j.state === 'running') return setTimeout(tick, 1000);
