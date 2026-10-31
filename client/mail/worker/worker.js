@@ -20,7 +20,7 @@
 import { initSync, admit, login, readProof, forgetDue } from './dd_mail.js';
 import wasm from './dd_mail_bg.wasm';
 import { MEMBERS, RELEASE, ALIASES } from './fleet.js';
-import { mode, agreedMember, isMember, entryOf, differ, said } from './identity.js';
+import { mode, agreedMember, isMember, entryOf, fieldsOf, differ, said } from './identity.js';
 import { boxApi, memberApi } from './unlock.js';
 import { forgetApi } from './leaving.js';
 import { sendApi } from './send.js';
@@ -140,8 +140,7 @@ async function holds(env, name, passkey, t) {
   // a time that is no number holds nothing
   if (!Number.isFinite(t) || !Number.isFinite(ended) || t < ended) return false;
   try {
-    const e = JSON.parse(await entry(env, name));
-    return e.entry.passkeys.some((p) => p.id === passkey);
+    return fieldsOf(await entry(env, name)).passkeys.some((p) => p.id === passkey);
   } catch {
     return false;
   }
@@ -197,7 +196,7 @@ async function entry(env, name) {
     } catch (e) {
       console.warn(JSON.stringify({ 'identity-shadow': 'unread', name, error: String(e.message || e) }));
     }
-    const ver = (t) => (t ? JSON.parse(t).entry.version : null);
+    const ver = (t) => (t ? fieldsOf(t).version : null);
     differ('member', name, { member: !why, version: ver(take) }, { member: isMember(m), version: isMember(m) ? ver(entryOf(m)) : null }, { own: why ? String(why.message || why) : null, agreed: said(m) });
   }
   if (why) throw why;
@@ -431,13 +430,13 @@ async function api(req, env, path, sent) {
     const { name } = body();
     if (!NAME.test(name || '')) return json({ error: 'no such member' }, 400);
     let e;
-    try { e = JSON.parse(await entry(env, name)); } catch (err) { return json({ error: String(err.message || err) }, 403); }
+    try { e = fieldsOf(await entry(env, name)); } catch (err) { return json({ error: String(err.message || err) }, 403); }
     const challenge = b64u(crypto.getRandomValues(new Uint8Array(32)));
     return json({
       challenge,
       token: await seal(env, { k: 'challenge', n: name, c: challenge, e: now() + CHALLENGE }),
       rpId: env.DOMAIN,
-      allow: e.entry.passkeys.map((p) => p.id),
+      allow: e.passkeys.map((p) => p.id),
     });
   }
   if (req.method === 'POST' && path === '/api/login') {

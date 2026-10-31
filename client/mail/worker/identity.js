@@ -51,6 +51,16 @@ export function entryOf(m) {
   throw new Error('the agreed item carries no entry');
 }
 
+// The entry's fields, from a signed entry's text either way: v1
+// ({entry, signature}) or a v2 envelope, its body. Checks nothing: for an
+// entry a check already took (admit, the judge) or a log line.
+export function fieldsOf(text) {
+  const s = JSON.parse(text);
+  if (s && s.v === 2 && s.kind === 'entry' && typeof s.body === 'string') return JSON.parse(utf8(s.body));
+  if (s && s.entry && typeof s.entry === 'object') return s.entry;
+  throw new Error('not an entry');
+}
+
 // Where its own judgment and the agreed state differ, the Worker says so
 // once a request; what it goes by stays its own until IDENTITY_FROM=agreed.
 // One line: who, which check, both answers, and `why` - what each side

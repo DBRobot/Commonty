@@ -228,7 +228,7 @@ async function sendBoxItem(kind, b) {
     return;
   }
   await init();
-  const plan = JSON.parse(box_item_plan(kind, JSON.stringify(entry), b.name, b.ticket || '', BigInt(Math.floor(Date.now() / 1000))));
+  const plan = JSON.parse(box_item_plan(kind, entry.text, b.name, b.ticket || '', BigInt(Math.floor(Date.now() / 1000))));
   const cfg = await pageConfig();
   const a = await navigator.credentials.get({
     publicKey: {
@@ -346,7 +346,7 @@ $('dv-confirm-go').onclick = async () => {
       render();
       throw new Error('Your account changed since this page opened. It is shown as it is now; confirm again.');
     }
-    const plan = JSON.parse(entry_resign(JSON.stringify(fresh), BigInt(Math.floor(Date.now() / 1000))));
+    const plan = JSON.parse(entry_resign(fresh.text, BigInt(Math.floor(Date.now() / 1000))));
     const cfg = await pageConfig();
     const signed = await signPlan(plan, cfg, entry.entry.root.split(':')[1]);
     const r = await fetch('/_dd/directory/' + encodeURIComponent(who.user), { method: 'PUT', headers: { 'content-type': 'application/json' }, body: signed });
@@ -452,7 +452,7 @@ function remove(k, label) {
       }
       await init();
       const e = entry.entry;
-      const plan = JSON.parse(entry_without(JSON.stringify(entry), k.passkey ? undefined : k.fingerprint, k.passkey || undefined, BigInt(Math.floor(Date.now() / 1000))));
+      const plan = JSON.parse(entry_without(entry.text, k.passkey ? undefined : k.fingerprint, k.passkey || undefined, BigInt(Math.floor(Date.now() / 1000))));
       const cfg = await pageConfig();
       const rootId = e.root.split(':')[1];
       const signed = await signPlan(plan, cfg, rootId);
@@ -571,7 +571,7 @@ async function addApprove() {
     } else {
       // a passkey main key: the new entry is signed with the passkey; no
       // key goes with it (an account like this keeps none in its entry)
-      const plan = JSON.parse(entry_with_device(JSON.stringify(entry), pk, BigInt(Math.floor(Date.now() / 1000))));
+      const plan = JSON.parse(entry_with_device(entry.text, pk, BigInt(Math.floor(Date.now() / 1000))));
       const cfg = await pageConfig();
       const signed = await signPlan(plan, cfg, entry.entry.root.split(':')[1]);
       const r = await fetch('/_dd/directory/' + encodeURIComponent(who.user), { method: 'PUT', headers: { 'content-type': 'application/json' }, body: signed });

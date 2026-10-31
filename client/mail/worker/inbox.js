@@ -22,6 +22,7 @@ import { newId, ID } from './mail-ids.js';
 import { pack, header as objectHeader, signEd25519 } from './mail-object.js';
 import { liveAliases } from './aliases.js';
 import { BOXES, MAIL_BOXES } from './fleet.js';
+import { fieldsOf } from './identity.js';
 
 const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const PK = /^[A-Za-z0-9_-]{43}$/;
@@ -169,7 +170,7 @@ export async function device(req, env, path, bytes, entry) {
   // still a device of theirs, as their own entry has it now: one taken off
   // their account speaks for them no longer
   try {
-    const e = JSON.parse(await entry(env, name)).entry;
+    const e = fieldsOf(await entry(env, name));
     if (!(e.devices || []).some((x) => x.fingerprint === fp && x.public_key === d.key)) return null;
   } catch {
     return null;
@@ -214,7 +215,7 @@ export async function inboxApi(req, env, path, body, json, me, h) {
     let dev = null;
     let passkeyRoot = false;
     try {
-      const e = JSON.parse(await h.entry(env, me.n)).entry;
+      const e = fieldsOf(await h.entry(env, me.n));
       passkeyRoot = String(e.root || '').startsWith('webauthn:');
       dev = (e.devices || []).find((x) => x.fingerprint === d.fp && x.public_key === d.key);
     } catch { /* no entry, no device */ }

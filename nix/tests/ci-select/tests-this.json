@@ -1690,6 +1690,31 @@
   },
   "notes": "pages.rs listed loosely: the flow hand-writes /_dd/me as pages::me_json does; it is not read."
  },
+ "entry-pages": {
+  "paths": [
+   "nix/tests/entry-pages.nix",
+   "nix/tests/entry-pages/**",
+   "app/web/_dd/pages/settings.html",
+   "app/web/_dd/static/**",
+   "servers/web-shared/kit.js",
+   "servers/web-shared/shell.js",
+   "servers/fleet/web/devices.js",
+   "client/web/**",
+   "client/identity/src/**"
+  ],
+  "why": {
+   "nix/tests/entry-pages.nix": "test derivation; cmp of kit.js and devices.js copies",
+   "nix/tests/entry-pages/**": "flow.py",
+   "app/web/_dd/pages/settings.html": "the Settings page, Profile and Devices",
+   "app/web/_dd/static/**": "settings.js and every script it loads: shell.js entryOf, kit.js readEntry, devices.js",
+   "servers/web-shared/kit.js": "cmp against the app's copy",
+   "servers/web-shared/shell.js": "the box's copy of entryOf",
+   "servers/fleet/web/devices.js": "cmp against the app's copy",
+   "client/web/**": "dd_web wasm: entry_without checks the v2 text",
+   "client/identity/src/**": "the v1/v2 SignedEntry and envelope checks the wasm runs"
+  },
+  "notes": ""
+ },
  "site-headers": {
   "paths": [
    "nix/tests/site.nix",

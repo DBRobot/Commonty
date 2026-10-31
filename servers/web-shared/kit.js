@@ -84,3 +84,18 @@ export function webUrl(u) {
     return null;
   }
 }
+
+/// A signed entry as the directory gives it - v1 `{ entry, signature }` or
+/// a v2 envelope `{ v: 2, kind: "entry", body, sig }` - read the way the
+/// pages read both: `.entry` is the entry's fields, and `.text` the answer
+/// exactly as it came, which is what the wasm checks before a passkey signs
+/// on from it. Nothing is verified here; a page shows it and signs nothing.
+export function readEntry(text) {
+  const s = JSON.parse(text);
+  const out = s && s.v === 2 && s.kind === 'entry' && typeof s.body === 'string'
+    ? { ...s, entry: JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(s.body), (c) => c.charCodeAt(0)))) }
+    : s;
+  if (!out || typeof out.entry !== 'object' || !out.entry) throw new Error('that is not an entry');
+  Object.defineProperty(out, 'text', { value: text });
+  return out;
+}

@@ -416,6 +416,66 @@ mod tests {
         assert!(verified(&forged).is_err());
     }
 
+    /// The directory gives an entry as a v2 envelope now, and the page hands
+    /// it over as it came (shell.js entryOf's `.text`): held to the root's
+    /// signature over the body's bytes, then changed from what that body says
+    #[test]
+    fn a_v2_entry_is_checked_over_its_body_as_signed() {
+        use identity::envelope::{ENTRY, Envelope, seal_json};
+        let key = ed25519_dalek::SigningKey::from_bytes(&[5; 32]);
+        let public = identity::encode_public(&key.verifying_key());
+        let e = identity::Entry {
+            name: "tom".into(),
+            root: public.clone(),
+            recovery: String::new(),
+            recovered_from: vec![],
+            devices: vec![identity::Device {
+                fingerprint: identity::fingerprint(&public),
+                public_key: public.clone(),
+                added: 1,
+            }],
+            passkeys: vec![],
+            grant: None,
+            libraries: vec![],
+            terms: None,
+            removed_boxes: vec![],
+            version: 2,
+            updated: 2,
+        };
+        let env = seal_json(ENTRY, &e, &key).unwrap();
+        assert!(verified(&serde_json::to_string(&env).unwrap()).is_ok());
+
+        // a device slipped into the body: the signature is over the old bytes
+        let other = identity::encode_public(
+            &ed25519_dalek::SigningKey::from_bytes(&[6; 32]).verifying_key(),
+        );
+        let mut slipped = e.clone();
+        slipped.devices.push(identity::Device {
+            fingerprint: identity::fingerprint(&other),
+            public_key: other,
+            added: 3,
+        });
+        let mut forged = env.clone();
+        forged.body = B64.encode(serde_json::to_vec(&slipped).unwrap());
+        assert!(verified(&serde_json::to_string(&forged).unwrap()).is_err());
+
+        // a passkey root's envelope: the change starts from its body
+        let mut p = e;
+        p.root = format!("{}pk1:digest", identity::WEBAUTHN_ROOT);
+        p.devices[0].fingerprint = "f2".into();
+        let text = serde_json::to_string(&Envelope {
+            v: 2,
+            kind: ENTRY.into(),
+            body: B64.encode(serde_json::to_vec(&p).unwrap()),
+            sig: String::new(),
+            recovery_sig: None,
+        })
+        .unwrap();
+        let out = change(&text, Some("f2"), None, 9).unwrap();
+        assert_eq!((out.devices.len(), out.version, out.updated), (0, 3, 9));
+        assert!(box_plan("enlist", &text, "jaaaaaaaaaa", "", 9).is_ok());
+    }
+
     #[test]
     fn a_device_joins_and_no_passkey_key_rides_along() {
         let newcomer = ed25519_dalek::SigningKey::from_bytes(&[4; 32]);
