@@ -119,10 +119,28 @@ box.fail("test -e /run/dd-placed/tang")
 box.fail("systemctl is-active --quiet tangd.socket")
 fleet.fail("curl -sf --max-time 5 http://192.168.1.50:7654/adv")
 
-# the same release with joined boxes attested: the plan gives it Tang, its
-# flag goes up, and Tang answers the house
+# the same release with joined boxes attested says nothing of this box, which
+# no member has enlisted: still nothing, and no flag
 box.succeed(
     f"cp {nix['attested']} /run/dd-test/placement.json && systemctl restart dd-control"
+)
+box.wait_until_succeeds(
+    "curl -sf http://127.0.0.1:4195/plan | jq -e '.boxes'", timeout=120
+)
+for _ in range(3):
+    assert not plan_gives("tang"), box.succeed("curl -sf http://127.0.0.1:4195/plan")
+    box.succeed("sleep 10")  # sleep-ok: never-runs check, a placement round each
+box.fail("test -e /run/dd-placed/tang")
+
+# its member enlists it: the plan gives it Tang, its flag goes up, and Tang
+# answers the house. Its proof is the test's switch here; a real one's
+# counting is state.Proved's, unit tested
+fleet.succeed(
+    f"cd /root/f && python3 {nix['fleet']} item enlist {nix['keyName']} 00112233445566778899aabbccddeeff"
+)
+fleet.wait_until_succeeds(
+    f"curl -sf http://127.0.0.1:4191/identity | jq -e '.enlisted.{nix['keyName']}'",
+    timeout=120,
 )
 box.wait_until_succeeds("test -e /run/dd-placed/tang", timeout=180)
 assert plan_gives("tang")

@@ -37,12 +37,13 @@ type Inputs struct {
 
 // JoinedRules: what the release lets a box that joined on its own key (a
 // member's) run. Such a box is in no release's capability table, so what
-// it says of itself can only narrow this, never widen it. Until its
-// hardware and boot are attested in the agreed state (docs/dev/attestation.md)
-// the release keeps Attested false and it runs nothing, holding copies
-// only.
+// it says of itself can only narrow this, never widen it. It runs any of
+// it only with the switch on, once the agreed state holds its own current
+// proof of its TPM and boot (state.Proved, docs/dev/attestation.md) and a
+// member has enlisted it. Otherwise it runs nothing, holding copies only.
 type JoinedRules struct {
-	// the switch, on in the release that brings attestation
+	// the fleet-wide switch, off until the coordinator turns it on last; it
+	// says joined boxes may run things at all, never that one has proved itself
 	Attested bool `json:"attested"`
 	// what the policy's trust tiers allow on a member's box: never what
 	// only the owner's boxes run (servesCode, trust owner), a
@@ -201,7 +202,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 				runs(svc, name)
 			}
 		}
-		mayRun := joinedCan(in, s.Boxes[name].Facts)
+		mayRun := joinedCan(in, s, name, members)
 		for svc, sv := range in.Services {
 			if _, ok := mayRun[svc]; (listed || ok) && sv.Placed && s.Boxes[name].Facts["runs/"+svc] > 0 {
 				runs(svc, name)
@@ -222,7 +223,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 	for _, name := range live {
 		f, rel := s.Boxes[name].Facts, in.Boxes[name]
 		if _, listed := in.Boxes[name]; !listed {
-			canOf[name] = joinedCan(in, f)
+			canOf[name] = joinedCan(in, s, name, members)
 			continue
 		}
 		if f["can_live"] == 0 {
@@ -1012,11 +1013,13 @@ func Placed(in Inputs, p Plan) map[string][]string {
 
 // joinedCan: what a box that joined on its own key may be given, from the
 // release's rules for such boxes narrowed by its own word (can/<svc>, a
-// service it says it cannot run stays off it). Nothing until the release
-// says joined boxes are attested.
-func joinedCan(in Inputs, f map[string]float64) map[string]float64 {
+// service it says it cannot run stays off it). Nothing while the release's
+// switch is off, its own proof of its TPM does not count now, or no member
+// has enlisted it.
+func joinedCan(in Inputs, s *state.State, name string, members map[string]bool) map[string]float64 {
 	c := map[string]float64{}
-	if in.Joined == nil || !in.Joined.Attested || f["can_live"] == 0 {
+	f := s.Boxes[name].Facts
+	if in.Joined == nil || !in.Joined.Attested || f["can_live"] == 0 || !members[name] || !s.Proved(name, s.Time) {
 		return c
 	}
 	for _, svc := range in.Joined.Services {
