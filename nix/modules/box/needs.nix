@@ -4,7 +4,11 @@
     what = "the control plane: heartbeats, leases and the directory, agreed by the voting boxes and a witness";
     everyBox = true;
     # a writer stopped when its lease may have lapsed, without dd-control
-    units = [ "dd-placed-fence" ];
+    # and a box that joined handing on its work before it powers off
+    units = [
+      "dd-placed-fence"
+      "dd-shutdown-drain"
+    ];
     base = {
       # signs with the key in the TPM; its disk unlock already needs one
       requires.tpm = true;

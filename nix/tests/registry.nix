@@ -40,6 +40,7 @@
     "waits"
     "switch-race"
     "work-memory"
+    "shutdown-drain"
     "runner-restart"
     "cache-upload"
     "cache-front"

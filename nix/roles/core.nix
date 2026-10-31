@@ -51,6 +51,8 @@ in
     ../modules/storage/backup.nix
     ../modules/storage/snapshots.nix
     ../modules/box/agent.nix
+    # a box that joined hands on its work before a clean shutdown
+    ../modules/box/shutdown-drain.nix
     # and an ssh session coming or going cannot fail its switch
     ../modules/box/logins.nix
     ../modules/observe/thanos.nix
