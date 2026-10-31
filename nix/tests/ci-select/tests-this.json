@@ -64,7 +64,8 @@
   "switch-remote",
   "cache-front",
   "wired-watch",
-  "net-detect"
+  "net-detect",
+  "boot-key"
  ],
  "acme": {
   "paths": [
@@ -825,7 +826,9 @@
    "nix/modules/box/disk-check.sh",
    "nix/modules/box/secure-boot.nix",
    "fleet/layout.nix",
-   "fleet/policy.json"
+   "fleet/policy.json",
+   "nix/modules/box/tpm-policy.sh",
+   "nix/lib/tpm-policy.nix"
   ],
   "why": {
    "nix/installer/iso.nix": "dd-join-install wrapper, env (RELEASE_URL, DETECT), installer system",
@@ -846,7 +849,9 @@
    "nix/modules/box/disk-check.sh": "dd-disk-check after unlock",
    "nix/modules/box/secure-boot.nix": "lanzaboote/Secure Boot on the installed system",
    "fleet/layout.nix": "disko layout: tank/enc encrypted pool",
-   "fleet/policy.json": "iso.nix reads domain/repo"
+   "fleet/policy.json": "iso.nix reads domain/repo",
+   "nix/modules/box/tpm-policy.sh": "dd-tpm-policy, seal under the approver",
+   "nix/lib/tpm-policy.nix": "dd-tpm-policy, seal under the approver"
   },
   "notes": "Includes the whole release crate (dd-agent + dd-box-setup share lib.rs/setup.rs); rollout.rs and dd-attest.rs are not exercised but are cheap to include via the glob.",
   "family": "vm"
@@ -1040,7 +1045,9 @@
    "nix/modules/box/disk-check.sh",
    "nix/modules/box/zfs-datasets.nix",
    "client/cli/src/diskcmd.rs",
-   "client/mail/worker/unlock.js"
+   "client/mail/worker/unlock.js",
+   "nix/modules/box/tpm-policy.sh",
+   "nix/lib/tpm-policy.nix"
   ],
   "why": {
    "nix/tests/unlock/**": "fake-worker.py: the unlock Worker's protocol stand-in",
@@ -1050,7 +1057,9 @@
    "nix/modules/box/disk-check.sh": "swapped-disk refusal 'not under data/enc / not this box'",
    "nix/modules/box/zfs-datasets.nix": "atMountpoint quotas, 'not capping data/big'",
    "client/cli/src/diskcmd.rs": "dd disk recover with the paper key",
-   "client/mail/worker/unlock.js": "the real protocol fake-worker.py mirrors (only indirectly: a protocol change there forces the stand-in/box script to change)"
+   "client/mail/worker/unlock.js": "the real protocol fake-worker.py mirrors (only indirectly: a protocol change there forces the stand-in/box script to change)",
+   "nix/modules/box/tpm-policy.sh": "dd-tpm-policy in the initrd, PCR 7 for a key made before approvers",
+   "nix/lib/tpm-policy.nix": "dd-tpm-policy in the initrd, PCR 7 for a key made before approvers"
   },
   "notes": "disk-unlock-seal.sh not exercised (no bootstrap.priv). unlock.js is debatable; drop it if only direct exercise counts. waits.py journal_has is in _shared.",
   "family": "vm"
@@ -3861,5 +3870,27 @@
    "nix/modules/computers/computer-facts.sh": "the script under test"
   },
   "notes": ""
+ },
+ "boot-key": {
+  "paths": [
+   "nix/tests/boot-key.nix",
+   "nix/tests/boot-key.py",
+   "servers/system/control/state/attest/**",
+   "servers/system/control/tpm/**",
+   "servers/system/control/cmd/attest-check/**",
+   "servers/system/control/go.mod",
+   "servers/system/control/go.sum",
+   "servers/system/control/cmd/boot-key/**",
+   "servers/system/control/cmd/dd-control/tpmsign.go",
+   "nix/modules/box/tpm-policy.sh",
+   "nix/lib/tpm-policy.nix"
+  ],
+  "why": {
+   "servers/system/control/cmd/boot-key/**": "dd-boot-key",
+   "servers/system/control/cmd/dd-control/tpmsign.go": "the in-process signer under PolicyAuthorize, by -check-sign, across an update, settle and rollback",
+   "nix/modules/box/tpm-policy.sh": "the shell's signature with the join key"
+  },
+  "notes": "boot-key.nix does not go through box/boot-key.nix's units.",
+  "family": "vm"
  }
 }

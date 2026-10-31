@@ -73,6 +73,7 @@ in
       path = [
         pkgs.tpm2-tools
         pkgs.util-linux # flock: one user of the TPM at a time
+        (import ../lib/tpm-policy.nix pkgs)
         pkgs.curl
         pkgs.jq
         pkgs.coreutils

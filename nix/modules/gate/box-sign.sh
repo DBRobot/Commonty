@@ -23,7 +23,7 @@ box_sign() {
     tpm2_createprimary -Q -C o -G ecc256 -c "$w/srk.ctx" &&
       tpm2_load -Q -C "$w/srk.ctx" -u "$KEYS/sig.pub" -r "$KEYS/sig.priv" -c "$w/sig.ctx" &&
       tpm2_startauthsession -Q --policy-session -S "$w/s.ctx" &&
-      tpm2_policypcr -Q -S "$w/s.ctx" -l sha256:7 &&
+      dd-tpm-policy "$w/s.ctx" "$KEYS" &&
       tpm2_sign -Q -c "$w/sig.ctx" -g sha256 -s ecdsa -f plain -p "session:$w/s.ctx" -o "$2" "$1"
     r=$?
     tpm2_flushcontext "$w/s.ctx" >/dev/null 2>&1 || true

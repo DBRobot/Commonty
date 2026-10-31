@@ -126,6 +126,7 @@
       "dd-disk-check"
       "dd-disk-key-forget"
       "dd-unlock-seal"
+      "dd-boot-settle" # approves the signed boot an update brought, the boot this unlock measures (box/boot-key.nix)
     ];
     everyBox = true;
     base = {

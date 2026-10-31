@@ -34,12 +34,17 @@ let
             encrypted = true;
           })
           ../modules/box/secure-boot.nix
+          ../modules/box/boot-key.nix
           ../modules/box/disk-unlock.nix
         ];
         _module.args.ddScript = import ../lib/script.nix { inherit lib; };
+        _module.args.self = self;
         networking.hostName = "joined";
-        # for the test to change PCR 7 under it
-        environment.systemPackages = [ pkgs.tpm2-tools ];
+        # for the test to change PCR 7 under it, and sign as its users do
+        environment.systemPackages = [
+          pkgs.tpm2-tools
+          (import ../lib/tpm-policy.nix pkgs)
+        ];
         networking.hostId = "dd000001";
         boot.initrd.systemd.enable = true;
         boot.initrd.availableKernelModules = [ "tpm_tis" ];
@@ -67,6 +72,9 @@ in
         virtualisation.useBootLoader = true;
         virtualisation.useEFIBoot = true;
         virtualisation.useSecureBoot = true;
+        # the firmware measures into the TPM, as a real one does: the join
+        # key's approver reads its event log
+        virtualisation.efi.OVMF = pkgs.OVMFFull.fd;
         virtualisation.useDefaultFilesystems = false;
         # blank's, already there: no image of its own to take them from
         virtualisation.efi.keepVariables = false;
@@ -130,6 +138,7 @@ in
         # its firmware's Secure Boot in setup mode, no keys yet: the box
         # enrolls its own
         virtualisation.useSecureBoot = true;
+        virtualisation.efi.OVMF = pkgs.OVMFFull.fd;
         virtualisation.emptyDiskImages = [
           8192
           8192
