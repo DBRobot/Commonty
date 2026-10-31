@@ -12,7 +12,7 @@ pkgs.runCommand "forget-owner"
   ''
     run() { FORGET_ROOT=$PWD/r bash ${../modules/box/forget-owner.sh} "$@"; }
     fresh() {
-      chmod -R u+w r 2>/dev/null; rm -rf r
+      rm -rf r
       mkdir -p r/var/lib/dd-control/owners-seen r/var/lib/dd-computer-owners r/run/dd-placed
       mkdir -p r/var/lib/dd-games/records r/var/lib/dd-games/worlds/ann r/var/lib/dd-games/worlds/bea
       for pair in aaaaaaaaaaaaaaaa:ann bbbbbbbbbbbbbbbb:bea; do
