@@ -1,0 +1,17 @@
+{
+  "owner": null,
+  "house": {
+    "ssid": "",
+    "address": "",
+    "sealedWifi": false
+  },
+  "encrypted": true,
+  "unlock": "tpm",
+  "extraPools": [],
+  "datasets": {
+    "tank/enc/games": {
+      "note": "members' game servers: each one's record, saves and guest disk",
+      "mountpoint": "/var/lib/dd-games"
+    }
+  }
+}

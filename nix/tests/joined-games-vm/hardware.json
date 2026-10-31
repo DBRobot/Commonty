@@ -1,0 +1,58 @@
+{
+  "hostId": "dd00b0c5",
+  "bootDisk": "/dev/vda",
+  "wired": "52:54:00:12:01:01",
+  "wifi": null,
+  "gpu": null,
+  "usbNic": false,
+  "secretsKey": "age1jkzv7f5nrtj29ltan8mt4dqd8lj3gv2ckh7tjceradgdlqwlzqqqlnwch5",
+  "firmware": {
+    "uefi": true,
+    "secureBoot": false,
+    "setupMode": false,
+    "tpm": {
+      "version": 2,
+      "p256": true,
+      "ppi": "1.3"
+    },
+    "settingsFromLinux": null
+  },
+  "cpu": {
+    "arch": "x86_64",
+    "vendor": "AuthenticAMD",
+    "model": "AMD Ryzen 5 7520U with Radeon Graphics",
+    "threads": 4,
+    "flags": [
+      "aes",
+      "avx",
+      "avx2"
+    ]
+  },
+  "memoryBytes": 8589934592,
+  "virt": {
+    "kvm": true,
+    "nested": true
+  },
+  "gpus": [],
+  "disks": [],
+  "pools": [
+    {
+      "name": "tank",
+      "bytes": 214748364800
+    }
+  ],
+  "nics": [
+    {
+      "name": "eth1",
+      "mac": "52:54:00:12:01:01",
+      "driver": "virtio_net",
+      "wireless": false,
+      "usb": false,
+      "initrd": true
+    }
+  ],
+  "power": {
+    "battery": false,
+    "mains": true
+  }
+}

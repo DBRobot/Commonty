@@ -98,19 +98,22 @@ in
     ) needs
   );
   # what a box that joined on its own key may be given (place.JoinedRules):
-  # by the policy's trust tiers, a placed service any box may run, that
-  # hands nobody the code holding their secrets, that the owner keeps to
-  # none of their own hardware, with no lease. Off (attested false) until
-  # a joined box's hardware and boot are attested in the agreed state
-  # (docs/dev/attestation.md): till then it holds copies only
+  # a placed service with no lease, that hands nobody the code holding their
+  # secrets, with no secret it could not have there and no shared bucket to
+  # write. services: trust any, which the plan may give it. named: the same
+  # with a name under the domain: built and carried, and not given until a
+  # member's box may serve under the domain (passkeys and cookies safe). own:
+  # what is its owner's or their household's (trust own, household), given
+  # only by a plan that keeps it to them.
+  # Nothing is given until a joined box's hardware and boot are attested in
+  # the agreed state (attested false): till then it holds copies only
   # (and what it needs beside it is every box's, or allowed too)
   joined =
     let
-      tier = builtins.attrNames (
-        lib.filterAttrs (
-          s: n: n.placed && !n.lease && !n.everyBox && n.trust == "any" && !n.servesCode
-        ) needs
-      );
+      fits = n: n.placed && !n.lease && !n.everyBox && !n.servesCode && n.secrets == [ ];
+      tiered = pred: builtins.attrNames (lib.filterAttrs (_: n: fits n && pred n) needs);
+      anyBox = tiered (n: n.trust == "any" && lib.all (b: !b.shared) (builtins.attrValues n.buckets));
+      own = tiered (n: n.trust == "own" || n.trust == "household");
       localOf =
         s:
         lib.filter (d: needs ? ${d} && needs.${s}.base.depends.${d}.local) (
@@ -122,10 +125,14 @@ in
           kept = lib.filter (s: lib.all (d: needs.${d}.everyBox || builtins.elem d ss) (localOf s)) ss;
         in
         if kept == ss then ss else keep kept;
+      built = keep (anyBox ++ own);
+      given = keep (lib.filter (s: needs.${s}.hosts == [ ]) anyBox);
     in
     {
       attested = false;
-      services = keep tier;
+      services = given;
+      named = lib.filter (s: builtins.elem s anyBox && !builtins.elem s given) built;
+      own = lib.filter (s: builtins.elem s own) built;
     };
   # a move must win by base, and by perGiB for each GiB it carries: a
   # stateless service moves for a clearly better box, 100G of photos for

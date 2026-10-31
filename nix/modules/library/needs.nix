@@ -2,6 +2,8 @@
 {
   libraries = {
     what = "members' files, films and shows over WebDAV, ciphertext made on their devices, kept in the storage pool";
+    # ciphertext
+    trust = "any";
     # ciphertext: members' libraries, read and written through the gate
     traffic = {
       class = "high";
@@ -30,6 +32,8 @@
 
   disk-images = {
     what = "members' archives of old computers (`dd image`), restic's layout, encrypted on the device, kept in the storage pool";
+    # ciphertext
+    trust = "any";
     # ciphertext: members' disk images
     traffic = {
       class = "high";
@@ -57,6 +61,8 @@
     # switched by the control plane: it runs where the plan puts it (box/placed.nix)
     placed = true;
     what = "members' mail, locked to their key by the mail Worker before any box has it, kept in the storage pool; and the pipe their app sends mail through";
+    # ciphertext, and who a member sends to
+    trust = "any";
     # ciphertext: mail the Worker locked, and TLS the member's app runs
     traffic = {
       class = "low";
@@ -83,7 +89,7 @@
         # (`*`): on the box holding the network's lease
         headscale.local = true;
       };
-      privacy = "none"; # locked to the member's key before it arrives
+      privacy = "metadata"; # locked to the member's key before it arrives; the pipe shows which server, and when
     };
   };
 
@@ -92,7 +98,7 @@
     placed = true;
     what = "plays a film a member's device cannot, decrypting it in memory only";
     # it decrypts the film it transcodes, for any member
-    trust = "owner";
+    trust = "any";
     traffic = {
       class = "high";
       upMbps = 25;

@@ -150,6 +150,7 @@ in
           RELEASE_KEY = "/root/release.pub";
           SOURCE = "git+http://forge/flake.git";
           DETECT = "${../modules/box/report}/detect.sh";
+          BOX_JSON = "${../installer/box.json}";
           NOT_BEFORE = "100";
           FILES = "http://forge/files";
         };

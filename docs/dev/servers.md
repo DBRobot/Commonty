@@ -298,7 +298,8 @@ needs file that says something unknown fails to evaluate:
 ```
 per service      what, units, instances, perHouse, everyBox, servesCode, when,
                  trust, traffic, alwaysOn, spread, grows, moves, base/variants
-trust            owner, household or any
+trust            owner, household, own or any; every service off everyBox says one
+secrets          what it reads from the box's own sops file, by name
 traffic          class (high, medium, low), upMbps, downMbps
 grows            photos, libraries, code, passwords
 requires/faster  arch, gpu, memory, disk, place, threads, windowsLicense, kvm,
@@ -327,8 +328,9 @@ what it *does* run is decided by the control plane.
 every box against every service, one service at a time, and never by load.
 A box can run a service when it has what the service requires (from its
 signed report and its owner's box.json), when the service's memory and
-storage floor fit, when the box is one its `trust` allows (the owner's
-boxes; or a box of a household it serves; or any), when its line is not
+storage floor fit, when the box is one its `trust` allows (the fleet owner's
+boxes; or a box of a household it serves; `own`, its box's owner's things, or
+any), when its line is not
 metered for `high` traffic, and when everything the service needs on the
 same box can run there too. A box that cannot run what every box runs
 (`everyBox`) cannot join. For each service it can run, the box gets a
@@ -376,8 +378,9 @@ per service whether the fleet wants it (some box is built with it, and
 the policy setting in its `when` is on), how many, spread or by house, the
 line it wants, its memory, what moving it carries, and `moves`: `better`
 (the default) or `on-failure`; and what a box that joined on its own key
-may run (`joined`: by the policy's trust tiers, given nothing until
-`attested`). How the control plane chooses is in
+may run (`joined`: `services`, given nothing until `attested`; `named`, the same
+with a name under the domain, built and carried but not given; `own`, its
+owner's or their household's things). How the control plane chooses is in
 [the control plane](control-plane.md#placement).
 
 Each box measures what it can tell only by running: its line, once a day

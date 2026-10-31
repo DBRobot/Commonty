@@ -26,6 +26,7 @@
 
   dd-verify = {
     what = "the gate: sign-in, who may reach what, the directory's replica, settings pages";
+    secrets = [ "tmdb-token" ];
     everyBox = true;
     # Pi-hole's api password, made on the box where it has Pi-hole, before
     # the gate that holds it starts (adblock/pihole.nix); and its keys to
@@ -68,6 +69,7 @@
     what = "the front door on the open internet: a tunnel this box opens outward";
     # every public request passes it in the clear
     trust = "owner";
+    secrets = [ "cloudflared-credentials" ];
     traffic = {
       class = "high";
       upMbps = 50;
@@ -131,6 +133,7 @@
     what = "the fleet's names at Cloudflare, converged at every switch";
     # where every name of the fleet points
     trust = "owner";
+    secrets = [ "cloudflare-token" ];
     alwaysOn = true;
     instances = 1;
     base = {
@@ -152,6 +155,9 @@
     # switched by the control plane: it runs where the plan puts it (box/placed.nix)
     placed = true;
     what = "checks hourly that the mail and DNS Workers Cloudflare runs are exactly the ones this release carries";
+    # a read of the Workers' code
+    trust = "any";
+    secrets = [ "cloudflare-workers-read" ];
     units = [
       "dd-mail-worker-check"
       "dd-dns-worker-check"
@@ -174,6 +180,8 @@
     # switched by the control plane: it runs where the plan puts it (box/placed.nix)
     placed = true;
     what = "the home controllers' updates: this box's nix store, read-only, on the Commonty network (smarthome/cache-door.nix)";
+    # public builds, each closure checked against the signed release by what fetches it
+    trust = "any";
     instances = 1;
     # cache.<domain>: the DNS Worker points it at the box running this
     hosts = [ "cache" ];

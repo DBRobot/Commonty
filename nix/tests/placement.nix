@@ -2,7 +2,8 @@
 # signed report and its owner's box.json, against fleet/boxes.json: every
 # box joins (it can run what every box runs), every service it carries is
 # one it can run, and nix/roles/bundles.json says truly what each bundle
-# brings (a service with units is found on a box by them). Fails while the flake is
+# brings (a service with units is found on a box by them), and each service's
+# trust is one it chose, and what is kept off members' boxes stays off. Fails while the flake is
 # evaluated, naming each problem; built, it is the whole table as JSON - what
 # the control plane chooses from.
 {
@@ -18,6 +19,7 @@ let
     capability
     built
     carries
+    inputs
     ;
   every = lib.attrNames (lib.filterAttrs (_: n: n.everyBox) needs);
   # what a box is built with, from its capability (fleet-placement.nix built)
@@ -66,8 +68,76 @@ let
       lib.unique (map (x: x.s) (lib.filter (x: needs.${x.s}.instances != 1) named))
     );
   policyOn = (lib.importJSON ../../fleet/policy.json).failover or false;
+  # passwords, the fleet's keys and doors, the forge and its CI, and the pages
+  # handling members' keys; all else may run on any member's box
+  keptOff = [
+    "vaultwarden"
+    "vaultwarden-send"
+    "postgresql" # the vault's records, until its database is its own
+    "headscale"
+    "dd-dns"
+    "cloudflared"
+    "dd-mail"
+    "forgejo"
+    "forgejo-public"
+    "forgejo-runner"
+    "ente-web"
+  ];
+  apart = lib.filterAttrs (_: n: !n.everyBox) needs;
+  # who may run a service is said, and what is kept off stays off
+  trustProblems =
+    map (s: "${s}: no trust said (needs trust): whose boxes may run it is chosen, not a default") (
+      builtins.attrNames (lib.filterAttrs (_: n: n.trust == null) apart)
+    )
+    ++ map (s: "${s}: kept off other people's boxes (David, 2026-11-01), so trust owner") (
+      lib.filter (s: needs.${s}.trust != "owner") keptOff
+    )
+    ++ map (s: "${s}: trust any, but the code holding people's secrets comes from it (servesCode)") (
+      builtins.attrNames (lib.filterAttrs (_: n: n.trust == "any" && n.servesCode) apart)
+    );
+  # the console's password is a login's, no service's
+  declaredSecrets = [
+    "console-password-hash"
+  ]
+  ++ lib.concatMap (n: n.secrets) (builtins.attrValues needs);
+  secretProblems = lib.concatMap (
+    box:
+    map (x: "${box}: reads ${x} from its own file, and no service says so (needs secrets)") (
+      lib.filter (x: !(builtins.elem x declaredSecrets)) (
+        builtins.attrNames self.nixosConfigurations.${box}.config.sops.secrets
+      )
+    )
+  ) (builtins.attrNames list);
+  joinedProblems = map (s: "${s}: joined.own, but trust ${toString needs.${s}.trust}") (
+    lib.filter (s: needs.${s}.trust != "own" && needs.${s}.trust != "household") inputs.joined.own
+  );
+  # a box as the installer sets it up, on a real report, carries the games
+  # (carries.json, what its heartbeat says and the plan gives from)
+  fresh =
+    (self.lib.joinedBox {
+      name = "fresh";
+      dir = ./placement-joined;
+    }).config.environment.etc."dd-placed/carries.json".text;
+  # the fixtures are the installer's box.json, with its member's word on the
+  # line (LINE); whose it is comes in enlisted.json
+  asInstalled =
+    f: removeAttrs (lib.importJSON f) [ "internet" ] == lib.importJSON ../installer/box.json;
+  freshProblems =
+    map (f: "${f}/box.json is not what the installer writes (nix/installer/box.json)") (
+      lib.filter (f: !asInstalled (./. + "/${f}/box.json")) [
+        "placement-joined"
+        "joined-games-vm"
+      ]
+    )
+    ++ lib.optional (
+      !(builtins.fromJSON fresh ? dd-games)
+    ) "a freshly imaged box does not carry dd-games: ${fresh}";
   problems =
     hostProblems
+    ++ trustProblems
+    ++ freshProblems
+    ++ secretProblems
+    ++ joinedProblems
     ++ map (b: "${b}: judged on the box, its capability is not the release's") (
       lib.filter (b: scores judged.boxes.${b} != scores capability.boxes.${b}) (builtins.attrNames list)
     )

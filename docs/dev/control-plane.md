@@ -458,9 +458,12 @@ switched runs wherever it is built). It is greedy, not optimal:
   that carries its new report.
 - A box that joined on its own key is in no release's table. The
   release's rules for such boxes (`joined` in the placement inputs) name
-  what a member's box may run by the policy's trust tiers (trust `any`,
-  no code handing people their secrets, nothing the owner keeps to their
-  own hardware, no lease), and its word only narrows that. Until its
+  what a member's box may run (trust `any`, no code handing people their
+  secrets, no secret the box cannot have, no shared bucket, no lease), and
+  its word only narrows that. One with a name under the domain
+  (`joined.named`) is built and carried there and not given yet; one its
+  owner's or their household's alone (trust `own` or `household`,
+  `joined.own`) is built and carried, and not given yet. Until its
   hardware and boot are attested in the agreed state (`attested`, off
   today) it is given no service at all and holds copies only; and what it
   says it runs counts for nothing, so it can neither keep a service nor

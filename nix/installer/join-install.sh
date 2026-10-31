@@ -134,8 +134,7 @@ fi
 if [ -n "${TICKET:-}" ] && [ -s "$TICKET" ]; then
   install -m 0600 "$TICKET" /mnt/var/lib/dd/join-ticket
 fi
-jq -n --arg ssid "$ssid" '{owner: null, house: {ssid: $ssid, address: "", sealedWifi: ($ssid != "")},
-  encrypted: true, unlock: "tpm", extraPools: [], datasets: {}}' > /mnt/var/lib/dd/box/box.json
+jq --arg ssid "$ssid" '.house.ssid = $ssid | .house.sealedWifi = ($ssid != "")' "$BOX_JSON" > /mnt/var/lib/dd/box/box.json
 
 # its system, built here from that commit and its report, onto the disk:
 # the installer's own store is memory. What it already has is taken from it

@@ -100,6 +100,8 @@
     # on every box that carries it
     spread = true;
     what = "mail from the box to members and the owner, signed by its TPM and handed to the mail Worker (modules/mail.nix)";
+    # each message passes through it in the clear, and the mail Worker takes it as the fleet's own
+    trust = "owner";
     # one instance per message, behind the dd-mail socket
     units = [ "dd-mail@" ];
     base = {
@@ -172,6 +174,7 @@
 
   home-network = {
     what = "the box on the house network: by cable when it has one, by wifi when not, at the address the router reserves (box/home-network.nix)";
+    secrets = [ "wifi-psk" ];
     units = [
       "NetworkManager-ensure-profiles"
       "dd-wifi-apply"
