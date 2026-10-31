@@ -328,16 +328,17 @@ what it *does* run is decided by the control plane.
 every box against every service, one service at a time, and never by load.
 A box can run a service when it has what the service requires (from its
 signed report and its owner's box.json), when the service's memory and
-storage floor fit, when the box is one its `trust` allows (the fleet owner's
-boxes; or a box of a household it serves; `own`, its box's owner's things, or
-any), when its line is not
-metered for `high` traffic, and when everything the service needs on the
+storage floor fit, when the box is one its `trust` allows (`owner`: the
+fleet owner's boxes; `household`: theirs, or one whose owner lives with the
+household it says it serves; `own`: a box somebody owns, for that person's
+own things; or `any`), when its line is said to be flat for `high` traffic,
+and when everything the service needs on the
 same box can run there too. A box that cannot run what every box runs
 (`everyBox`) cannot join. For each service it can run, the box gets a
 score from what is known before anything runs: what makes the service
 faster, memory to spare, mains power for what must always answer, threads,
-room for the pool. A line no box.json calls flat (`internet.metered:
-false`) counts as metered. The owner's own boxes usually come out able to
+room for the pool. A line nobody has said is flat (`internet.metered`
+absent) takes no `high` traffic and scores as metered, and says why. The owner's own boxes usually come out able to
 run nearly everything; that is the point. Whether they do is the control
 plane's call.
 

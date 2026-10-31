@@ -33,6 +33,9 @@ type Inputs struct {
 	// what a box that joined on its own key may be given (JoinedRules);
 	// absent, nothing but copies
 	Joined *JoinedRules `json:"joined,omitempty"`
+	// the fleet's owner (policy owner): a box they enlisted is theirs as a
+	// box of the release with them as its owner is
+	Owner string `json:"owner,omitempty"`
 }
 
 // JoinedRules: what the release lets a box that joined on its own key (a
@@ -40,7 +43,7 @@ type Inputs struct {
 // it says of itself can only narrow this, never widen it. Until its
 // hardware and boot are attested in the agreed state (docs/dev/attestation.md)
 // the release keeps Attested false and it runs nothing, holding copies
-// only.
+// only. A box no member has enlisted holds copies only whatever this says.
 type JoinedRules struct {
 	// the switch, on in the release that brings attestation
 	Attested bool `json:"attested"`
@@ -48,6 +51,9 @@ type JoinedRules struct {
 	// only the owner's boxes run (servesCode, trust owner), a
 	// writer under a lease, or what reads a secret from the box's own file
 	Services []string `json:"services"`
+	// what reads only its box's owner's data: each member's own, on their
+	// own boxes, never the one the fleet shares (placeOwn)
+	Own []string `json:"own,omitempty"`
 }
 
 // Bucket is one a service writes to its box's own store
@@ -137,6 +143,8 @@ type Decision struct {
 	Service string  `json:"service"`
 	Fit     float64 `json:"fit"`
 	Why     string  `json:"why"`
+	// a member's own, on their own box: the fleet's names never follow it
+	Own bool `json:"own,omitempty"`
 }
 
 const (
@@ -156,10 +164,10 @@ const RefusedEverywhere = "every box able to run it refused it; tried again: "
 func ComputerService(id string) string { return "computer-" + id }
 
 // Decide plans the fleet. goneAfter is how long (ms of agreed time) a box
-// may go unheard and still count as alive. members: the joined boxes a
-// member has enlisted and that qualify (the agreed identity state's), which
-// keep copies as a box of the release does.
-func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool) Plan {
+// may go unheard and still count as alive. owners: whose each joined box is,
+// by the agreed identity state (Owners), the only word on it: a box not here
+// runs nothing and its copies count last.
+func Decide(in Inputs, s *state.State, goneAfter int64, owners map[string]string) Plan {
 	p := Plan{Boxes: map[string][]Decision{}, Unplaced: map[string]string{}, Copies: map[string][]string{}, DoesNotFit: map[string][]string{}}
 	live := []string{}
 	for name := range in.Boxes {
@@ -201,7 +209,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 				runs(svc, name)
 			}
 		}
-		mayRun := joinedCan(in, s.Boxes[name].Facts)
+		mayRun := ownerCan(in, s.Boxes[name].Facts, owners[name])
 		for svc, sv := range in.Services {
 			if _, ok := mayRun[svc]; (listed || ok) && sv.Placed && s.Boxes[name].Facts["runs/"+svc] > 0 {
 				runs(svc, name)
@@ -222,7 +230,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 	for _, name := range live {
 		f, rel := s.Boxes[name].Facts, in.Boxes[name]
 		if _, listed := in.Boxes[name]; !listed {
-			canOf[name] = joinedCan(in, f)
+			canOf[name] = ownerCan(in, f, owners[name])
 			continue
 		}
 		if f["can_live"] == 0 {
@@ -301,6 +309,10 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 	for svc, sv := range in.Services {
 		m, seen := 0.0, false
 		for _, name := range live {
+			// a joined box's word sizes it there alone (memOn)
+			if _, listed := in.Boxes[name]; !listed {
+				continue
+			}
 			if v, ok := s.Boxes[name].Facts["svc/"+svc+"/mem"]; ok {
 				m, seen = max(m, v/gib), true
 			}
@@ -818,7 +830,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 		case sv.PerHouse > 0:
 			houses := map[string][]string{}
 			for _, name := range cands {
-				h := in.Boxes[name].Site
+				h := siteOf(in, s, owners, name)
 				houses[h] = append(houses[h], name)
 			}
 			hs := []string{}
@@ -883,6 +895,9 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 	for _, svc := range wanted {
 		decide(svc)
 	}
+	placeOwn(in, s, &p, live, owners, canOf, ownPlace{
+		can: can, room: room, fit: fit, place: place, adds: adds, draining: draining, planned: planned,
+	})
 	placeComputers(in, s, &p, live, now, draining, in.Damping.PerGiB)
 
 	// the copies, once the services are placed: a bucket stays in the
@@ -909,7 +924,8 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 		// where it is written: its room was judged with the service. A
 		// box's own bucket only on that box, though every box runs its service
 		for _, name := range live {
-			at := planned[name][bk.Service]
+			// (a member's own instance writes for them, not for the fleet)
+			at := planned[name][bk.Service] && !isOwn(p, name, bk.Service)
 			if bk.Box != "" {
 				at = name == bk.Box
 			}
@@ -929,7 +945,7 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 		// the release or a member's, then a stranger: a stranger's word
 		// that it keeps a copy never pushes out either
 		takesOver := func(name string) bool { _, ok := in.Boxes[name].Can[bk.Service]; return ok }
-		listed := func(name string) bool { _, ok := in.Boxes[name]; return ok || members[name] }
+		listed := func(name string) bool { _, ok := in.Boxes[name]; return ok || owners[name] != "" }
 		sort.SliceStable(have, func(i, j int) bool {
 			if a, b := takesOver(have[i]), takesOver(have[j]); a != b {
 				return a
@@ -999,7 +1015,7 @@ func Placed(in Inputs, p Plan) map[string][]string {
 	out := map[string][]string{}
 	for box, ds := range p.Boxes {
 		for _, d := range ds {
-			if sv, ok := in.Services[d.Service]; ok && sv.Placed {
+			if sv, ok := in.Services[d.Service]; ok && sv.Placed && !d.Own {
 				out[d.Service] = append(out[d.Service], box)
 			}
 		}

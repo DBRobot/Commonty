@@ -605,7 +605,7 @@ func TestAMembersBoxKeepsItsCopyAsABoxOfTheReleaseDoes(t *testing.T) {
 	s.Boxes["jabc"] = &state.BoxState{LastSeen: s.Time - 1000, Facts: map[string]float64{
 		"store_size_bytes": 1000 * gib, "store_free_bytes": 900 * gib, "store/ente/bytes": 50 * gib,
 	}}
-	p := Decide(in, s, 90_000, map[string]bool{"jabc": true})
+	p := Decide(in, s, 90_000, map[string]string{"jabc": "ann"})
 	if got := strings.Join(p.Copies["ente"], ","); got != "big,jabc" {
 		t.Fatalf("copies %q: the member's box holding more lost its copy", got)
 	}
@@ -716,7 +716,8 @@ func TestAnAttestedJoinedBoxRunsOnlyWhatItsTierAllows(t *testing.T) {
 	pg := in.Services["postgres"]
 	pg.Lease, pg.Placed = true, true
 	in.Services["postgres"] = pg
-	p := Decide(in, s, 90_000, nil)
+	ann := map[string]string{"jabc": "ann"}
+	p := Decide(in, s, 90_000, ann)
 	if !runs(p, "jabc", "web") {
 		t.Fatalf("web, allowed and claimed, sticky where it runs: %+v", p.Boxes)
 	}
@@ -728,7 +729,7 @@ func TestAnAttestedJoinedBoxRunsOnlyWhatItsTierAllows(t *testing.T) {
 	// and its word only narrows: not claimed, not given
 	in2, s2 := joinedClaiming()
 	in2.Joined = &JoinedRules{Attested: true, Services: []string{"web"}}
-	if p := Decide(in2, s2, 90_000, nil); len(p.Boxes["jabc"]) != 0 {
+	if p := Decide(in2, s2, 90_000, ann); len(p.Boxes["jabc"]) != 0 {
 		t.Fatalf("given what it did not say it can: %+v", p.Boxes["jabc"])
 	}
 }

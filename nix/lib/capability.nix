@@ -87,8 +87,9 @@ let
       wiredBoot = builtins.any (n: !n.wireless && n.initrd) (hw.nics or [ ]);
       mains = (hw.power or { }).mains or true;
       battery = (hw.power or { }).battery or false;
-      # a line nobody has said is flat counts as metered
-      metered = net.metered or true;
+      # its member's word on its line (box.json internet.metered), or null:
+      # nobody has said, and only a line said to be flat takes heavy traffic
+      metered = net.metered or null;
       owner = own.owner or null;
       household = (own.house or { }).household or [ ];
       # the mountpoints its owner gave datasets in box.json
@@ -156,12 +157,16 @@ let
       n = needs.${s};
     in
     lib.optional (n.trust == "owner" && f.owner != policy.owner) "only on ${policy.owner}'s boxes"
+    ++ lib.optional (n.trust == "own" && f.owner == null) "only on a box somebody owns"
     ++ lib.optional (
-      n.trust == "household" && f.owner != policy.owner && f.household == [ ]
-    ) "only on ${policy.owner}'s boxes or a household's"
-    ++ lib.optional (
-      n.traffic.class == "high" && f.metered
-    ) "high traffic, and the line is metered (or not said to be flat)";
+      n.trust == "household" && f.owner != policy.owner && !(builtins.elem f.owner f.household)
+    ) "only on ${policy.owner}'s boxes or one its owner's household lives with"
+    ++ lib.optional (n.traffic.class == "high" && f.metered != false) (
+      if f.metered == null then
+        "high traffic, and nobody has said this line is flat"
+      else
+        "high traffic, and the line is metered"
+    );
 
   # and through its dependencies: what it needs on the same box must be
   # able to run there too
@@ -224,7 +229,7 @@ let
       w = -1.0;
       why = "battery only";
     }
-    ++ lib.optional (n.traffic.class == "medium" && f.metered) {
+    ++ lib.optional (n.traffic.class == "medium" && f.metered != false) {
       w = -1.0;
       why = "metered line";
     }

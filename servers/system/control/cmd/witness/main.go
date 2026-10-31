@@ -126,7 +126,7 @@ func main() {
 			s := v.State()
 			code, b := ids.Answer(len(s.Directory), func(i int) ident.Item {
 				d := s.Directory[i]
-				return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item}
+				return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item, Boxes: d.Boxes}
 			}, s.Height, s.Time, s.IdentBoxes(), name, since)
 			return js.ValueOf([]any{code, string(b)})
 		}))
@@ -167,23 +167,14 @@ func main() {
 func placed(in place.Inputs, s *state.State, goneAfter int64, ids *ident.Server, rc *computers.Server) map[string][]string {
 	item := func(i int) ident.Item {
 		d := s.Directory[i]
-		return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item}
+		return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item, Boxes: d.Boxes}
 	}
 	if rc != nil {
 		in.Computers = rc.Computers(len(s.Directory), item, s.Height, s.Time, s.IdentBoxes())
 	}
-	members := map[string]bool{}
+	var owners map[string]string
 	if ids != nil {
-		for _, m := range ids.View(len(s.Directory), item, s.Height, s.Time, s.IdentBoxes()).Members {
-			if m.Status != "member" {
-				continue
-			}
-			for _, b := range m.Enlisted {
-				if b.Qualifies != "" {
-					members[b.Box] = true
-				}
-			}
-		}
+		owners = place.Owners(ids.View(len(s.Directory), item, s.Height, s.Time, s.IdentBoxes()))
 	}
-	return place.Placed(in, place.Decide(in, s, goneAfter, members))
+	return place.Placed(in, place.Decide(in, s, goneAfter, owners))
 }

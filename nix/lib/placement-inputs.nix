@@ -134,6 +134,8 @@ in
       named = lib.filter (s: builtins.elem s anyBox && !builtins.elem s given) built;
       own = lib.filter (s: builtins.elem s own) built;
     };
+  # a box they enlisted counts as theirs (place.Inputs.Owner)
+  inherit (policy) owner;
   # a move must win by base, and by perGiB for each GiB it carries: a
   # stateless service moves for a clearly better box, 100G of photos for
   # one better by a whole point of suits more

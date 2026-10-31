@@ -54,6 +54,15 @@ func fleetState(in Inputs) *state.State {
 	return s
 }
 
+func readGolden() (map[string]Plan, error) {
+	raw, err := os.ReadFile("testdata/fleet-plans.json")
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]Plan{}
+	return out, json.Unmarshal(raw, &out)
+}
+
 func fleetScenes() map[string]func(*state.State) {
 	return map[string]func(*state.State){
 		"both up":         func(*state.State) {},
