@@ -43,6 +43,13 @@ anyone needs to trust it with.
   fleet, 8 joining at once at the relay. One unheard for 30 days is
   dropped from the agreed state.
 
+- **Its build** runs in the agent's unit, as root and under the work slice
+  (`work-memory.nix`), once for each signed commit and report: the same
+  again costs no evaluation (`self-build` in the agent's state). A failure
+  says so in the heartbeat (`agent_ok` 0, `build_fail`: 1 fetch, 2 memory, 3
+  disk, 4 build) and no text of it leaves the box. It is tried again an hour
+  later, a failed fetch at the next run, and at once for a new commit.
+
 ## What a stranger can do
 
 Hold ciphertext it can't read, and fail to keep it: the box writing a
@@ -264,7 +271,8 @@ replaying the directory serves its replay, which knows invites only).
   (unheard by the agreed state) while healthy.
 - **Our fault, for 90 days**: a box whose last word was that its agent's
   last run did not end well (`agent_ok` 0: the release was refused or
-  rolled back on it; held, none and absent say nothing) on a release
+  rolled back on it, or its own build of it failed; held, none, absent and
+  building say nothing) on a release
   older than the newest the release's own boxes run is not gone for 90
   days from its last word (`OurFaultFor`), and the state machine keeps
   its place that long rather than forgetting it after 30 days as it does

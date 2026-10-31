@@ -357,7 +357,8 @@ func reportFacts(report, model string) map[string]float64 {
 
 // promFacts reads the few samples the heartbeat carries from text-format
 // metric files: release (dd_agent_counter), agent_ok (dd_agent_info's
-// result: 1 ok, 0 refused or rolled back) and backup_last (dd_backup_last_success_seconds)
+// result: 1 ok, 0 refused, rolled back or its own build failed), building
+// and build_fail (a box's own build), and backup_last (dd_backup_last_success_seconds)
 // maxFacts bounds what one heartbeat carries, members and services and all
 const maxFacts = 512
 
@@ -494,9 +495,16 @@ func promFacts(files ...string) map[string]float64 {
 				switch {
 				case strings.Contains(l, `result="ok"`):
 					out["agent_ok"] = 1
-				case strings.Contains(l, `result="refused"`), strings.Contains(l, `result="rollback"`):
+				case strings.Contains(l, `result="refused"`), strings.Contains(l, `result="rollback"`), strings.Contains(l, `result="failed"`):
 					out["agent_ok"] = 0
+				case strings.Contains(l, `result="building"`):
+					out["building"] = 1
 				}
+			case "dd_agent_build_fail":
+				// why a box's own build failed: a short code, no text of it
+				// leaves the box (dd-agent.rs BuildFail). A retry still says it
+				out["build_fail"] = v
+				out["agent_ok"] = 0
 			}
 		}
 	}

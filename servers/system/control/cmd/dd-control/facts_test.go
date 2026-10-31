@@ -146,12 +146,41 @@ func TestWhatABoxQualifiesByComesFromItsOwnReport(t *testing.T) {
 func TestOnlyAReleaseThatFailedIsAgentOkZero(t *testing.T) {
 	d := t.TempDir()
 	agent := filepath.Join(d, "dd_agent.prom")
-	for result, want := range map[string]float64{"ok": 1, "refused": 0, "rollback": 0, "held": -1, "none": -1, "absent": -1, "": -1} {
+	for result, want := range map[string]float64{"ok": 1, "refused": 0, "rollback": 0, "failed": 0, "building": -1, "held": -1, "none": -1, "absent": -1, "": -1} {
 		_ = os.WriteFile(agent, []byte("dd_agent_info{box=\"j0123456789\",path=\"/nix/store/x\",result=\""+result+"\"} 1\n"), 0o644)
 		v, said := promFacts(agent)["agent_ok"]
 		// -1: no word on how a release went, which is never "our fault"
 		if want < 0 && said || want >= 0 && (!said || v != want) {
 			t.Fatalf("result %q: agent_ok %v (said %v), want %v", result, v, said, want)
 		}
+	}
+}
+
+func TestABoxsOwnBuildSaysHowItWent(t *testing.T) {
+	d := t.TempDir()
+	agent := filepath.Join(d, "dd_agent.prom")
+	write := func(body string) map[string]float64 {
+		_ = os.WriteFile(agent, []byte(body), 0o644)
+		return promFacts(agent)
+	}
+	// as dd-agent.rs record_build writes them
+	info := func(r string) string {
+		return "dd_agent_counter{box=\"j0123456789\"} 7\ndd_agent_info{box=\"j0123456789\",path=\"/nix/store/x\",result=\"" + r + "\"} 1\n"
+	}
+	code := "# HELP dd_agent_build_fail Why this box's own build failed: 1 fetch, 2 memory, 3 disk, 4 build.\n# TYPE dd_agent_build_fail gauge\ndd_agent_build_fail{box=\"j0123456789\"} 2\n"
+	if f := write(info("failed") + code); f["build_fail"] != 2 || f["agent_ok"] != 0 || f["building"] != 0 || f["release"] != 7 {
+		t.Fatalf("failed: %v", f)
+	}
+	// trying again: building, and still why the last try failed
+	if f := write(info("building") + code); f["building"] != 1 || f["build_fail"] != 2 || f["agent_ok"] != 0 {
+		t.Fatalf("a retry: %v", f)
+	}
+	f := write(info("building"))
+	if _, said := f["agent_ok"]; f["building"] != 1 || said {
+		t.Fatalf("a first build says nothing of a release yet: %v", f)
+	}
+	f = write(info("ok"))
+	if _, had := f["build_fail"]; had || f["agent_ok"] != 1 || f["building"] != 0 {
+		t.Fatalf("built: %v", f)
 	}
 }

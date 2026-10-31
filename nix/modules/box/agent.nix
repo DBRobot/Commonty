@@ -226,6 +226,9 @@ in
     # it builds as root, outside the daemon and its limit: under the work
     # slice's with CI. A kill ends this run; the timer starts the next
     dd.work.units.dd-build = { };
+    # so does the agent of a box that builds its own system. A kill fails the
+    # build, and the agent lives to say so (dd-agent.rs BuildFail)
+    dd.work.units.dd-agent = lib.mkIf joined { oomPolicy = "continue"; };
     systemd.timers.dd-build = {
       wantedBy = [ "timers.target" ];
       # never inside a switch: its first run is three minutes after the
