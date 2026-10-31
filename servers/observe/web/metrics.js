@@ -262,7 +262,7 @@ function tabs(current, alerts) {
   const t = (href, label, key, extra) => el('a', { href, 'aria-current': current === key ? 'page' : null }, label, extra);
   put($('tabs'),
     t('/', 'The fleet', 'fleet'),
-    boxNames.map((b) => t(`/servers/${encodeURIComponent(b)}`, b, `box:${b}`)),
+    boxNames.map((b) => t(`/box/${encodeURIComponent(b)}`, b, `box:${b}`)),
     t('/alerts', 'Alerts', 'alerts', alerts ? [' ', el('span', { class: `mchip ${alerts.some((a) => a.level === 'bad') ? 'bad' : 'busy'}`, text: String(alerts.length) })] : null),
     t('/storage', 'Storage & backups', 'storage'),
     t('/explore', 'Explore', 'explore'));
@@ -294,7 +294,7 @@ async function fleetView() {
     const memLvl = level(b.mem * 100, 80, 92), tLvl = level(b.temp, 85, 95);
     const drivesOk = b.drives.every((d) => d.ok);
     return el('div', { class: `card${b.up ? '' : ' down'}` },
-      el('header', {}, el('span', { class: `dot ${state}` }), el('h2', {}, el('a', { href: `/servers/${encodeURIComponent(b.box)}`, style: 'color:var(--ink)', text: b.box })),
+      el('header', {}, el('span', { class: `dot ${state}` }), el('h2', {}, el('a', { href: `/box/${encodeURIComponent(b.box)}`, style: 'color:var(--ink)', text: b.box })),
         el('span', { class: `mchip ${state}`, text: !b.up ? 'not answering' : state === 'ok' ? 'fine' : `${mine.length} to look at` }), el('span', { class: 'spacer' }),
         el('span', { class: 'small muted', text: [rel?.release ? `release ${rel.release}` : null, b.uptime ? `up ${age(b.uptime)}` : null].filter(Boolean).join(' · ') })),
       el('div', { class: 'what', text: [info.model?.replace(/\(R\)|\(TM\)|with Radeon Graphics| @ .*/g, '').trim(), b.memTotal ? `${bytes(b.memTotal)} memory` : null, info.kernel ? `kernel ${info.kernel}` : null].filter(Boolean).join(' · ') }),
@@ -355,7 +355,7 @@ async function boxView(name, params) {
   put(main(),
     el('div', { class: 'mrow gap' }, el('h2', { style: 'margin:0;font-size:20px', text: name }), el('span', { class: `mchip ${b.up ? 'ok' : 'bad'}`, text: b.up ? 'answering' : 'not answering' }),
       el('span', { class: 'muted small', text: [b.info.model, b.memTotal ? bytes(b.memTotal) : null, b.uptime ? `up ${age(b.uptime)}` : null, b.release?.release ? `release ${b.release.release}` : null].filter(Boolean).join(' · ') }),
-      el('span', { class: 'spacer' }), spanPicker(key, `/servers/${encodeURIComponent(name)}`)),
+      el('span', { class: 'spacer' }), spanPicker(key, `/box/${encodeURIComponent(name)}`)),
     el('div', { class: 'charts gap' },
       chartBox('CPU', Number.isFinite(last(busy)) ? `now ${pct(last(busy))}%` : '', [line('busy', 'var(--c1)', busy), line('waiting on disk', 'var(--c3)', iowait)], { max: 100, unit: (v) => `${Math.round(v)}%`, secs }),
       chartBox('Temperature', Number.isFinite(last(cpuT)) ? `now ${pct(last(cpuT))} °C` : '', [line('hottest chip', 'var(--c4)', cpuT), line('SSD', 'var(--c2)', ssdT)], { max: 120, unit: (v) => `${Math.round(v)}°`, warn: { at: 100, label: 'slows itself' }, secs }),
@@ -493,7 +493,7 @@ async function render() {
   const params = new URLSearchParams(location.search);
   try {
     if (path === '/') await fleetView();
-    else if (path.startsWith('/servers/')) await boxView(path.slice(5), params);
+    else if (path.startsWith('/box/')) await boxView(path.slice('/box/'.length), params);
     else if (path === '/alerts') await alertsView();
     else if (path === '/storage') await storageView();
     else if (path === '/explore') await exploreView(params);

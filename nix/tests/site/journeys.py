@@ -225,8 +225,10 @@ def metrics(page):
     card = page.locator("#app a", has_text="box").first
     expect(card).to_be_visible(timeout=T)
     card.click()
-    expect(page).to_have_url(re.compile(r"/box"), timeout=T)
-    expect(page.locator("#app")).to_contain_text("box", timeout=T)
+    # its route: the error page also says "box", so its heading and spans
+    expect(page).to_have_url(url("metrics", "/box/box"), timeout=T)
+    expect(page.locator("#app h2").first).to_have_text("box", timeout=T)
+    expect(page.locator("#app .mseg")).to_be_visible(timeout=T)
     return "the box's own page, from Thanos"
 
 
