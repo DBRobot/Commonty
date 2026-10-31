@@ -943,7 +943,8 @@ async fn photos<R: Runtime>(
     }
     // Ente's own files: a page by its name, its name with .html, or the app
     // shell (as nginx served them, try_files $uri $uri.html /index.html)
-    client(site, "photos", path, true).await
+    let seen = header_str(req.headers(), "if-none-match").map(str::to_string);
+    client(site, "photos", path, true, seen.as_deref()).await
 }
 
 /// what a page the app hands a browser may load and run
@@ -1216,7 +1217,8 @@ async fn vault<R: Runtime>(site: &Site<R>, req: Request, path: &str) -> Response
         let base = format!("https://vault.{}", crate::account::domain());
         return forward(&base, None, req, true).await;
     }
-    client(site, "vault", path, false).await
+    let seen = header_str(req.headers(), "if-none-match").map(str::to_string);
+    client(site, "vault", path, false, seen.as_deref()).await
 }
 
 /// One of the app's own files (web/), served as the app carries it
@@ -1256,7 +1258,13 @@ fn mime(p: &Path) -> &'static str {
 /// the same on every platform - Android has no nix store to read from), or
 /// from a folder for a development run that names one (COMMONTY_PHOTOS_WEB,
 /// COMMONTY_VAULT_WEB).
-async fn client<R: Runtime>(site: &Site<R>, name: &str, path: &str, shell: bool) -> Response {
+async fn client<R: Runtime>(
+    site: &Site<R>,
+    name: &str,
+    path: &str,
+    shell: bool,
+    seen: Option<&str>,
+) -> Response {
     if site.root.is_some() {
         return file(site.root.as_deref(), path, shell).await;
     }
@@ -1277,6 +1285,18 @@ async fn client<R: Runtime>(site: &Site<R>, name: &str, path: &str, shell: bool)
         tries.push(format!("_clients/{name}/index.html"));
     }
     for t in tries {
+        let tag = tag(&t);
+        if let Some(tag) = &tag
+            && seen.is_some_and(|s| matches(s, tag))
+            && crate::site::carries(&site.app, &t)
+        {
+            return Response::builder()
+                .status(StatusCode::NOT_MODIFIED)
+                .header(header::ETAG, tag)
+                .header(header::CACHE_CONTROL, "no-cache")
+                .body(Body::empty())
+                .unwrap_or_default();
+        }
         if let Some(a) = crate::site::carried(&site.app, &t) {
             // the resolver's own guess at a type is by the asset's name;
             // ours for the few it would get wrong (wasm, maps)
@@ -1295,15 +1315,50 @@ async fn client<R: Runtime>(site: &Site<R>, name: &str, path: &str, shell: bool)
             } else {
                 Body::from(a.bytes)
             };
-            return Response::builder()
+            let mut r = Response::builder()
                 .header(header::CONTENT_TYPE, kind)
                 .header(header::CACHE_CONTROL, "no-cache")
-                .header("x-content-type-options", "nosniff")
-                .body(body)
-                .unwrap_or_default();
+                .header("x-content-type-options", "nosniff");
+            if let Some(tag) = tag {
+                r = r.header(header::ETAG, tag);
+            }
+            return r.body(body).unwrap_or_default();
         }
     }
     plain(StatusCode::NOT_FOUND, "no such file")
+}
+
+/// A client's file other than a page, as this launch carries it: asked
+/// again, it is the browser's copy, if the browser shows this tag. What the
+/// app carries does not change while it runs. The tag is keyed with the
+/// launch secret, so a program that held the port while the app was down
+/// cannot leave a copy of its own behind under a tag the app would take;
+/// a long `immutable` cache would let it (packaged.md).
+fn tag(carried: &str) -> Option<String> {
+    let ext = Path::new(carried).extension().and_then(|e| e.to_str())?;
+    if ext.eq_ignore_ascii_case("html") {
+        return None;
+    }
+    use sha2::Digest as _;
+    let h = sha2::Sha256::new()
+        .chain_update(crate::site::launch_secret())
+        .chain_update([0])
+        .chain_update(carried)
+        .finalize();
+    Some(format!(
+        "\"{}\"",
+        h[..16]
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    ))
+}
+
+/// If-None-Match against the one tag: a list, a weak form, or any
+fn matches(seen: &str, tag: &str) -> bool {
+    seen.split(',')
+        .map(|t| t.trim().trim_start_matches("W/"))
+        .any(|t| t == tag || t == "*")
 }
 
 /// A file of the client's, never outside its root: no `..`, no hidden names.
@@ -1609,6 +1664,25 @@ pub fn vault_state<R: Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_clients_files_but_not_its_pages_are_tagged_for_this_launch_alone() {
+        let js = "_clients/photos/_next/static/chunks/a1b2.js";
+        let t = tag(js).unwrap();
+        assert_eq!(tag(js), Some(t.clone()));
+        assert_ne!(
+            tag("_clients/photos/_next/static/chunks/c3d4.js"),
+            Some(t.clone())
+        );
+        assert_eq!(tag("_clients/photos/index.html"), None);
+        assert_eq!(tag("_clients/photos/gallery.HTML"), None);
+        assert_eq!(tag("_clients/photos/gallery"), None);
+        assert!(matches(&t, &t));
+        assert!(matches(&format!("\"x\", W/{t}"), &t));
+        assert!(matches("*", &t));
+        assert!(!matches("\"x\"", &t));
+        assert!(!matches("", &t));
+    }
 
     fn sha(b: &[u8]) -> String {
         use sha2::Digest as _;
