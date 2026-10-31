@@ -124,6 +124,14 @@ pub(crate) fn domain_meta() -> String {
 /// 200 and HTML: a missing script or stylesheet on a page in a browser was
 /// the app's sign-in screen instead of a 404.
 pub(crate) fn carried<R: Runtime>(app: &AppHandle<R>, path: &str) -> Option<tauri::Asset> {
+    if !carries(app, path) {
+        return None;
+    }
+    app.asset_resolver().get(path.to_string())
+}
+
+/// whether the app carries it, without opening it
+pub(crate) fn carries<R: Runtime>(app: &AppHandle<R>, path: &str) -> bool {
     static KEYS: std::sync::OnceLock<std::collections::HashSet<String>> =
         std::sync::OnceLock::new();
     let keys = KEYS.get_or_init(|| {
@@ -132,10 +140,7 @@ pub(crate) fn carried<R: Runtime>(app: &AppHandle<R>, path: &str) -> Option<taur
             .map(|(k, _)| k.trim_start_matches('/').to_string())
             .collect()
     });
-    if !keys.contains(path.trim_start_matches('/')) {
-        return None;
-    }
-    app.asset_resolver().get(path.to_string())
+    keys.contains(path.trim_start_matches('/'))
 }
 
 /// One of the app's own pages, with the launch secret in it

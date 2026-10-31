@@ -264,6 +264,15 @@ the app's Photos page (its window, or a      the app                    gate / m
   the member's browser. What it is handed is in no address, so no history
   keeps it. That copy asks the gate's `/_dd/` routes with the device's
   token, and talks to museum (`api.<domain>`) and S3 directly.
+- Its files (and the web vault's) are served `no-cache`. Every file but a
+  page carries an ETag, so a new tab asks again and gets a bodiless 304
+  instead of the client's 9 MB (`tag` in local.rs). The tag is keyed with
+  the launch secret, so it changes each launch. They are deliberately not
+  `immutable`: a program that held the port while the app was down could
+  leave its own copy of a chunk in the browser's cache, under the real
+  name, and the app's pages would run it later with the keys in them. A
+  tag that program cannot know makes the browser take the app's copy
+  again.
 
 ### Our pages
 
