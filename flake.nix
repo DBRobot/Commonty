@@ -1725,6 +1725,8 @@
           "android-sdk"
           "appRelease"
           "pi"
+          # a set of every crate's checks, not a package (legacyPackages.rustChecks)
+          "crateChecks"
         ]
         // {
           # `dd secret run` falls back to this when sops is not on PATH. The
