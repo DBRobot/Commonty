@@ -60,6 +60,7 @@ in
     })
     ./home-network.nix
     (import ./capability.nix dir)
+    ./forget-owner.nix
     ../storage/store.nix
     ../storage/postgres-follow.nix
     ./net-hardware.nix

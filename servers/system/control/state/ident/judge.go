@@ -61,6 +61,12 @@ type Said struct {
 	Agreed uint64          `json:"agreed"`
 }
 
+// Unenlisted is a box its member's root took off their boxes, and when
+type Unenlisted struct {
+	Member string `json:"member"`
+	At     uint64 `json:"at"`
+}
+
 // Enlisted is a box a member's root named as theirs, with the ticket it
 // joined with
 type Enlisted struct {
@@ -109,7 +115,10 @@ type State struct {
 	Said      map[string]*Said           `json:"said,omitempty"`
 	Handovers map[string][]Handover      `json:"handovers,omitempty"`
 	Enlisted  map[string]*Enlisted       `json:"enlisted,omitempty"`
-	Joins     map[string]*Join           `json:"joins,omitempty"`
+	// box -> the last member to take it off their boxes: what may be removed
+	// of theirs there goes by this (View's Ended), never by a box being unlisted
+	Unenlisted map[string]*Unenlisted `json:"unenlisted,omitempty"`
+	Joins      map[string]*Join       `json:"joins,omitempty"`
 	// ticket id -> the box it enlisted: a ticket is used once, for good
 	Tickets  map[string]string     `json:"tickets,omitempty"`
 	Extended map[string]*Extension `json:"extended,omitempty"`
@@ -146,6 +155,9 @@ func (s *State) UnmarshalJSON(b []byte) error {
 	}
 	if s.Enlisted == nil {
 		s.Enlisted = map[string]*Enlisted{}
+	}
+	if s.Unenlisted == nil {
+		s.Unenlisted = map[string]*Unenlisted{}
 	}
 	if s.BoxAt == nil {
 		s.BoxAt = map[string]uint64{}
@@ -195,7 +207,8 @@ func New() *State {
 	return &State{
 		Entries: map[string]*Held{}, Invites: map[string]json.RawMessage{}, Acks: map[string][]string{},
 		Said: map[string]*Said{}, Handovers: map[string][]Handover{}, Enlisted: map[string]*Enlisted{},
-		BoxAt: map[string]uint64{}, Outcomes: map[string]string{}, Joins: map[string]*Join{},
+		Unenlisted: map[string]*Unenlisted{},
+		BoxAt:      map[string]uint64{}, Outcomes: map[string]string{}, Joins: map[string]*Join{},
 		Tickets: map[string]string{}, Extended: map[string]*Extension{},
 	}
 }
@@ -771,6 +784,7 @@ func (s *State) enlist(cfg *Config, env Envelope, body []byte, raw json.RawMessa
 			return errors.New("that box is not theirs")
 		}
 		delete(s.Enlisted, e.Box)
+		s.Unenlisted[e.Box] = &Unenlisted{Member: name, At: at}
 		s.BoxAt[e.Box] = e.At
 		return nil
 	}
@@ -808,6 +822,7 @@ func (s *State) enlist(cfg *Config, env Envelope, body []byte, raw json.RawMessa
 		return fmt.Errorf("refused: that ticket enlisted %s already", b)
 	}
 	s.Enlisted[e.Box] = &Enlisted{Member: name, ID: e.Member, Box: e.Box, Key: j.Key, Ticket: t.ID, Since: at, Item: raw}
+	delete(s.Unenlisted, e.Box)
 	s.Tickets[t.ID] = e.Box
 	s.BoxAt[e.Box] = e.At
 	return nil
