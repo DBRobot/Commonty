@@ -100,7 +100,11 @@ box installer (full screen)        fleet
   ([`state/ident`](../../servers/system/control/state/ident/judge.go))
   takes it only if the box's ticket is the member's: signed by a device in
   their entry, for them, not expired, never used. Once enlisted, the
-  ticket is used for good. A box is one member's at a time. Every gate
+  ticket is used for good. A ticket past its week enlists nothing, and no
+  later ticket can claim the box: the installer refuses a drive whose
+  ticket has run out before wiping, and a box whose ticket runs out after
+  it joined stays a stranger until it is imaged again. A box is one
+  member's at a time. Every gate
   reads whose each box is from the agreed state's `enlisted`
   ([`member_boxes.rs`](../../servers/gate/src/member_boxes.rs)), with the
   ticket it was enlisted with; a ticket alone makes a box no one's. A box
@@ -364,9 +368,12 @@ on loopback, which runs the installer's own programs:
 
 ```
 firmware   UEFI, TPM 2.0, Secure Boot in setup mode, disks seen (not behind RAID/RST),
-           virtualisation. What the firmware lets Linux change (Dell, Lenovo,
-           HP, no BIOS password) it changes and restarts; the rest it says
-           where to change. Power-on after an outage can't be read: a tip.
+           virtualisation, the minimum's threads and memory (a disk below
+           its 128 GB can't be chosen), the drive's ticket not expired: all
+           before anything is wiped. What the firmware lets Linux change
+           (Dell, Lenovo, HP, no BIOS password) it changes and restarts; the
+           rest it says where to change. Power-on after an outage can't be
+           read: a tip.
 network    a cable, else the drive's Wi-Fi, else a network picked here
 disk       internal, not removable, nothing of it mounted
 back up    optional: dd-box-backup (backup.sh)

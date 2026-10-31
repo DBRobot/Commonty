@@ -117,6 +117,16 @@ assert not c["checks"]["secure_boot"] and not c["checks"]["raid"], c
 assert c["checks"]["setup_mode"], c
 assert c["firmware"]["driver"] is None and c["firmware"]["change"] == [], c
 assert c["drive"]["ticket"] and c["drive"]["backupKey"], c
+assert c["missing"] == [], c
+assert not c["drive"]["expired"], c
+
+# a disk below the hardware minimum is said to be, and never installed to
+small = [d["name"] for d in api("disks")["disks"] if d["small"]]
+assert small == ["/dev/vdc"], small
+blank.fail(
+    f"curl -sf {mine} -H 'content-type: application/json' "
+    '-d \'{"disk": "/dev/vdc"}\' http://127.0.0.1:8090/api/install'
+)
 
 # the disk this machine runs from is never one: named, refused
 out = blank.fail("DISK=/dev/vda dd-join-install 2>&1")

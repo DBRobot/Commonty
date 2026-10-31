@@ -165,6 +165,42 @@ pub fn checks(sys: &Path, dev: &Path) -> Checks {
     }
 }
 
+// The join's own minimum (state/ident/hardware.go, where these are tuned),
+// asked before the disk is wiped rather than after it. Only what is known here
+// and is not asked already: Checks has the TPM and UEFI, the network its step.
+const MIN_THREADS: u64 = 4;
+const MIN_MEM_TOTAL: u64 = 7 << 30;
+pub const MIN_SYSTEM_DISK: u64 = 128_000_000_000;
+
+/// What this machine lacks of the minimum, in the words a refused join uses
+pub fn missing(threads: u64, mem_total: u64) -> Vec<String> {
+    let mut why = Vec::new();
+    if threads < MIN_THREADS {
+        why.push(format!(
+            "{MIN_THREADS} processor threads (it has {threads})"
+        ));
+    }
+    if mem_total < MIN_MEM_TOTAL {
+        why.push(format!(
+            "8 GiB of memory (it has {:.1} GiB)",
+            mem_total as f64 / (1u64 << 30) as f64
+        ));
+    }
+    why
+}
+
+/// MemTotal from /proc/meminfo, in bytes
+pub fn mem_total(meminfo: &str) -> Option<u64> {
+    meminfo
+        .lines()
+        .find_map(|l| l.strip_prefix("MemTotal:"))?
+        .split_whitespace()
+        .next()?
+        .parse::<u64>()
+        .ok()
+        .map(|kb| kb * 1024)
+}
+
 /// The ticket's id (`ticket("<hex>")` in its first block), unverified: the
 /// gate checks the ticket, this only says where its backup goes.
 pub fn ticket_id(ticket: &str) -> Option<String> {
@@ -173,6 +209,17 @@ pub fn ticket_id(ticket: &str) -> Option<String> {
     let i = src.find("ticket(\"")? + 8;
     let id: String = src[i..].chars().take_while(|c| *c != '"').collect();
     (id.len() == 32 && id.bytes().all(|c| c.is_ascii_hexdigit())).then_some(id)
+}
+
+/// When the ticket stops being good, seconds (its `check if time($t), $t <
+/// <n>`), unverified: enough to say so before a disk is wiped for it.
+pub fn ticket_expires(ticket: &str) -> Option<u64> {
+    const CHECK: &str = "check if time($t), $t < ";
+    let b = biscuit_auth::UnverifiedBiscuit::from_base64(ticket.trim()).ok()?;
+    let src = b.print_block_source(0).ok()?;
+    let i = src.find(CHECK)? + CHECK.len();
+    let n: String = src[i..].chars().take_while(char::is_ascii_digit).collect();
+    n.parse().ok()
 }
 
 /// A backup's progress from restic's `--json` lines: done (0..1) and the
@@ -491,6 +538,24 @@ mod tests {
     }
 
     #[test]
+    fn the_minimum_says_what_is_missing() {
+        // an "8 GB" machine, as its MemTotal says: just over
+        assert_eq!(missing(4, 7 << 30), Vec::<String>::new());
+        assert_eq!(
+            missing(2, 4 << 30),
+            [
+                "4 processor threads (it has 2)",
+                "8 GiB of memory (it has 4.0 GiB)"
+            ]
+        );
+        assert_eq!(
+            mem_total("MemFree: 1 kB\nMemTotal:       16384 kB\n"),
+            Some(16 << 20)
+        );
+        assert_eq!(mem_total("nothing"), None);
+    }
+
+    #[test]
     fn a_tickets_id() {
         // as client/auth mint_join_ticket makes one
         let kp = biscuit_auth::KeyPair::new();
@@ -512,5 +577,24 @@ mod tests {
     #[test]
     fn a_ticket_that_is_not_one_has_no_id() {
         assert_eq!(ticket_id("not a ticket"), None);
+        assert_eq!(ticket_expires("not a ticket"), None);
+    }
+
+    #[test]
+    fn when_a_ticket_stops_being_good() {
+        // as client/auth mint_join_ticket makes one
+        let kp = biscuit_auth::KeyPair::new();
+        let t = biscuit_auth::Biscuit::builder()
+            .fact("purpose(\"join\")")
+            .unwrap()
+            .check("check if time($t), $t < 1791800000")
+            .unwrap()
+            .check("check if operation(\"join\")")
+            .unwrap()
+            .build(&kp)
+            .unwrap()
+            .to_base64()
+            .unwrap();
+        assert_eq!(ticket_expires(&t), Some(1791800000));
     }
 }

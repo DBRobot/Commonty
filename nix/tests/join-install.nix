@@ -130,11 +130,13 @@ in
         # its firmware's Secure Boot in setup mode, no keys yet: the box
         # enrolls its own
         virtualisation.useSecureBoot = true;
+        # the hardware minimum, and a second disk below it. Both sparse
         virtualisation.emptyDiskImages = [
-          8192
+          131072
           8192
         ];
-        virtualisation.memorySize = 2048;
+        virtualisation.cores = 4;
+        virtualisation.memorySize = 8192;
         system.extraDependencies = [ installed ];
         environment.systemPackages = [
           pkgs.jq
