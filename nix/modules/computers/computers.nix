@@ -266,6 +266,15 @@ let
   # systemd's idmapped one, nobody's on disk, so root never writes in it).
   # Single use, ten minutes; none, and the guest is simply not on the
   # Commonty network this time.
+  # on a joined box the door goes by whose box the plan picked, whichever
+  ownOnly =
+    if config.dd.box.joined then
+      "true"
+    else
+      lib.removeSuffix "\n" ''
+        [ "$(${pkgs.curl}/bin/curl -fsS --max-time 10 http://127.0.0.1:4195/computers \
+          | ${pkgs.jq}/bin/jq -r --arg id "$id" '.computers[$id].consent // empty')" = own ] || exit 0
+      '';
   netJoin = pkgs.writeShellScript "dd-computer-net" ''
     set -u
     id="$1"
@@ -275,8 +284,7 @@ let
     # always one, so dd-computer@'s credential is there: empty, no key
     (umask 077 && echo '{}' > "$out.new" && ${pkgs.coreutils}/bin/mv "$out.new" "$out")
     # where it may run, as agreed: never what its own directory says
-    [ "$(${pkgs.curl}/bin/curl -fsS --max-time 10 http://127.0.0.1:4195/computers \
-      | ${pkgs.jq}/bin/jq -r --arg id "$id" '.computers[$id].consent // empty')" = own ] || exit 0
+    ${ownOnly}
     export PATH=${
       lib.makeBinPath [
         pkgs.age

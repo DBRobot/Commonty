@@ -1000,3 +1000,25 @@ func TestAComputerOnAJoinedBoxRunsByThePlanAlone(t *testing.T) {
 		t.Fatalf("asked for a lease: %v", *calls)
 	}
 }
+
+func TestTheDoorIsToldOnlyAJoinedHolderWithAnOwner(t *testing.T) {
+	s := state.New()
+	s.Joined = map[string]*state.Joined{"j0": {Key: "k"}, "j1": {Key: "k"}}
+	id := "0123456789abcdef"
+	give := func(box string) place.Plan {
+		return place.Plan{Boxes: map[string][]place.Decision{box: {{Service: "web"}, {Service: place.ComputerService(id)}}}}
+	}
+	owners := map[string]string{"j0": "ann"}
+	if b, o := planHolder(s, give("j0"), owners, id); b != "j0" || o != "ann" {
+		t.Fatalf("%q %q", b, o)
+	}
+	if b, _ := planHolder(s, give("j1"), owners, id); b != "" {
+		t.Fatalf("a box nobody owns: %q", b)
+	}
+	if b, _ := planHolder(s, give("node1"), map[string]string{"node1": "david"}, id); b != "" {
+		t.Fatalf("a box of the release: %q", b)
+	}
+	if b, _ := planHolder(s, give("j0"), owners, "fedcba9876543210"); b != "" {
+		t.Fatalf("another computer: %q", b)
+	}
+}

@@ -1066,6 +1066,9 @@ func main() {
 			return ident.Item{Time: d.Time, Box: d.Box, Item: d.Item, Boxes: d.Boxes}
 		}
 	}
+	// which joined box the plan gives a computer, and whose it is: what the
+	// gate's door hands such a box the computer's key by
+	var joinedHolder func(s *state.State, id string) (box, owner string)
 	// what the fleet would run, from the agreed state now
 	if *placement != "" {
 		raw, err := os.ReadFile(*placement)
@@ -1083,6 +1086,9 @@ func main() {
 				i.Computers = rc.Computers(len(s.Directory), logItem(s), s.Height, s.Time, s.IdentBoxes())
 			}
 			return place.Decide(i, s, cfg.Rules.GoneAfter, boxOwners(ids, s))
+		}
+		joinedHolder = func(s *state.State, id string) (string, string) {
+			return planHolder(s, decide(s), boxOwners(ids, s), id)
 		}
 		placed.limits = cfg.Computers
 		placed.noLeases = *joinKey != ""
@@ -1162,7 +1168,13 @@ func main() {
 			}
 			s := n.State()
 			w.Header().Set("content-type", "application/json")
-			_ = json.NewEncoder(w).Encode(computerLease(s, cfg, id, rc.Computers(len(s.Directory), logItem(s), s.Height, s.Time, s.IdentBoxes())))
+			out := computerLease(s, cfg, id, rc.Computers(len(s.Directory), logItem(s), s.Height, s.Time, s.IdentBoxes()))
+			if joinedHolder != nil {
+				if box, owner := joinedHolder(s, id); box != "" {
+					out["plan"] = map[string]any{"holder": box, "owner": owner}
+				}
+			}
+			_ = json.NewEncoder(w).Encode(out)
 		})
 		http.HandleFunc("/computers", func(w http.ResponseWriter, req *http.Request) {
 			q := req.URL.Query()
@@ -1310,6 +1322,24 @@ func computerLease(s *state.State, cfg *state.Config, id string, cs []*computers
 		}
 	}
 	return out
+}
+
+// planHolder: the joined box this plan gives a computer, and its owner by the
+// same state; none for a computer on a box of the release, which has a lease,
+// or on a box nobody owns
+func planHolder(s *state.State, plan place.Plan, owners map[string]string, id string) (string, string) {
+	svc := place.ComputerService(id)
+	for box, ds := range plan.Boxes {
+		if _, joined := s.Joined[box]; !joined || owners[box] == "" {
+			continue
+		}
+		for _, d := range ds {
+			if d.Service == svc {
+				return box, owners[box]
+			}
+		}
+	}
+	return "", ""
 }
 
 var joinedName = regexp.MustCompile(`^j[0-9a-f]{10}$`)
