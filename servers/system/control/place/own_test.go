@@ -145,6 +145,12 @@ func TestTheFleetOwnersImagedBoxIsTheirs(t *testing.T) {
 	if runs(p, "jb", "llm") {
 		t.Fatalf("what is theirs on another's box: %+v", p.Boxes["jb"])
 	}
+	// what has a name stays off it, until such a box may serve under the domain
+	in.Joined.Named = []string{"llm"}
+	if p := Decide(in, s, 90_000, map[string]string{"ja": "david"}); runs(p, "ja", "llm") {
+		t.Fatalf("a named service on a joined box: %+v", p.Boxes["ja"])
+	}
+	in.Joined.Named = nil
 	// a writer stays off it: leases are not for such boxes yet
 	sv := in.Services["llm"]
 	sv.Lease = true
