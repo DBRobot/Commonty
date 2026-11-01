@@ -143,6 +143,14 @@ func TestWhatABoxQualifiesByComesFromItsOwnReport(t *testing.T) {
 	}
 }
 
+func TestAGuardedCopyHeldBackIsAFact(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "store-copy.prom")
+	_ = os.WriteFile(f, []byte("dd_store_copy_skipped{bucket=\"backups-node1\",box=\"node2\"} 1\n"), 0o644)
+	if got := promFacts(f); got["store/backups-node1/skipped/node2"] != 1 {
+		t.Fatalf("facts: %v", got)
+	}
+}
+
 func TestOnlyAReleaseThatFailedIsAgentOkZero(t *testing.T) {
 	d := t.TempDir()
 	agent := filepath.Join(d, "dd_agent.prom")
@@ -153,13 +161,5 @@ func TestOnlyAReleaseThatFailedIsAgentOkZero(t *testing.T) {
 		if want < 0 && said || want >= 0 && (!said || v != want) {
 			t.Fatalf("result %q: agent_ok %v (said %v), want %v", result, v, said, want)
 		}
-	}
-}
-
-func TestAGuardedCopyHeldBackIsAFact(t *testing.T) {
-	f := filepath.Join(t.TempDir(), "store-copy.prom")
-	_ = os.WriteFile(f, []byte("dd_store_copy_skipped{bucket=\"backups-node1\",box=\"node2\"} 1\n"), 0o644)
-	if got := promFacts(f); got["store/backups-node1/skipped/node2"] != 1 {
-		t.Fatalf("facts: %v", got)
 	}
 }

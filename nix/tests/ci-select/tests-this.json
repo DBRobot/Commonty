@@ -29,6 +29,7 @@
   "metrics-ui",
   "thanos",
   "backup",
+  "computer-backup",
   "release",
   "store",
   "takeover",
@@ -58,7 +59,6 @@
   "waits",
   "switch-race",
   "work-memory",
-  "computer-backup",
   "site-journeys",
   "rollout",
   "placed",
@@ -95,6 +95,24 @@
    "client/mail/worker/identity.js": "copied into the dns-worker package and imported at load"
   },
   "notes": "dns-worker package also bundles client/mail compiled to wasm (dd_mail.wasm via controller.js); only needed for the Worker to load, not on the acme path, so client/mail/src/** left out. flake.nix dns-worker derivation is wiring (shared).",
+  "family": "vm"
+ },
+ "computer-backup": {
+  "paths": [
+   "nix/tests/computer-backup.nix",
+   "nix/tests/computer-backup.py",
+   "nix/modules/computers/backup.nix",
+   "nix/modules/storage/backup.nix",
+   "nix/modules/storage/store.nix"
+  ],
+  "why": {
+   "nix/tests/computer-backup.nix": "test",
+   "nix/tests/computer-backup.py": "test",
+   "nix/modules/computers/backup.nix": "the nightly unit, its snapshot, its room check",
+   "nix/modules/storage/backup.nix": "newRepoGuard, the password and key it shares",
+   "nix/modules/storage/store.nix": "the bucket it writes"
+  },
+  "notes": "The copy's guard is in the store test.",
   "family": "vm"
  },
  "console": {
@@ -1222,24 +1240,6 @@
    "nix/modules/box/logins.nix": "admin linger (user@1000 survives logins); the fix under test"
   },
   "notes": "Behaviour mostly lives in nixpkgs switch-to-configuration/logind (flake.lock, shared).",
-  "family": "vm"
- },
- "computer-backup": {
-  "paths": [
-   "nix/tests/computer-backup.nix",
-   "nix/tests/computer-backup.py",
-   "nix/modules/computers/backup.nix",
-   "nix/modules/storage/backup.nix",
-   "nix/modules/storage/store.nix"
-  ],
-  "why": {
-   "nix/tests/computer-backup.nix": "test",
-   "nix/tests/computer-backup.py": "test",
-   "nix/modules/computers/backup.nix": "the nightly unit, its snapshot, its room check",
-   "nix/modules/storage/backup.nix": "newRepoGuard, the password and key it shares",
-   "nix/modules/storage/store.nix": "the bucket it writes"
-  },
-  "notes": "The copy's guard is in the store test.",
   "family": "vm"
  },
  "work-memory": {
