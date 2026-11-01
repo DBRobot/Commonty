@@ -755,10 +755,12 @@
                   members = builtins.fromJSON (builtins.readFile ./fleet/members.json);
                   admin = (builtins.fromJSON (builtins.readFile ./fleet/policy.json)).owner;
                   # identity::ROOT_PAGES, on the fleet's domain
-                  root_pages = map (p: "https://${p}.${(builtins.fromJSON (builtins.readFile ./fleet/policy.json)).domain}") [
-                    "home"
-                    "compute"
-                  ];
+                  root_pages =
+                    map (p: "https://${p}.${(builtins.fromJSON (builtins.readFile ./fleet/policy.json)).domain}")
+                      [
+                        "home"
+                        "compute"
+                      ];
                 };
                 # what members' remote computers may take, and their ports'
                 # pool (state/computers): fleet/policy.json computers
