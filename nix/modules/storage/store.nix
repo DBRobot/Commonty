@@ -204,12 +204,6 @@ let
       # node2's every 30 s was 15000 requests at node1 to copy nothing
       # (2026-10-24). The store's own time, from the listing, asks none.
       if [ "$MODE" = all ]; then recent=""; else recent="--max-age 15m --use-server-modtime"; fi
-      # the plan's copies: kept, so a restart copies on as last agreed
-      if [ -s ${plan} ] && jq -e 'type == "object"' ${plan} >/dev/null 2>&1; then
-        # a name of this mode's own: the other mode's run, side by side, moved a
-        # shared one away first and this one's mv failed the unit
-        cp ${plan} $mine/copies.json.$MODE && mv $mine/copies.json.$MODE $mine/copies.json
-      fi
       ${lib.optionalString cfg.copyDeletes ''
         # a box's own bucket alone: no other box ever writes it
         own() {
@@ -237,6 +231,12 @@ let
           }
         }
       ''}
+      # the plan's copies: kept, so a restart copies on as last agreed
+      if [ -s ${plan} ] && jq -e 'type == "object"' ${plan} >/dev/null 2>&1; then
+        # a name of this mode's own: the other mode's run, side by side, moved a
+        # shared one away first and this one's mv failed the unit
+        cp ${plan} $mine/copies.json.$MODE && mv $mine/copies.json.$MODE $mine/copies.json
+      fi
       # the other boxes that keep a bucket
       targets() {
         if [ -s $mine/copies.json ]; then
@@ -342,8 +342,15 @@ let
               if [ "$MODE" = all ] && own $b; then
                 may_delete "$p" $b && {
                   echo "$p: what $b no longer holds here goes from there too, after ${cfg.copyDeleteAfter}"
-                  bounded rclone sync --checksum --s3-no-check-bucket --fast-list \
-                    --use-server-modtime --min-age ${cfg.copyDeleteAfter} --delete-before "here:$b" "there:$b"
+                  # what is there and not here: this moves nothing, so it
+                  # sends nothing past a guard on what may be sent
+                  gone=$(mktemp)
+                  comm -13 <(rclone lsf -R --files-only --fast-list "here:$b" | LC_ALL=C sort) \
+                    <(rclone lsf -R --files-only --fast-list "there:$b" | LC_ALL=C sort) > "$gone"
+                  if [ -s "$gone" ]; then
+                    bounded rclone delete --s3-no-check-bucket --use-server-modtime --min-age ${cfg.copyDeleteAfter} --files-from "$gone" "there:$b"
+                  fi
+                  rm -f "$gone"
                 } || echo "$p: nothing of $b is deleted there this time"
               fi
             ''}
