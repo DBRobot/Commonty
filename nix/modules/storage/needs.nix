@@ -174,6 +174,7 @@
       "dd-store-facts"
       "dd-store-at" # keys to the shared buckets, at the stores that keep them
       "dd-store-joined" # keys for the boxes that joined on their own keys
+      "dd-store-grants" # with copyDeletes: who may write which copy here
     ];
     base = {
       # node1, 2026-10-11: a fresh garage of one

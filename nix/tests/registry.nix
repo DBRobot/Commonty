@@ -40,6 +40,7 @@
     "waits"
     "switch-race"
     "work-memory"
+    "copy-deletes"
     "runner-restart"
     "cache-upload"
     "cache-front"

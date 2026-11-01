@@ -58,6 +58,7 @@
   "waits",
   "switch-race",
   "work-memory",
+  "copy-deletes",
   "site-journeys",
   "rollout",
   "placed",
@@ -1221,6 +1222,20 @@
    "nix/modules/box/logins.nix": "admin linger (user@1000 survives logins); the fix under test"
   },
   "notes": "Behaviour mostly lives in nixpkgs switch-to-configuration/logind (flake.lock, shared).",
+  "family": "vm"
+ },
+ "copy-deletes": {
+  "paths": [
+   "nix/tests/copy-deletes.nix",
+   "nix/tests/copy-deletes.py",
+   "nix/modules/storage/store.nix"
+  ],
+  "why": {
+   "nix/tests/copy-deletes.nix": "test",
+   "nix/tests/copy-deletes.py": "test",
+   "nix/modules/storage/store.nix": "dd-store-grants, and the copier's prune"
+  },
+  "notes": "A stand-in answers for dd-control's /plan and /state.",
   "family": "vm"
  },
  "work-memory": {

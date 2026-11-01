@@ -96,6 +96,8 @@ let
   # every bucket a peer's key here is allowed: its copies, and what it writes here
   peerBuckets = lib.unique (copied ++ sharedHere);
   homed = lib.filterAttrs (_: b: b.shared && b.home != null) cfg.buckets;
+  # with copyDeletes a peer writes only what dd-store-grants says it does
+  writeGrant = lib.optionalString (!cfg.copyDeletes) "--write";
   # the plan, as dd-control writes it, and the last one this box saw
   plan = "/run/dd-placed/copies.json";
   # a placed service's bucket is written where the service runs; another's,
@@ -208,6 +210,33 @@ let
         # shared one away first and this one's mv failed the unit
         cp ${plan} $mine/copies.json.$MODE && mv $mine/copies.json.$MODE $mine/copies.json
       fi
+      ${lib.optionalString cfg.copyDeletes ''
+        # a box's own bucket alone: no other box ever writes it
+        own() {
+          case "$1" in
+          ${lib.concatStrings (
+            lib.mapAttrsToList (b: _: "  ${b}) true ;;\n") (lib.filterAttrs (_: v: v.writer == box) cfg.buckets)
+          )}
+          *) false ;;
+          esac
+        }
+        # only on the plan's say that this store keeps it, from an agreed
+        # state read now, and never from a bucket that has lost most of what
+        # it held: a store that came back empty deletes nothing
+        may_delete() {
+          local st plan t have sent
+          st=$(curl -fsS --max-time 10 ${cfg.control}/state) || return 1
+          plan=$(curl -fsS --max-time 10 ${cfg.control}/plan) || return 1
+          t=$(jq -r '.time // 0 | floor' <<<"$st") || return 1
+          [ $(($(date +%s) - t / 1000)) -lt 600 ] || { echo "the agreed state is old"; return 1; }
+          jq -e --arg b "$2" --arg p "$1" '(.copies[$b] // []) | index($p) != null' <<<"$plan" >/dev/null || return 1
+          have=$(rclone size --json "here:$2" | jq -r '.bytes') && sent=$(rclone size --json "there:$2" | jq -r '.bytes') || return 1
+          [ -n "$have" ] && [ -n "$sent" ] && [ "$have" -gt 0 ] && [ $((have * 4)) -ge "$sent" ] || {
+            echo "$2 holds $have bytes here and $sent there: that is no prune"
+            return 1
+          }
+        }
+      ''}
       # the other boxes that keep a bucket
       targets() {
         if [ -s $mine/copies.json ]; then
@@ -309,6 +338,15 @@ let
                 fi
               fi
             fi
+            ${lib.optionalString cfg.copyDeletes ''
+              if [ "$MODE" = all ] && own $b; then
+                may_delete "$p" $b && {
+                  echo "$p: what $b no longer holds here goes from there too, after ${cfg.copyDeleteAfter}"
+                  bounded rclone sync --checksum --s3-no-check-bucket --fast-list \
+                    --use-server-modtime --min-age ${cfg.copyDeleteAfter} --delete-before "here:$b" "there:$b"
+                } || echo "$p: nothing of $b is deleted there this time"
+              fi
+            ''}
             # copy, never sync: nothing is deleted there
             bounded rclone copy --checksum --s3-no-check-bucket --fast-list $recent "here:$b" "there:$b"
           ) && { [ "$MODE" != all ] || date +%s > $mine/$p.$b.ok; } || { echo "$p: $b not copied this time"; failed=1; }
@@ -429,6 +467,17 @@ in
         }
       );
       default = { };
+    };
+    copyDeletes = lib.mkOption {
+      type = lib.types.bool;
+      # David has not decided (docs/dev/storage.md)
+      default = false;
+      description = "What a box prunes from its own bucket goes from its copies too, on the plan's and the agreed state's say, and a peer's key writes (so deletes) only the buckets the plan or an agreed lease says it writes.";
+    };
+    copyDeleteAfter = lib.mkOption {
+      type = lib.types.str;
+      default = "1d";
+      description = "how old an object must be before a prune reaches its copies";
     };
     boxes = lib.mkOption {
       type = lib.types.listOf lib.types.str;
@@ -616,8 +665,13 @@ in
             id=$(awk -F= '/ACCESS_KEY_ID/ { print $2 }' ${state}/from/${p}.env)
             # its copies, and the shared buckets it writes here
             for b in ${lib.concatStringsSep " " peerBuckets}; do
-              g bucket allow --read --write "$b" --key "$id" >/dev/null
+              g bucket allow --read ${writeGrant} "$b" --key "$id" >/dev/null
             done
+            ${lib.optionalString cfg.copyDeletes ''
+              for b in ${lib.concatStringsSep " " sharedHere}; do
+                g bucket allow --write "$b" --key "$id" >/dev/null
+              done
+            ''}
             age -r ${lib.escapeShellArg v.recipient} -o ${sealed}/${p}.age.new ${state}/from/${p}.env
             chmod 0444 ${sealed}/${p}.age.new
             mv ${sealed}/${p}.age.new ${sealed}/${p}.age
@@ -751,7 +805,7 @@ in
           key peer-$p > ${state}/from/$p.env
           id=$(awk -F= '/ACCESS_KEY_ID/ { print $2 }' ${state}/from/$p.env)
           for b in ${lib.concatStringsSep " " copied}; do
-            g bucket allow --read --write "$b" --key "$id" >/dev/null
+            g bucket allow --read ${writeGrant} "$b" --key "$id" >/dev/null
           done
           if age -r "$recipient" -o ${sealed}/$p.age.new ${state}/from/$p.env; then
             chmod 0444 ${sealed}/$p.age.new
@@ -778,6 +832,73 @@ in
       timerConfig = {
         OnActiveSec = "2min";
         OnUnitActiveSec = "5min";
+      };
+    };
+
+    # With copyDeletes: a write key here can delete, so each peer's writes only
+    # what is its to write. A box's own bucket: that box's. A placed service's:
+    # the box the plan gives it or its agreed lease names, the box in the middle
+    # of handing it on too. Any other stays as it was. On no fresh word, nothing
+    # changes: a stale box neither grants nor takes away.
+    systemd.services.dd-store-grants = lib.mkIf cfg.copyDeletes {
+      description = "Which boxes may write which copies here, by the plan and the agreed state";
+      after = [ "dd-store-setup.service" ];
+      restartIfChanged = false;
+      path = [
+        pkgs.coreutils
+        pkgs.gawk
+        pkgs.curl
+        pkgs.jq
+      ];
+      serviceConfig.Type = "oneshot";
+      script = ''
+        set -uo pipefail
+        g() { ${garage} "$@"; }
+        g status >/dev/null 2>&1 || exit 0
+        st=$(curl -fsS --max-time 10 ${cfg.control}/state) || { echo "no agreed state: nothing changes"; exit 0; }
+        plan=$(curl -fsS --max-time 10 ${cfg.control}/plan) || { echo "no plan: nothing changes"; exit 0; }
+        t=$(jq -r '.time // 0 | floor' <<<"$st")
+        [ $(($(date +%s) - t / 1000)) -lt 600 ] || { echo "the agreed state is old: nothing changes"; exit 0; }
+        runs() { # box service: the plan's word, or the lease's
+          jq -e --arg p "$1" --arg s "$2" '[.boxes[$p][]?.service] | index($s) != null' <<<"$plan" >/dev/null \
+            || jq -e --arg p "$1" --arg s "svc/$2" '.leases[$s].holder == $p' <<<"$st" >/dev/null
+        }
+        may() { # box bucket
+          case "$2" in
+          ${lib.concatStrings (
+            lib.mapAttrsToList (
+              b: v:
+              if v.writer != null then
+                "  ${b}) [ \"$1\" = ${v.writer} ] ;;\n"
+              else if v.service != null && placedSvc v.service then
+                "  ${b}) runs \"$1\" ${v.service} ;;\n"
+              else
+                "  ${b}) true ;;\n"
+            ) (lib.filterAttrs (b: _: lib.elem b copied) cfg.buckets)
+          )}
+          *) false ;;
+          esac
+        }
+        for f in ${state}/from/*.env; do
+          [ -e "$f" ] || continue
+          p=$(basename "$f" .env)
+          id=$(awk -F= '/ACCESS_KEY_ID/ { print $2 }' "$f")
+          for b in ${lib.concatStringsSep " " copied}; do
+            if may "$p" "$b"; then
+              g bucket allow --write "$b" --key "$id" >/dev/null
+            else
+              g bucket deny --write "$b" --key "$id" >/dev/null
+            fi
+          done
+        done
+        exit 0
+      '';
+    };
+    systemd.timers.dd-store-grants = lib.mkIf cfg.copyDeletes {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnActiveSec = "2min";
+        OnUnitActiveSec = "1min";
       };
     };
 

@@ -41,7 +41,14 @@ until the other is back.
   it is already, then on the boxes whose stores have the most room, and
   only where it fits. Until a plan has been seen, the first boxes by name.
   A copy is added to, never pruned: what is deleted here stays there.
-  Deletes reaching the copies is a decision still to make.
+  Deletes reaching the copies is a decision still to make; the code for it
+  is there and off (`dd.store.copyDeletes`). On, a box's own bucket alone is
+  pruned on its copies, a day after, on the plan's word that the store keeps
+  it, from an agreed state read now, and never from a bucket that lost most of
+  what it held. And a peer's key, which can delete whatever it can write, then
+  writes only what is its: its own bucket, or a service the plan or an agreed
+  lease gives it (`dd-store-grants`). Today, off, any box's key at a store can
+  delete any copy there.
 - **Whose a bucket is**: most are written where their service runs. A
   box's own (its backup, `backups-<box>`) is written by that box alone,
   wherever it is kept, and only that box copies it out; so are the
