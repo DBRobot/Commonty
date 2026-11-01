@@ -468,17 +468,6 @@ in
       );
       default = { };
     };
-    copyDeletes = lib.mkOption {
-      type = lib.types.bool;
-      # David has not decided (docs/dev/storage.md)
-      default = false;
-      description = "What a box prunes from its own bucket goes from its copies too, on the plan's and the agreed state's say, and a peer's key writes (so deletes) only the buckets the plan or an agreed lease says it writes.";
-    };
-    copyDeleteAfter = lib.mkOption {
-      type = lib.types.str;
-      default = "1d";
-      description = "how old an object must be before a prune reaches its copies";
-    };
     boxes = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ box ];
@@ -501,6 +490,17 @@ in
         envFile = "${state}/at/${b}.env";
       }) homed;
       description = "where this box reaches each shared bucket, and the file with its key there (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY), readable by the bucket's owner";
+    };
+    copyDeletes = lib.mkOption {
+      type = lib.types.bool;
+      # David has not decided (docs/dev/storage.md)
+      default = false;
+      description = "What a box prunes from its own bucket goes from its copies too, on the plan's and the agreed state's say, and a peer's key writes (so deletes) only the buckets the plan or an agreed lease says it writes.";
+    };
+    copyDeleteAfter = lib.mkOption {
+      type = lib.types.str;
+      default = "1d";
+      description = "how old an object must be before a prune reaches its copies";
     };
     handover = lib.mkOption {
       type = lib.types.attrsOf (lib.types.listOf lib.types.str);
