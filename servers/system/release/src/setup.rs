@@ -298,7 +298,9 @@ impl Build {
     pub fn share(&self) -> f64 {
         const WEIGHT: u64 = 20;
         let all = self.to_build * WEIGHT + self.to_fetch;
-        if all == 0 {
+        // what it fetches to evaluate comes first, a path or two of them: not
+        // the work, whose size nix does not know yet
+        if self.to_build == 0 && self.to_fetch < 20 {
             return 0.0;
         }
         ((self.built * WEIGHT + self.fetched) as f64 / all as f64).min(1.0)
@@ -529,6 +531,13 @@ mod tests {
     #[test]
     fn an_installs_share_and_what_is_left() {
         assert_eq!(Build::default().share(), 0.0);
+        // one path of the evaluation's, all done, is not the install nearly over
+        let eval = Build {
+            fetched: 1,
+            to_fetch: 1,
+            ..Build::default()
+        };
+        assert_eq!(eval.share(), 0.0);
         assert_eq!(install_share(0, 0.0), 0.0);
         assert_eq!(install_share(3, 1.0), 0.9);
         assert!(install_share(5, 0.0) < 1.0);

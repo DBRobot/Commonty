@@ -29,6 +29,13 @@ web = subprocess.Popen(
     stderr=subprocess.DEVNULL,
 )
 atexit.register(web.kill)
+if os.environ.get("JOIN_REAL_CACHE"):
+    cache = subprocess.Popen(
+        [nix["nixServe"], "--listen", "127.0.0.1:8081"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    atexit.register(cache.kill)
 # this run's own, not one a run before it left on the port
 want = Path(nix["fleet"], "release.pub").read_bytes()
 for _ in range(100):
@@ -159,6 +166,14 @@ while True:
         shown = now
         print(
             f"after {int(now - began)}s: {j['done']:.3f} eta={j['eta']} {b}", flush=True
+        )
+        # what it is doing, for when it does not move
+        print(
+            box.succeed(
+                "{ ps -eo pcpu,rss,etimes,args --sort=-pcpu | head -6 | cut -c1-300; "
+                "free -m; df -m /tmp /mnt; } 2>&1 || true"
+            ),
+            flush=True,
         )
     if j["state"] != "running":
         break

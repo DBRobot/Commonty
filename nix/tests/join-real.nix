@@ -11,6 +11,8 @@
 # outside the build sandbox, and is not one of CI's:
 #   nix build .#checks.x86_64-linux.join-real.driver
 #   JOIN_REAL_MINUTES=720 out=$(mktemp -d) result/bin/nixos-test-driver
+# With JOIN_REAL_CACHE=1 the VM also substitutes from this machine's store: only
+# what its own report changes is built, minutes instead of the hours.
 {
   pkgs,
   lib,
@@ -93,6 +95,10 @@ let
         ../installer/image.nix
         shell
         {
+          # JOIN_REAL_CACHE (join-real.py): this machine's own store, to prove
+          # the path without the hours. Nothing answers there otherwise
+          nix.settings.extra-substituters = [ "http://10.0.2.2:8081" ];
+          nix.settings.require-sigs = false;
           environment.etc."dd/test-release.pub".source = "${fleet}/release.pub";
           environment.variables = lib.mkForce {
             RELEASE_URL = "${server}/release/current.json";
@@ -114,6 +120,8 @@ in
 {
   name = "join-real";
   nodes = { };
+  # a real box's install is hours; the test's own bound is JOIN_REAL_MINUTES
+  globalTimeout = 16 * 3600;
   # 8 GB and 4 threads: what the hardware minimum lets through
   scriptEnv = {
     inherit fleet ticketId;
@@ -127,6 +135,7 @@ in
     swtpm = "${pkgs.swtpm}/bin/swtpm";
     zstd = "${pkgs.zstd}/bin/zstd";
     python = "${pkgs.python3}/bin/python3";
+    nixServe = "${pkgs.nix-serve}/bin/nix-serve";
     git = "${pkgs.git}/bin/git";
   };
 }
