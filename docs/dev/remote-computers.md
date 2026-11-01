@@ -18,7 +18,10 @@ are not built yet (below, Open).
 A member's computer goes on a joined box they enlisted first, when one has
 room; a member with none is hosted as before. One whose owner said anyone's
 goes on another member's box only when the release's have no room. On a joined
-box it runs by the plan alone, with no lease.
+box it runs by the plan alone, with no lease. It gets its Commonty network key
+at the same door, which takes the box's keys from the agreed state and hands
+one only to the box the plan at that state gives the computer, when that box
+is the computer's owner's; on another member's box it has the internet only.
 
 A box hosts computers when its own report says it has KVM on x86_64 and
 its owner does not bar them: it is then built with the `compute` bundle
