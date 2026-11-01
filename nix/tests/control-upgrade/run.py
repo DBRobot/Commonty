@@ -5,7 +5,8 @@
 # wait is measured and bounded), every box at a height holds the same
 # state as every other there, old and new alike, and svc/db stays with its
 # holder at its epoch. Release 359's config has no rule for svc/next and
-# this one's has: it is granted only once version 2 is agreed, and that is
+# this one's has: it is granted only once version 2 (or a later one this
+# release runs) is agreed, and that is
 # only once every validator and every live box runs this release.
 #
 # SCENARIO=together is release 360's switch of 2026-10-24 instead: the
@@ -490,7 +491,7 @@ class Fleet:
             s["height"]
             for _, _, _, s in self.samples
             if any((s.get("leases") or {}).get(f"svc/{w}") for w in WRITERS)
-            and s.get("machine") != 2
+            and (s.get("machine") or 1) < 2
         ]
         ok(
             not early,
@@ -785,7 +786,7 @@ class Fleet:
             )
         wait(
             f"{self.name}: version 2 agreed",
-            lambda: all(self.state(i).get("machine") == 2 for i in (1, 2, 3)),
+            lambda: all((self.state(i).get("machine") or 1) >= 2 for i in (1, 2, 3)),
         )
         nxt = lambda: self.state(1).get("leases", {}).get("svc/next") or {}
         wait(
@@ -841,7 +842,7 @@ class Fleet:
         early = [
             s["height"]
             for _, _, _, s in self.samples
-            if s.get("leases", {}).get("svc/next") and s.get("machine") != 2
+            if s.get("leases", {}).get("svc/next") and (s.get("machine") or 1) < 2
         ]
         ok(
             not early,
@@ -851,7 +852,8 @@ class Fleet:
         first2 = min(before2) if before2 else None
         last_switch = phases[-1][1]
         at2 = min(
-            (t for t, _, _, s in self.samples if s.get("machine") == 2), default=None
+            (t for t, _, _, s in self.samples if (s.get("machine") or 1) >= 2),
+            default=None,
         )
         ok(
             at2 is not None and at2 >= last_switch,
