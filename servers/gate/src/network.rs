@@ -1188,16 +1188,19 @@ pub(crate) struct ComputerAsk {
 /// box's secrets key.
 ///
 /// `snap`: the computer and its lease from one agreed state (dd-control's
-/// /computer-lease), Err when it could not be read.
+/// /computer-lease), Err when it could not be read. `joined`: a box the
+/// release does not list, as the agreed state has it.
 pub(crate) async fn computer_key(
     door: &Door,
     ask: &ComputerAsk,
     now: u64,
     snap: Result<Snapshot, ()>,
+    joined: Option<&BoxKeys>,
 ) -> Result<String, (StatusCode, String)> {
     let keys = door
         .boxes
         .get(&ask.name)
+        .or(joined)
         .ok_or((StatusCode::FORBIDDEN, "not a box of this fleet".into()))?;
     if ask.id.len() != 16
         || !ask
@@ -1312,6 +1315,16 @@ pub(crate) struct Snapshot {
     /// it is a host of computers at all
     #[serde(rename = "hostOwner")]
     host_owner: Option<String>,
+    /// the joined box the plan at that state gives it, and whose that box
+    /// is by that state (a box of the release has a lease instead)
+    plan: Option<SnapPlan>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
+pub(crate) struct SnapPlan {
+    holder: String,
+    owner: String,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -1369,6 +1382,18 @@ fn qualifies(snap: &Snapshot, box_name: &str) -> Result<String, (StatusCode, Str
     };
     if !c.up {
         return no("that computer is not agreed up");
+    }
+    // a box that joined on its own key holds no lease: the plan picked it, and
+    // it is the computer's owner's own, so nothing there reads a key it should
+    // not. Only ever by the plan; its own word, or a lease, count for nothing
+    if joined_name(box_name) {
+        return match &snap.plan {
+            Some(p) if p.holder == box_name && !c.owner.is_empty() && p.owner == c.owner => {
+                Ok(c.owner.clone())
+            }
+            Some(p) if p.holder == box_name => no("that box is not the computer's owner's"),
+            _ => no("the plan does not give that box the computer"),
+        };
     }
     if c.consent != "own" {
         return no("only a computer kept to its owner's own boxes joins the network");
@@ -1442,10 +1467,30 @@ pub(crate) async fn computer_join(
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    match computer_key(door, &ask, now, snap).await {
+    let joined = joined_keys(&app, door, &ask.name).await;
+    match computer_key(door, &ask, now, snap, joined.as_ref()).await {
         Ok(sealed) => sealed.into_response(),
         Err((status, why)) => (status, why).into_response(),
     }
+}
+
+/// A box the release does not list: its keys as the agreed state has them, if
+/// it joined (this box's dd-control)
+async fn joined_keys(app: &App, door: &Door, name: &str) -> Option<BoxKeys> {
+    if door.boxes.contains_key(name) || !joined_name(name) {
+        return None;
+    }
+    let control = app.control.as_ref()?;
+    let st: serde_json::Value = crate::http()
+        .get(format!("{}/state", control.trim_end_matches('/')))
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+    box_keys(name, st["joined"].get(name)?).ok()
 }
 
 #[derive(serde::Deserialize)]
@@ -1465,30 +1510,7 @@ pub(crate) async fn box_join(State(app): State<Arc<App>>, Json(ask): Json<BoxAsk
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    // a box the release does not list: as the agreed state has it, if it
-    // joined (this box's dd-control)
-    let mut joined = None;
-    if !door.boxes.contains_key(&ask.name)
-        && joined_name(&ask.name)
-        && let Some(control) = &app.control
-    {
-        let st: Option<serde_json::Value> = async {
-            crate::http()
-                .get(format!("{}/state", control.trim_end_matches('/')))
-                .timeout(Duration::from_secs(10))
-                .send()
-                .await
-                .ok()?
-                .json()
-                .await
-                .ok()
-        }
-        .await;
-        joined = st
-            .as_ref()
-            .and_then(|s| s["joined"].get(&ask.name))
-            .and_then(|j| box_keys(&ask.name, j).ok());
-    }
+    let joined = joined_keys(&app, door, &ask.name).await;
     match box_key(door, &ask.name, ask.time, &ask.sig, now, joined.as_ref()).await {
         Ok(sealed) => sealed.into_response(),
         Err((code, why)) => (code, why).into_response(),
@@ -2446,11 +2468,11 @@ mod tests {
         // signed by another box, or asked by a box that is not the holder
         let forged = ask(&node2, "node1", now);
         assert_eq!(
-            refused(computer_key(&door, &forged, now, snap(&same)).await),
+            refused(computer_key(&door, &forged, now, snap(&same), None).await),
             StatusCode::FORBIDDEN
         );
         assert_eq!(
-            refused(computer_key(&door, &ask(&node2, "node2", now), now, snap(&same)).await),
+            refused(computer_key(&door, &ask(&node2, "node2", now), now, snap(&same), None).await),
             StatusCode::FORBIDDEN
         );
         for (why, change, code) in [
@@ -2509,14 +2531,16 @@ mod tests {
                 Some(c) => snap(c),
             };
             assert_eq!(
-                refused(computer_key(&door, &a, now, s).await),
+                refused(computer_key(&door, &a, now, s, None).await),
                 code,
                 "{why}"
             );
         }
         assert!(f.made.lock().unwrap().is_empty());
 
-        let sealed = computer_key(&door, &a, now, snap(&same)).await.unwrap();
+        let sealed = computer_key(&door, &a, now, snap(&same), None)
+            .await
+            .unwrap();
         let answer: serde_json::Value =
             serde_json::from_str(sealed.strip_prefix("sealed to age1node1: ").unwrap()).unwrap();
         assert_eq!(answer["key"], "key-41");
@@ -2537,7 +2561,14 @@ mod tests {
         // once a minute
         assert_eq!(
             refused(
-                computer_key(&door, &ask(&node1, "node1", now + 5), now + 5, snap(&same)).await
+                computer_key(
+                    &door,
+                    &ask(&node1, "node1", now + 5),
+                    now + 5,
+                    snap(&same),
+                    None
+                )
+                .await
             ),
             StatusCode::TOO_MANY_REQUESTS
         );
@@ -2551,9 +2582,15 @@ mod tests {
             v["time"] = (later as i64 * 1000).into();
             v["lease"]["expires"] = (later as i64 * 1000 + 10_000).into();
         };
-        computer_key(&door, &ask(&node1, "node1", later), later, snap(&fresh))
-            .await
-            .unwrap();
+        computer_key(
+            &door,
+            &ask(&node1, "node1", later),
+            later,
+            snap(&fresh),
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(*f.deleted.lock().unwrap(), vec!["9".to_string()]);
         // the key before it expired, and no longer bound
         assert_eq!(*f.expired.lock().unwrap(), vec!["41".to_string()]);
@@ -2590,6 +2627,143 @@ mod tests {
     /// A computer's node goes once its computer is not agreed up, or its
     /// owner is no member, or the gate never made its key; it stays while
     /// the computers are unread. Its address is its owner's.
+    #[tokio::test]
+    async fn a_joined_box_gets_a_computers_key_only_if_the_plan_picked_it() {
+        use base64::Engine;
+        use p256::ecdsa::{SigningKey, signature::Signer};
+        use std::os::unix::fs::PermissionsExt;
+
+        let f = Arc::new(Fake::default());
+        let api = fake_headscale(f.clone()).await;
+        let dir = std::env::temp_dir().join(format!("computer-joined-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let age = dir.join("age");
+        std::fs::write(&age, "#!/bin/sh\nprintf 'sealed to %s: ' \"$3\"; cat\n").unwrap();
+        std::fs::set_permissions(&age, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let box_key = SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+        let other = SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+        let node1 = SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+        let mut boxes = HashMap::new();
+        boxes.insert(
+            "node1".to_string(),
+            BoxKeys {
+                signs: *node1.verifying_key(),
+                recipient: "age1node1".into(),
+            },
+        );
+        let door = door_at(api, boxes, age.display().to_string());
+        let keys = BoxKeys {
+            signs: *box_key.verifying_key(),
+            recipient: "age1joined".into(),
+        };
+        let name = "j0123456789";
+        let id = "0123456789abcdef";
+        let ask = |k: &SigningKey, name: &str, t: u64| {
+            let s: Signature = k.sign(&computer_join_message(name, id, t));
+            ComputerAsk {
+                name: name.into(),
+                id: id.into(),
+                time: t,
+                sig: base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(s.to_bytes()),
+            }
+        };
+        let now = 1_790_000_000;
+        let now_ms = now as i64 * 1000;
+        let snap = |f: &dyn Fn(&mut serde_json::Value)| {
+            let mut v = serde_json::json!({
+                "height": 9, "leaseHeight": 9, "time": now_ms - 1000,
+                "computer": { "owner": "ann", "up": true, "consent": "own" },
+                "plan": { "holder": name, "owner": "ann" },
+            });
+            f(&mut v);
+            Ok(serde_json::from_value::<Snapshot>(v).unwrap())
+        };
+        let a = ask(&box_key, name, now);
+        let refused = |r: Result<String, (StatusCode, String)>| r.unwrap_err().0;
+
+        // unknown to the agreed state, or signed by another
+        assert_eq!(
+            refused(computer_key(&door, &a, now, snap(&|_| {}), None).await),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            refused(
+                computer_key(
+                    &door,
+                    &ask(&other, name, now),
+                    now,
+                    snap(&|_| {}),
+                    Some(&keys)
+                )
+                .await
+            ),
+            StatusCode::FORBIDDEN
+        );
+        for (why, change) in [
+            (
+                "the plan picked another",
+                &(|v: &mut serde_json::Value| v["plan"]["holder"] = "j00000000a1".into())
+                    as &dyn Fn(&mut serde_json::Value),
+            ),
+            ("no plan for it", &|v| v["plan"] = serde_json::Value::Null),
+            ("another's box", &|v| v["plan"]["owner"] = "bob".into()),
+            ("nobody's", &|v| v["plan"]["owner"] = "".into()),
+            ("down", &|v| v["computer"]["up"] = false.into()),
+            // a lease, or the release's word, is nothing to a joined box
+            ("a lease alone", &|v| {
+                v["plan"] = serde_json::Value::Null;
+                v["lease"] = serde_json::json!({ "holder": name, "expires": now_ms + 10_000 });
+                v["hostOwner"] = "ann".into();
+            }),
+        ] {
+            assert_eq!(
+                refused(computer_key(&door, &a, now, snap(change), Some(&keys)).await),
+                StatusCode::FORBIDDEN,
+                "{why}"
+            );
+        }
+        // a stale state grants nothing
+        assert_eq!(
+            refused(
+                computer_key(
+                    &door,
+                    &a,
+                    now,
+                    snap(&|v| v["time"] = (now_ms - 60_000).into()),
+                    Some(&keys)
+                )
+                .await
+            ),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert!(f.made.lock().unwrap().is_empty());
+
+        // a box of the release gets nothing by the plan: its lease, as ever
+        let n = ask(&node1, "node1", now);
+        let s = snap(&|v| v["plan"]["holder"] = "node1".into());
+        assert_eq!(
+            refused(computer_key(&door, &n, now, s, None).await),
+            StatusCode::FORBIDDEN
+        );
+        assert!(f.made.lock().unwrap().is_empty());
+
+        // the plan picked it, for its owner's computer, whichever they consented to
+        let any = snap(&|v| v["computer"]["consent"] = "any".into());
+        let sealed = computer_key(&door, &a, now, any, Some(&keys))
+            .await
+            .unwrap();
+        assert!(sealed.starts_with("sealed to age1joined: "), "{sealed}");
+        assert_eq!(
+            door.bound.lock().unwrap().get("41"),
+            Some(&Bound {
+                owner: "ann".into(),
+                id: id.into(),
+                on: name.into(),
+                made: now
+            })
+        );
+    }
+
     #[tokio::test]
     async fn a_computers_node_lives_only_as_long_as_its_grant() {
         // the reaper takes one person's at a time; which comes off, not the order
