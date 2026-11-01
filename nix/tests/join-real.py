@@ -157,7 +157,9 @@ while True:
     now = time.monotonic()
     if now - shown > 300:
         shown = now
-        print(f"after {int(now - began)}s: {j['done']:.3f} eta={j['eta']} {b}", flush=True)
+        print(
+            f"after {int(now - began)}s: {j['done']:.3f} eta={j['eta']} {b}", flush=True
+        )
     if j["state"] != "running":
         break
     assert now - began < minutes * 60, f"not installed after {minutes} minutes: {j}"
