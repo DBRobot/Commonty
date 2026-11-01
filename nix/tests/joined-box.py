@@ -198,6 +198,11 @@ assert ticket[-40:] not in st, "the ticket is in the agreed state"
 wait(box, "test ! -e /var/lib/dd-control/join-refused", timeout=120)
 assert j["key"] == spki, j
 
+# a stranger makes no backup password and backs nothing up
+box.succeed("systemctl start dd-backup-seal")
+box.fail("test -e /var/lib/dd/backup-password")
+box.fail("test -e /var/lib/dd-backup-seal/sealed.json")
+
 # not hers on its ticket alone, and signing up opened nothing: the box waits
 # for her root, and the services are shut to her
 token = fleet.succeed("cat /root/f/token").strip()
@@ -277,6 +282,18 @@ assert ident["access"] == "box", ident
 assert ident["enlisted"][0]["qualifies"] == "gpu" and ident["enlisted"][0]["counts"], (
     ident
 )
+# hers: it makes its backup's password, sealed to her keys, and puts the copy
+# beside the repository
+box.wait_until_succeeds(
+    "systemctl start dd-backup-seal && test -s /var/lib/dd-backup-seal/sealed.json",
+    timeout=120,
+)
+sealed = json.loads(box.succeed("cat /var/lib/dd-backup-seal/sealed.json"))
+assert sealed["owner"] == "ada" and sealed["keys"], sealed
+assert box.succeed("stat -c %a /var/lib/dd/backup-password").strip() == "400"
+password = box.succeed("cat /var/lib/dd/backup-password").strip()
+assert password not in json.dumps(sealed)
+
 # the services are open to her now
 wait(fleet, f"test $({verify}) = 200", timeout=60)
 assert json.loads(
@@ -360,6 +377,12 @@ ident = json.loads(fleet.succeed("curl -sf 'http://127.0.0.1:4191/identity?name=
     "member"
 ]
 assert ident["access"] == "none" and ident["enlisted"] == [], ident
+# nobody's: its backup stops
+box.wait_until_succeeds(
+    "systemctl start dd-backup-seal && test ! -e /var/lib/dd-backup-seal/sealed.json",
+    timeout=120,
+)
+
 # and every door with them: no service, no network key, no guest, her
 # computer down
 for host in services:

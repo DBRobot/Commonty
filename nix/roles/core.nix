@@ -49,6 +49,7 @@ in
     ../modules/storage/postgres-isolation.nix
     ../modules/storage/postgres-backup.nix
     ../modules/storage/backup.nix
+    ../modules/storage/backup-seal.nix
     ../modules/storage/snapshots.nix
     ../modules/box/agent.nix
     # and an ssh session coming or going cannot fail its switch

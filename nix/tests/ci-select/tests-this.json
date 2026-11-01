@@ -853,6 +853,8 @@
  },
  "joined-box": {
   "paths": [
+   "nix/modules/storage/backup-seal.nix",
+   "servers/system/release/src/bin/dd-backup-seal.rs",
    "nix/tests/joined-box.nix",
    "nix/tests/joined-box.py",
    "nix/tests/joined-box/**",
@@ -897,6 +899,8 @@
    "nix/modules/box/host.nix": "joined-box host wiring (lib.joinedBoxModules -> boxModules)",
    "nix/modules/box/control.nix": "dd-control unit, ConditionResult=no under install name, relay, join-refused",
    "nix/modules/box/agent.nix": "dd-agent: names box by key, builds joinedBox from DD_AGENT_JOINED_SOURCE, switches, no GC",
+   "nix/modules/storage/backup-seal.nix": "dd-backup-seal: no password for a stranger, sealed to her keys once enlisted",
+   "servers/system/release/src/bin/dd-backup-seal.rs": "the seal, run on the box",
    "nix/modules/box/work-memory.nix": "imported by agent.nix",
    "nix/modules/box/report.nix": "dd-join-prepare (box-key.spki), hardware report",
    "nix/modules/box/report/**": "detect.sh -> /var/lib/dd/report/hardware.json",

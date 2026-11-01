@@ -20461,6 +20461,11 @@ rec {
             requiredFeatures = [ ];
           }
           {
+            name = "dd-backup-seal";
+            path = "src/bin/dd-backup-seal.rs";
+            requiredFeatures = [ ];
+          }
+          {
             name = "dd-box-setup";
             path = "src/bin/dd-box-setup.rs";
             requiredFeatures = [ ];
@@ -20492,6 +20497,10 @@ rec {
           {
             name = "identity";
             packageId = "identity";
+          }
+          {
+            name = "library";
+            packageId = "library";
           }
           {
             name = "serde";

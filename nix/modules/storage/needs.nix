@@ -43,6 +43,7 @@
     units = [
       "restic-backups-*"
       "dd-backup-stale"
+      "dd-backup-seal" # a box that joined: its password, sealed to its owner
       "dd-alert@*"
     ];
     everyBox = true;
