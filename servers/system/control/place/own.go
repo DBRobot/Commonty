@@ -66,7 +66,7 @@ func siteOf(in Inputs, s *state.State, owners map[string]string, name string) st
 // ForgetHold is how long after an enlistment ended a box removes what is on
 // its disk of that member's: services stop at once, by the plan; a disk goes
 // only once the word that ended it has stood this long (ms)
-const ForgetHold = int64(3600_000)
+const ForgetHold = int64(24 * 3600_000)
 
 // MayForget: of what a plan says, what any box must also hold true by the same
 // state before it removes anything: the word has stood long enough, and the box

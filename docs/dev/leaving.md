@@ -182,7 +182,7 @@ forge              their own repositories, then their account; what they
 games              every server and kept world of theirs          games forget
 their own boxes    what a joined box they enlisted holds in the
                    clear: computers' disks, game servers, worlds
-                   (an hour on, plan's word, the box's own check) box/forget-owner.sh
+                   (24 hours on, plan's word, the box's own check) box/forget-owner.sh
 mail               their <name>@<domain> rule, its destination if no other
                    rule uses it, their aliases (each address kept
                    from anyone else, with no name on it), their
