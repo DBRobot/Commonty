@@ -39,6 +39,10 @@ lines=$(
     ask "max by (box) (max_over_time(dd_backup_last_success_seconds[$WINDOW])) < $((now - 26 * 3600))" | while read -r b v; do
       echo "$b: last good backup $(((now - v) / 3600)) hours ago"
     done
+    # a remote computer's backup held back, to spare a store's last room
+    ask "max by (box) (last_over_time(dd_store_copy_skipped[$WINDOW])) > 0" | while read -r b _; do
+      echo "$b: a remote computer's backup was left uncopied: a store is short of room (journalctl -u dd-store-copy)"
+    done
     # a runner's or docker's new config (a sandbox fix, say) not in force yet
     ask "max by (box) (last_over_time(dd_runner_restart_pending_seconds[$WINDOW])) > 3600" | while read -r b _; do
       echo "$b: a CI runner's or docker's new config has waited over an hour to apply (journalctl -u dd-runner-restart there)"

@@ -87,6 +87,50 @@ in
       default = if store then "/var/lib/dd-store/keys/backups-${box}.env" else null;
       description = "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY of this box's backup key: the store's key to its bucket, made on the box; null: no backup";
     };
+    # A box whose store came back empty (reinstalled without it) would
+    # otherwise start a new repository here, and its copy would go out
+    # over the old one on the other boxes' stores: a mix of two
+    # repositories that restores neither. So a new one only once every
+    # other store has said it keeps none; otherwise it stops, and says
+    # to bring this one back first (scripts/restore-box).
+    newRepoGuard = lib.mkOption {
+      type = lib.types.functionTo lib.types.str;
+      readOnly = true;
+      default = prefix: ''
+        if ! ${pkgs.restic}/bin/restic cat config >/dev/null 2>&1; then
+          export RCLONE_CONFIG=/dev/null
+          ${lib.concatStrings (
+            lib.mapAttrsToList (p: v: ''
+              k=$(mktemp)
+              if ! { curl -fsS --max-time 30 ${v.url}/_keys/${box}.age \
+                | age -d -i ${config.dd.store.identity} > "$k"; }; then
+                rm -f "$k"
+                echo "${p}: no key to its store, so no word on whether it keeps backups-${box}${prefix}: no new repository yet"
+                exit 1
+              fi
+              there=$( ( set -a; . "$k"; set +a
+                export RCLONE_CONFIG_THERE_TYPE=s3 RCLONE_CONFIG_THERE_PROVIDER=Other \
+                  RCLONE_CONFIG_THERE_ENDPOINT=${v.url} RCLONE_CONFIG_THERE_REGION=us-east-1 \
+                  RCLONE_CONFIG_THERE_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
+                  RCLONE_CONFIG_THERE_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
+                  RCLONE_CONFIG_THERE_FORCE_PATH_STYLE=true
+                rclone lsf --files-only --max-depth 1 there:backups-${box}${prefix} ) ) || {
+                rm -f "$k"
+                echo "${p}: its store did not answer: no new repository yet"
+                exit 1
+              }
+              rm -f "$k"
+              if grep -qx config <<<"$there"; then
+                echo "${p} keeps a copy of backups-${box}${prefix}: bring it back into this store (scripts/restore-box), not a new one over it"
+                exit 1
+              fi
+            '') config.dd.store.peers
+          )}
+          ${pkgs.restic}/bin/restic init
+        fi
+      '';
+      description = "preStart for a restic unit: start the repository under this prefix of the box's bucket only where no other store keeps one";
+    };
     passwordFile = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
       default = null;
@@ -144,12 +188,6 @@ in
 
       systemd.services.restic-backups-dd = {
         environment.AWS_DEFAULT_REGION = "us-east-1";
-        # A box whose store came back empty (reinstalled without it) would
-        # otherwise start a new repository here, and its copy would go out
-        # over the old one on the other boxes' stores: a mix of two
-        # repositories that restores neither. So a new one only once every
-        # other store has said it keeps none; otherwise it stops, and says
-        # to bring this one back first (scripts/restore-box).
         path = lib.mkIf store (
           [
             pkgs.curl
@@ -161,37 +199,7 @@ in
         );
         preStart = lib.mkIf store (
           lib.mkBefore ''
-            if ! ${pkgs.restic}/bin/restic cat config >/dev/null 2>&1; then
-              export RCLONE_CONFIG=/dev/null
-              ${lib.concatStrings (
-                lib.mapAttrsToList (p: v: ''
-                  k=$(mktemp)
-                  if ! { curl -fsS --max-time 30 ${v.url}/_keys/${box}.age \
-                    | age -d -i ${config.dd.store.identity} > "$k"; }; then
-                    rm -f "$k"
-                    echo "${p}: no key to its store, so no word on whether it keeps backups-${box}: no new repository yet"
-                    exit 1
-                  fi
-                  there=$( ( set -a; . "$k"; set +a
-                    export RCLONE_CONFIG_THERE_TYPE=s3 RCLONE_CONFIG_THERE_PROVIDER=Other \
-                      RCLONE_CONFIG_THERE_ENDPOINT=${v.url} RCLONE_CONFIG_THERE_REGION=us-east-1 \
-                      RCLONE_CONFIG_THERE_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
-                      RCLONE_CONFIG_THERE_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
-                      RCLONE_CONFIG_THERE_FORCE_PATH_STYLE=true
-                    rclone lsf --files-only --max-depth 1 there:backups-${box} ) ) || {
-                    rm -f "$k"
-                    echo "${p}: its store did not answer: no new repository yet"
-                    exit 1
-                  }
-                  rm -f "$k"
-                  if grep -qx config <<<"$there"; then
-                    echo "${p} keeps a copy of backups-${box}: bring it back into this store (scripts/restore-box), not a new one over it"
-                    exit 1
-                  fi
-                '') config.dd.store.peers
-              )}
-              ${pkgs.restic}/bin/restic init
-            fi
+            ${cfg.newRepoGuard ""}
           ''
         );
         after = [

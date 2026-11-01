@@ -38,6 +38,9 @@ let
           inherit (ages.${other name}) recipient;
         };
         buckets.photos = { };
+        # big and able to wait: only where it leaves room there
+        guarded.photos = [ "big/" ];
+        copyFloorBytes = 1048576;
         # this box's own, kept here alone
         buckets.scratch.copies = 1;
         # a's alone to write (a box's backup): b keeps a copy, and never
@@ -75,6 +78,7 @@ let
         pkgs.awscli2
         pkgs.age
         pkgs.curl
+        pkgs.python3
       ];
       # where dd-control writes the plan's copies
       systemd.tmpfiles.rules = [ "d /run/dd-placed 0755 root root -" ];

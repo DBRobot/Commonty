@@ -3,7 +3,11 @@
   # Members' own computers (nix/modules/computers/computers.nix, docs/dev/remote-computers.md):
   # a VM each, with its own disks, made from a config they save. That a
   # given computer exists is the box's state, not the repo's.
-  imports = [ ../modules/computers/computers.nix ];
+  imports = [
+    ../modules/computers/computers.nix
+    # /home's disk, each night (docs/dev/remote-computers.md)
+    ../modules/computers/backup.nix
+  ];
 
   dd.computers.enable = true;
 
@@ -20,8 +24,7 @@
   ];
 
   # the records and configs: without them a restored disk is no one's
-  # computer. The disks themselves go to snapshots (docs/dev/remote-computers.md),
-  # not the nightly backup
+  # computer. /home's disk has a repository of its own (computers/backup.nix)
   dd.backup.paths = [
     "/var/lib/dd-computers/records"
     "/var/lib/dd-computers/configs"
