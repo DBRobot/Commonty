@@ -189,6 +189,25 @@ pub fn missing(threads: u64, mem_total: u64) -> Vec<String> {
     why
 }
 
+/// What the firmware says is installed, in bytes: the sum of the DMI memory
+/// devices (type 17) in `/sys/firmware/dmi/entries/17-*/raw`, each the raw
+/// structure. More than MemTotal where integrated graphics keep a share.
+pub fn mem_installed<'a>(devices: impl IntoIterator<Item = &'a [u8]>) -> u64 {
+    devices
+        .into_iter()
+        .filter_map(|d| {
+            let size = u16::from_le_bytes([*d.get(12)?, *d.get(13)?]);
+            let mib = match size {
+                0 | 0xFFFF => return None,
+                0x7FFF => u32::from_le_bytes(d.get(28..32)?.try_into().ok()?) as u64,
+                s if s & 0x8000 != 0 => (s & 0x7FFF) as u64 / 1024,
+                s => s as u64,
+            };
+            Some(mib << 20)
+        })
+        .sum()
+}
+
 /// MemTotal from /proc/meminfo, in bytes
 pub fn mem_total(meminfo: &str) -> Option<u64> {
     meminfo
@@ -553,6 +572,25 @@ mod tests {
             Some(16 << 20)
         );
         assert_eq!(mem_total("nothing"), None);
+        // DMI type 17 as the firmware writes it: 8192 MB in the size word,
+        // an empty slot, 512 KB units, and the extended size
+        let dev = |size: u16, ext: u32| {
+            let mut d = vec![0u8; 40];
+            d[0] = 17;
+            d[12..14].copy_from_slice(&size.to_le_bytes());
+            d[28..32].copy_from_slice(&ext.to_le_bytes());
+            d
+        };
+        let (a, b, c, e) = (
+            dev(8192, 0),
+            dev(0, 0),
+            dev(0x8000 | 512, 0),
+            dev(0x7FFF, 65536),
+        );
+        assert_eq!(mem_installed([a.as_slice(), b.as_slice()]), 8 << 30);
+        assert_eq!(mem_installed([c.as_slice()]), 0);
+        assert_eq!(mem_installed([e.as_slice()]), 64 << 30);
+        assert_eq!(mem_installed([&a[..10]]), 0);
     }
 
     #[test]

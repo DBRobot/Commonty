@@ -85,6 +85,22 @@ for n in /sys/module/kvm_intel/parameters/nested /sys/module/kvm_amd/parameters/
   [ -r "$n" ] && case "$(cat "$n")" in Y | 1) nested=true ;; esac
 done
 mem=$(awk '/^MemTotal:/ {print $2 * 1024}' /proc/meminfo)
+# what is installed, from the firmware's memory devices (DMI type 17): more
+# than MemTotal where firmware or integrated graphics keep a share
+installed=0
+for e in /sys/firmware/dmi/entries/17-*/raw; do
+  [ -r "$e" ] || continue
+  size=$(od -An -tu2 -j12 -N2 "$e" | tr -d ' ')
+  case "$size" in "" | 0 | 65535) continue ;; esac
+  if [ "$size" = 32767 ]; then
+    mib=$(od -An -tu4 -j28 -N4 "$e" | tr -d ' ')
+  elif [ $((size & 32768)) != 0 ]; then
+    mib=$(((size & 32767) / 1024))
+  else
+    mib=$size
+  fi
+  installed=$((installed + mib * 1048576))
+done
 
 # every GPU, what video it can encode (transcode wants H.264 encode) and
 # its VRAM; vainfo finds the driver only where the box has graphics enabled
@@ -158,7 +174,7 @@ jq -n \
   --argjson winkey $winkey \
   --arg arch "$(uname -m)" --arg vendor "$vendor" --arg model "$model" \
   --argjson threads "$(nproc)" --argjson flags "$flags" \
-  --argjson kvm $kvm --argjson nested $nested --argjson mem "$mem" \
+  --argjson kvm $kvm --argjson nested $nested --argjson mem "$mem" --argjson installed "$installed" \
   --argjson gpus "$gpus" --argjson disks "$disks" --argjson pools "$pools" --argjson nics "$nics" --argjson stack "$stack" \
   --argjson battery $battery --argjson ac $ac '
 {
@@ -173,6 +189,7 @@ jq -n \
   },
   cpu: { arch: $arch, vendor: $vendor, model: $model, threads: $threads, flags: $flags },
   memoryBytes: $mem,
+  memInstalledBytes: $installed,
   virt: { kvm: $kvm, nested: $nested },
   gpus: $gpus,
   disks: $disks, pools: $pools, nics: $nics, stack: $stack,

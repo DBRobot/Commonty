@@ -300,8 +300,10 @@ func reportFacts(report, model string) map[string]float64 {
 				Threads float64 `json:"threads"`
 			} `json:"cpu"`
 			MemoryBytes float64 `json:"memoryBytes"`
-			BootDisk    string  `json:"bootDisk"`
-			Disks       []struct {
+			// what the firmware says is installed; 0 from a report before it
+			MemInstalledBytes float64 `json:"memInstalledBytes"`
+			BootDisk          string  `json:"bootDisk"`
+			Disks             []struct {
 				ID    string  `json:"id"`
 				Bytes float64 `json:"bytes"`
 			} `json:"disks"`
@@ -324,6 +326,9 @@ func reportFacts(report, model string) map[string]float64 {
 			}
 			out["threads"] = r.CPU.Threads
 			out["mem_total_bytes"] = r.MemoryBytes
+			if r.MemInstalledBytes > 0 {
+				out["mem_installed_bytes"] = r.MemInstalledBytes
+			}
 			for _, d := range r.Disks {
 				if d.ID != "" && d.ID == r.BootDisk {
 					out["system_disk_bytes"] = d.Bytes
@@ -861,7 +866,7 @@ func main() {
 					return
 				}
 				joining.Facts = facts()
-				if why := ident.Minimum(joining.Facts); why != "" {
+				if why := ident.MinimumAt(joining.Facts, state.Machine); why != "" {
 					log.Printf("join: refused: this box %s", why)
 					_ = os.WriteFile(refused, []byte("this box "+why+"\n"), 0o644)
 				}

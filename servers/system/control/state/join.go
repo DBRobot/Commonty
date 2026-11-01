@@ -140,7 +140,7 @@ func (s *State) checkJoin(cfg *Config, verify Verify, r Request, now int64) erro
 	if len(j.Facts) > maxJoinFacts {
 		return fmt.Errorf("%d facts; at most %d", len(j.Facts), maxJoinFacts)
 	}
-	if why := ident.Minimum(j.Facts); why != "" {
+	if why := ident.MinimumAt(j.Facts, s.Version()); why != "" {
 		return fmt.Errorf("refused: this box %s", why)
 	}
 	if c := j.Claim; c != nil {

@@ -32,7 +32,17 @@ const (
 
 // Minimum: why a box can't join, or "" when it can. Each reason says what
 // is missing in words the person setting the box up can act on.
-func Minimum(f map[string]float64) string {
+func Minimum(f map[string]float64) string { return MinimumAt(f, 2) }
+
+// MinimumAt is Minimum as the state machine of that version judges it.
+// From 3, a box's memory is what it has installed (DMI), where that is
+// more than MemTotal: integrated graphics keep part of it from Linux, and
+// an 8 GB machine is 8 GB to the person setting it up.
+func MinimumAt(f map[string]float64, version int) string {
+	mem := f["mem_total_bytes"]
+	if version >= 3 && f["mem_installed_bytes"] > mem {
+		mem = f["mem_installed_bytes"]
+	}
 	var why []string
 	if f["tpm_major"] != 2 {
 		why = append(why, "a TPM 2.0")
@@ -49,8 +59,8 @@ func Minimum(f map[string]float64) string {
 	if f["threads"] < MinThreads {
 		why = append(why, fmt.Sprintf("%d processor threads (it has %.0f)", MinThreads, f["threads"]))
 	}
-	if f["mem_total_bytes"] < MinMemTotal {
-		why = append(why, fmt.Sprintf("8 GiB of memory (it has %.1f GiB)", f["mem_total_bytes"]/(1<<30)))
+	if mem < MinMemTotal {
+		why = append(why, fmt.Sprintf("8 GiB of memory (it has %.1f GiB)", mem/(1<<30)))
 	}
 	if f["system_disk_bytes"] < MinSystemDisk {
 		why = append(why, fmt.Sprintf("a %d GB system disk (it has %.0f GB)", int(MinSystemDisk/1e9), f["system_disk_bytes"]/1e9))

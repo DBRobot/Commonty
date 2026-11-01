@@ -21,10 +21,11 @@ import (
 )
 
 // Machine is the state machine this code runs. 1 is release 359's (no
-// version, no agreed config); 2 adds the agreed config and rollout requests.
+// version, no agreed config); 2 adds the agreed config and rollout requests;
+// 3 judges a joining box's memory by what it has installed (ident.MinimumAt).
 // Raise it with every change to what Check, Apply, Block or the state's
 // format does, and gate the change on s.Machine.
-const Machine = 2
+const Machine = 3
 
 // MachineFact is the heartbeat fact a box says its version in. A box
 // that says none runs 1.

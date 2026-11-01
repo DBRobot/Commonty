@@ -447,11 +447,20 @@ fn route(app: &Arc<App>, method: &str, path: &str, body: &Value) -> Result<Reply
 /// What this machine lacks of the hardware minimum
 fn missing() -> Vec<String> {
     let threads = std::thread::available_parallelism().map_or(0, |n| n.get() as u64);
-    let mem = std::fs::read_to_string("/proc/meminfo")
+    let total = std::fs::read_to_string("/proc/meminfo")
         .ok()
         .and_then(|m| setup::mem_total(&m))
         .unwrap_or(0);
-    setup::missing(threads, mem)
+    // as the join judges it: what is installed, where that is more
+    let raw: Vec<Vec<u8>> = std::fs::read_dir("/sys/firmware/dmi/entries")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with("17-"))
+        .filter_map(|e| std::fs::read(e.path().join("raw")).ok())
+        .collect();
+    let installed = setup::mem_installed(raw.iter().map(Vec::as_slice));
+    setup::missing(threads, total.max(installed))
 }
 
 /// The drive's ticket has run out: a box joining with it could never be its
