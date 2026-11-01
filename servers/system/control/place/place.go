@@ -54,6 +54,9 @@ type JoinedRules struct {
 	// what reads only its box's owner's data: each member's own, on their
 	// own boxes, never the one the fleet shares (placeOwn)
 	Own []string `json:"own,omitempty"`
+	// what has a name under the domain: not given to any joined box, the
+	// fleet owner's included, until such a box may serve there
+	Named []string `json:"named,omitempty"`
 }
 
 // Bucket is one a service writes to its box's own store

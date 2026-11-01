@@ -43,7 +43,7 @@ func ownerCan(in Inputs, f map[string]float64, owner string) map[string]float64 
 		return c
 	}
 	for svc, sv := range in.Services {
-		if v, said := f["can/"+svc]; said && sv.Placed && !sv.Lease && !sv.EveryBox {
+		if v, said := f["can/"+svc]; said && sv.Placed && !sv.Lease && !sv.EveryBox && !slices.Contains(in.Joined.Named, svc) {
 			c[svc] = v
 		}
 	}
