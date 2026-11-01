@@ -3,7 +3,7 @@
   "owner": "david",
   "domain": "commonty.org",
   "repo": "david/commonty",
-  "allowanceGb": 200,
+  "allowanceGb": 500,
   "mailAliases": {
     "security": "david"
   },
