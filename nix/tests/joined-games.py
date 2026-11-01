@@ -41,4 +41,8 @@ box.succeed("test -d /var/lib/dd-games/records")
 
 # nginx carries its name beside the box's own
 wait_unit_active(box, "nginx.service")
-assert "server_name games." in box.succeed("nginx -T 2>/dev/null")
+# nginx is not on the test's path: the config its unit runs with
+conf = box.succeed(
+    'systemctl cat nginx.service | grep -oE "/nix/store/[^ \']+nginx.conf" | sort -u'
+).strip()
+assert "server_name games." in box.succeed(f"cat {conf}")
