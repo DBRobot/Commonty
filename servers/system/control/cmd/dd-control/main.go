@@ -262,7 +262,7 @@ func facts() map[string]float64 {
 	// and what it can run, judged by the release's rules on its report as
 	// it is now (nix/modules/box/capability.nix); whether its owner is
 	// draining it (dd-drain); and its room for remote computers
-	for name, v := range promFacts("/var/lib/dd-facts/dd_agent.prom", "/var/lib/dd-facts/backup.prom", "/var/lib/dd-facts/net.prom", "/var/lib/dd-facts/services.prom", "/var/lib/dd-facts/store.prom", "/var/lib/dd-facts/store-copy.prom", "/var/lib/dd-facts/can.prom", "/var/lib/dd-facts/draining.prom", "/var/lib/dd-facts/release-drain.prom", "/var/lib/dd-facts/computers.prom") {
+	for name, v := range promFacts("/var/lib/dd-facts/dd_agent.prom", "/var/lib/dd-facts/backup.prom", "/var/lib/dd-facts/net.prom", "/var/lib/dd-facts/services.prom", "/var/lib/dd-facts/store.prom", "/var/lib/dd-facts/store-copy.prom", "/var/lib/dd-facts/computers-backup.prom", "/var/lib/dd-facts/can.prom", "/var/lib/dd-facts/draining.prom", "/var/lib/dd-facts/release-drain.prom", "/var/lib/dd-facts/computers.prom") {
 		f[name] = v
 	}
 	for name, v := range reportFacts(*reportPath, "/sys/firmware/devicetree/base/model") {
@@ -405,6 +405,7 @@ func usageFacts(files ...string) map[string]float64 {
 }
 
 var storeLost = regexp.MustCompile(`^dd_store_lost\{bucket="([^"]*)",box="([^"]*)"\}$`)
+var storeSkipped = regexp.MustCompile(`^dd_store_copy_skipped\{bucket="([^"]*)",box="([^"]*)"\}$`)
 
 func promFacts(files ...string) map[string]float64 {
 	out := map[string]float64{}
@@ -455,6 +456,13 @@ func promFacts(files ...string) map[string]float64 {
 				m := storeLost.FindStringSubmatch(fs[0])
 				if m != nil && len(fs) == 2 && usageName(m[1]) && usageName(m[2]) && len(out) < maxFacts {
 					out["store/"+m[1]+"/lost/"+m[2]] = v
+				}
+			case "dd_store_copy_skipped":
+				// dd_store_copy_skipped{bucket="backups-node1",box="node2"}:
+				// a guarded copy held back, node2 short of room for it
+				m := storeSkipped.FindStringSubmatch(fs[0])
+				if m != nil && len(fs) == 2 && usageName(m[1]) && usageName(m[2]) && len(out) < maxFacts {
+					out["store/"+m[1]+"/skipped/"+m[2]] = v
 				}
 			case "dd_service_memory_bytes":
 				// dd_service_memory_bytes{service="forgejo"} as svc/forgejo/mem

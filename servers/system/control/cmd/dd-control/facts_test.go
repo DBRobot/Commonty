@@ -184,3 +184,11 @@ func TestABoxsOwnBuildSaysHowItWent(t *testing.T) {
 		t.Fatalf("built: %v", f)
 	}
 }
+
+func TestAGuardedCopyHeldBackIsAFact(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "store-copy.prom")
+	_ = os.WriteFile(f, []byte("dd_store_copy_skipped{bucket=\"backups-node1\",box=\"node2\"} 1\n"), 0o644)
+	if got := promFacts(f); got["store/backups-node1/skipped/node2"] != 1 {
+		t.Fatalf("facts: %v", got)
+	}
+}

@@ -42,6 +42,13 @@ until the other is back.
   only where it fits. Until a plan has been seen, the first boxes by name.
   A copy is added to, never pruned: what is deleted here stays there.
   Deletes reaching the copies is a decision still to make.
+- **A guarded prefix** of a bucket (`dd.store.guarded`: remote computers'
+  disks) goes only in the half-hourly full copy, and only while the other
+  store's free room in the agreed state stays above a floor after it: the
+  larger of 20 GiB and a tenth of that store, above the 5% where a store
+  refuses everything, so the rest of its copies still land. Otherwise it is
+  left, the fact and the alert say so (`dd_store_copy_skipped`), and the
+  rest of the bucket goes on as ever.
 - **Whose a bucket is**: most are written where their service runs. A
   box's own (its backup, `backups-<box>`) is written by that box alone,
   wherever it is kept, and only that box copies it out; so are the

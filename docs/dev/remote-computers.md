@@ -13,7 +13,9 @@ are not built yet (below, Open).
 3. **The box's side**: dd-control holds each computer's lease where the
    plan puts it and starts `dd-computer@<id>`; the guest, the page,
    `dd computer`, the outbound rules and the allowance.
-4. **Snapshots**, so a computer can come back on another box. Not built.
+4. **Snapshots**, so a computer can come back on another box. Built: a
+   nightly backup of each computer's `/home` disk (Backups, below). Not
+   built: the 15-minute repository, and coming back by itself.
 
 A box hosts computers when its own report says it has KVM on x86_64 and
 its owner does not bar them: it is then built with the `compute` bundle
@@ -329,7 +331,23 @@ browser: compute.<domain>        CLI: dd computer ...
   minutes of changes and a copy round (5 minutes). The old box's dataset
   is kept, named for when, and never deleted without the owner's yes.
 
-## Snapshots
+## Backups
+
+Each night ([`computers/backup.nix`](../../nix/modules/computers/backup.nix))
+a ZFS snapshot of the dataset holding the computers' directories, taken
+for the run and destroyed after it, gives restic each computer's
+`home.qcow2` and `record.json` as of one moment, in a repository of their own
+at `computers/` in the box's backup bucket, under the box's backup password.
+The system disk is left out: it is the release's image and the owner's Nix
+file, and churns by gigabytes an hour under a build. The computer never
+notices. A store short of room is not filled for it: below the floor
+([storage.md](storage.md)) the run or the copy is skipped, and it says so.
+
+Restoring is by hand: on a box with the password, the bucket brought back
+(`scripts/restore-box`), `restic -r s3:.../backups-<box>/computers restore
+latest`, the file put in the computer's directory with the computer stopped.
+
+## Snapshots (not built)
 
 - Every 15 minutes, a ZFS snapshot of the computer's dataset, read by
   restic into the computer's bucket, `computer-<id>`, in the box's own store.

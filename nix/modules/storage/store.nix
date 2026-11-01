@@ -208,6 +208,14 @@ let
         # shared one away first and this one's mv failed the unit
         cp ${plan} $mine/copies.json.$MODE && mv $mine/copies.json.$MODE $mine/copies.json
       fi
+      # what of a bucket goes only where it leaves room (guarded)
+      guarded() {
+        case "$1" in
+        ${lib.concatStrings (
+          lib.mapAttrsToList (b: ps: "  ${b}) echo ${lib.concatStringsSep " " ps} ;;\n") cfg.guarded
+        )}
+        esac
+      }
       # the other boxes that keep a bucket
       targets() {
         if [ -s $mine/copies.json ]; then
@@ -295,11 +303,13 @@ let
               RCLONE_CONFIG_HERE_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
               RCLONE_CONFIG_HERE_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
               RCLONE_CONFIG_HERE_FORCE_PATH_STYLE=true
+            leave=()
+            for q in $(guarded $b); do leave+=(--exclude "/$q**"); done
             # first, one object the last copy there sent, read back: a
             # store that takes copies and keeps none is found out
             if [ "$MODE" = all ] && [ -s $mine/$p.$b.ok ]; then
               age=$(( $(date +%s) - $(cat $mine/$p.$b.ok) ))
-              obj=$(rclone lsf -R --files-only --fast-list --use-server-modtime --min-age "''${age}s" "here:$b" 2>/dev/null | shuf -n1 || true)
+              obj=$(rclone lsf -R --files-only --fast-list --use-server-modtime --min-age "''${age}s" "''${leave[@]}" "here:$b" 2>/dev/null | shuf -n1 || true)
               if [ -n "$obj" ] && want=$(rclone cat "here:$b/$obj" | sha256sum); then
                 if got=$(rclone cat "there:$b/$obj" 2>/dev/null | sha256sum) && [ "$got" = "$want" ]; then
                   rm -f $mine/lost/$p.$b
@@ -310,7 +320,34 @@ let
               fi
             fi
             # copy, never sync: nothing is deleted there
-            bounded rclone copy --checksum --s3-no-check-bucket --fast-list $recent "here:$b" "there:$b"
+            bounded rclone copy --checksum --s3-no-check-bucket --fast-list $recent "''${leave[@]}" "here:$b" "there:$b"
+            # the guarded part, in the full copy alone, by the other store's
+            # own word on its room in the agreed state: none is no room. It
+            # stops at that room whatever the word was worth
+            [ "$MODE" = all ] || exit 0
+            for q in $(guarded $b); do
+              mkdir -p $mine/skipped
+              st=$(curl -fsS --max-time 10 ${cfg.control}/state) || st='{}'
+              free=$(jq -r --arg p "$p" '.boxes[$p].facts.store_free_bytes // empty | floor' <<<"$st") || free=""
+              size=$(jq -r --arg p "$p" '.boxes[$p].facts.store_size_bytes // 0 | floor' <<<"$st") || size=0
+              floor=$((size / 10 > ${toString cfg.copyFloorBytes} ? size / 10 : ${toString cfg.copyFloorBytes}))
+              have=$(rclone size --json "here:$b/$q" | jq -r '.bytes') || have=""
+              sent=$(rclone size --json "there:$b/$q" 2>/dev/null | jq -r '.bytes') || sent=0
+              sent=''${sent:-0}
+              if [ -z "$free" ] || [ -z "$have" ] || [ $((free - floor)) -lt $((have - sent)) ]; then
+                echo "$p: $b/$q is not copied: $((have - sent)) bytes to send, ''${free:-unknown} free there, $floor to stay free"
+                touch $mine/skipped/$p.$b
+                continue
+              fi
+              [ "$have" -gt "$sent" ] || { rm -f $mine/skipped/$p.$b; continue; }
+              if bounded rclone copy --checksum --s3-no-check-bucket --fast-list \
+                --max-transfer "$((free - floor))" --cutoff-mode cautious "here:$b/$q" "there:$b/$q"; then
+                rm -f $mine/skipped/$p.$b
+              else
+                touch $mine/skipped/$p.$b
+                exit 1
+              fi
+            done
           ) && { [ "$MODE" != all ] || date +%s > $mine/$p.$b.ok; } || { echo "$p: $b not copied this time"; failed=1; }
         done
       done
@@ -325,6 +362,11 @@ let
         [ -e "$f" ] || continue
         n=''${f##*/}
         echo "dd_store_lost{bucket=\"''${n#*.}\",box=\"''${n%%.*}\"} 1" >> $out
+      done
+      for f in $mine/skipped/*; do
+        [ -e "$f" ] || continue
+        n=''${f##*/}
+        echo "dd_store_copy_skipped{bucket=\"''${n#*.}\",box=\"''${n%%.*}\"} 1" >> $out
       done
       install -d /var/lib/dd-facts
       chmod 0644 $out
@@ -429,6 +471,19 @@ in
         }
       );
       default = { };
+    };
+    guarded = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.listOf lib.types.str);
+      default = { };
+      description = "bucket -> prefixes (each ending in /): big and able to wait. Copied only in the full copy and only where the other store keeps copyFloorBytes free after it; otherwise left, and said (dd_store_copy_skipped)";
+    };
+    copyFloorBytes = lib.mkOption {
+      type = lib.types.ints.positive;
+      # above the 5% where a store refuses every copy (node2's: 14G), so
+      # the rest of its copies still land; a tenth of a bigger store. A store's
+      # free already leaves a fifth of its pool to the box's other services
+      default = 20 * 1024 * 1024 * 1024;
+      description = "what a guarded copy leaves free on the store it goes to, or a tenth of that store if more";
     };
     boxes = lib.mkOption {
       type = lib.types.listOf lib.types.str;

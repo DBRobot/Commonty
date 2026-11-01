@@ -41,6 +41,7 @@
     "switch-race"
     "work-memory"
     "shutdown-drain"
+    "computer-backup"
     "runner-restart"
     "cache-upload"
     "cache-front"

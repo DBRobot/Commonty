@@ -59,6 +59,7 @@
   "switch-race",
   "work-memory",
   "shutdown-drain",
+  "computer-backup",
   "site-journeys",
   "rollout",
   "placed",
@@ -1244,6 +1245,24 @@
    "nix/modules/box/host.nix": "the power key every other box ignores (asserted of node1)"
   },
   "notes": "A stand-in answers for dd-control; the real one's draining fact is control-plane's place_test.",
+  "family": "vm"
+ },
+ "computer-backup": {
+  "paths": [
+   "nix/tests/computer-backup.nix",
+   "nix/tests/computer-backup.py",
+   "nix/modules/computers/backup.nix",
+   "nix/modules/storage/backup.nix",
+   "nix/modules/storage/store.nix"
+  ],
+  "why": {
+   "nix/tests/computer-backup.nix": "test",
+   "nix/tests/computer-backup.py": "test",
+   "nix/modules/computers/backup.nix": "the nightly unit, its snapshot, its room check",
+   "nix/modules/storage/backup.nix": "newRepoGuard, the password and key it shares",
+   "nix/modules/storage/store.nix": "the bucket it writes"
+  },
+  "notes": "The copy's guard is in the store test.",
   "family": "vm"
  },
  "work-memory": {

@@ -120,6 +120,59 @@ a.succeed("""echo '{"photos":["a","b"]}' > /run/dd-placed/copies.json""")
 a.succeed("systemctl start dd-store-copy.service dd-store-copy-recent.service")
 copied("photos", "p2", "the plan keeps it here")
 
+# a guarded prefix goes only where it leaves room: never into b's last 1M (the
+# floor here), whatever a holds. What b says of its room is the agreed state's
+a.succeed("dd if=/dev/urandom of=/tmp/big bs=1M count=2")
+a.succeed(
+    "set -a; . /var/lib/dd-store/keys/photos.env; AWS_DEFAULT_REGION=us-east-1 "
+    f"{s3} s3 cp /tmp/big s3://photos/big/one"
+)
+put(a, "photos", "beside", "the rest of the bucket")
+a.succeed("mkdir -p /run/state")
+a.succeed(
+    "systemd-run --unit=state-standin python3 -m http.server --directory /run/state 4195"
+)
+
+
+def room(free):
+    a.succeed(
+        'echo \'{"boxes":{"b":{"facts":{"store_free_bytes":'
+        f"{free}"
+        ',"store_size_bytes":1048576}}}}\' > /run/state/state.tmp'
+        " && mv /run/state/state.tmp /run/state/state"
+    )
+
+
+def on_b(name):
+    status, _ = b.execute(
+        "set -a; . /var/lib/dd-store/keys/photos.env; AWS_DEFAULT_REGION=us-east-1 "
+        f"{s3} s3 ls s3://photos/{name}"
+    )
+    return status == 0
+
+
+skipped = """grep -c 'dd_store_copy_skipped{bucket="photos",box="b"} 1' /var/lib/dd-facts/store-copy.prom"""
+# no word on its room is no room; the recent copy never carries it either
+start_fresh(a, "dd-store-copy-recent.service")
+assert get(b, "photos", "beside") == "the rest of the bucket"
+run = start_fresh(a, "dd-store-copy.service")
+logged(run, "is not copied")
+assert not on_b("big/one")
+a.succeed(skipped)
+# what it holds back is no lost copy
+a.succeed("! grep -q dd_store_lost /var/lib/dd-facts/store-copy.prom")
+# room for it, but not for it and the floor
+room(2 * 1024 * 1024 + 512 * 1024)
+logged(start_fresh(a, "dd-store-copy.service"), "is not copied")
+assert not on_b("big/one")
+a.succeed(skipped)
+# room for both: it goes, and the fact is gone
+room(8 * 1024 * 1024)
+start_fresh(a, "dd-store-copy.service")
+assert on_b("big/one")
+assert a.execute(skipped)[0] != 0
+a.succeed("systemctl stop state-standin")
+
 # b nearly full: what a sends is refused, what b keeps still read
 # the timer stopped, and a run of it already going: one ending after the
 # touch would see the room and take the mark away
