@@ -99,6 +99,7 @@ let
             RELEASE_KEY = "/etc/dd/test-release.pub";
             SOURCE = "git+${server}/box.git";
             DETECT = "${../modules/box/report}/detect.sh";
+            BOX_JSON = "${../installer/box.json}";
             NOT_BEFORE = "100";
             FILES = "${server}/files";
           };
