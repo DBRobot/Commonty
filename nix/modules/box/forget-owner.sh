@@ -1,9 +1,10 @@
 # shellcheck shell=bash
-# What is on a joined box's disk of one member it no longer serves: their
-# remote computers' disks and their game servers and kept worlds. Started only
-# by dd-control (cmd/dd-control/enlisted.go), on the plan's word and its own
-# reading of the agreed state; anything of anyone else's is left. Safe to run
-# again. What it could not remove yet (still running) keeps it failing, and
+# A joined box whose owner it no longer serves is a stranger, which keeps only
+# ciphertext copies: every remote computer's disk on it and every game server
+# and kept world, its former owner's and those of any member who ran one here,
+# go. Started only by dd-control (cmd/dd-control/enlisted.go), on the plan's
+# word and its own reading of the agreed state, naming the owner it knew. Safe
+# to run again. What it could not remove yet (still running) keeps it failing, and
 # dd-control tries again: only when all is gone does the member come off what
 # this box has known, so a member it never knew can never be asked for.
 set -u
@@ -25,7 +26,6 @@ for f in "$owners"/*; do
   [ -f "$f" ] || continue
   id=$(basename "$f")
   [[ $id =~ ^[0-9a-f]{16}$ ]] || continue
-  [ "$(cat "$f")" = "$member" ] || continue
   if [ -e "$root/run/dd-placed/computer-$id" ]; then
     echo "computer-$id still runs here" >&2
     left=1
@@ -46,12 +46,11 @@ if [ -d "$games/records" ]; then
       [ -f "$r" ] || continue
       id=$(basename "$r" .json)
       [[ $id =~ ^[A-Za-z0-9_-]+$ ]] || continue
-      [ "$(jq -r '.owner // empty' "$r")" = "$member" ] || continue
       rm -rf -- "$games/instances/$id"
       rm -f -- "$games/players/$id.json" "$games/control/$id.qmp" "$r"
       echo "game server $id: removed"
     done
-    rm -rf -- "${games:?}/worlds/$member"
+    rm -rf -- "${games:?}/worlds"
   fi
 fi
 

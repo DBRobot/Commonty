@@ -1,12 +1,12 @@
-# What a joined box removes of a former owner (box/forget-owner.sh): theirs and
-# nobody else's, nothing for a member it never knew, and not what still runs.
+# What a joined box removes when its owner has ended (box/forget-owner.sh):
+# every computer and game on it; nothing for a member it never knew as its
+# owner, nothing outside those folders, and not what still runs.
 { pkgs, ... }:
 pkgs.runCommand "forget-owner"
   {
     nativeBuildInputs = [
       pkgs.bash
       pkgs.coreutils
-      pkgs.jq
     ];
   }
   ''
@@ -24,14 +24,18 @@ pkgs.runCommand "forget-owner"
         mkdir -p r/var/lib/dd-games/instances/$who-1
       done
       touch r/var/lib/dd-control/owners-seen/ann
+      touch r/var/lib/dd-games/measured.json
+      mkdir -p r/var/lib/other && touch r/var/lib/other/kept
     }
 
     fresh
     run ann
     [ ! -e r/var/lib/private/dd-computer/aaaaaaaaaaaaaaaa ] && [ ! -e r/var/lib/dd-computer-owners/aaaaaaaaaaaaaaaa ]
     [ ! -e r/var/lib/dd-games/records/ann-1.json ] && [ ! -e r/var/lib/dd-games/instances/ann-1 ] && [ ! -e r/var/lib/dd-games/worlds/ann ]
-    [ -e r/var/lib/private/dd-computer/bbbbbbbbbbbbbbbb/home.qcow2 ] && [ -e r/var/lib/dd-computer-owners/bbbbbbbbbbbbbbbb ]
-    [ -e r/var/lib/dd-games/records/bea-1.json ] && [ -e r/var/lib/dd-games/instances/bea-1 ] && [ -e r/var/lib/dd-games/worlds/bea ]
+    # another member's on it too: this box is nobody's now
+    [ ! -e r/var/lib/private/dd-computer/bbbbbbbbbbbbbbbb ] && [ ! -e r/var/lib/dd-games/worlds/bea ]
+    # and nothing else
+    [ -e r/var/lib/dd-games/measured.json ] && [ -e r/var/lib/other/kept ]
     [ ! -e r/var/lib/dd-control/owners-seen/ann ]
     # and once done, a second word does nothing
     if run ann; then echo "ran with no record of them"; exit 1; fi

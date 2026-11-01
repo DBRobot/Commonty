@@ -22,6 +22,8 @@ box it runs by the plan alone, with no lease. It gets its Commonty network key
 at the same door, which takes the box's keys from the agreed state and hands
 one only to the box the plan at that state gives the computer, when that box
 is the computer's owner's; on another member's box it has the internet only.
+A joined box whose owner has ended removes every computer's disk on it, a day on
+([joining](joining.md)).
 
 A box hosts computers when its own report says it has KVM on x86_64 and
 its owner does not bar them: it is then built with the `compute` bundle
