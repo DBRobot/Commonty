@@ -1092,7 +1092,7 @@ func main() {
 			return place.Decide(i, s, cfg.Rules.GoneAfter, place.Owners(v))
 		}
 		joinedHolder = func(s *state.State, id string) (string, string) {
-			return planHolder(s, decide(s), boxOwners(ids, s), id)
+			return planHolder(s, decide(s), place.Owners(identView(ids, s)), id)
 		}
 		placed.limits = cfg.Computers
 		placed.noLeases = *joinKey != ""

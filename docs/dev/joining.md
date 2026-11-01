@@ -306,9 +306,9 @@ replaying the directory serves its replay, which knows invites only).
   (`dd.box.owner` stays empty on a joined box).
 - **When it stops being theirs**: an unenlist, leaving or a suspension stops
   everything of theirs on it in the next plan; only ciphertext copies stay.
-  A box with no owner is a stranger. Its disk's plaintext of theirs (their
-  computers' disks, game servers and worlds) goes once a signed word that
-  ended it has stood an hour (`ident.View` `ended`, `place.Forget`,
+  A box with no owner is a stranger. The plaintext on its disk (every
+  computer's disk, game server and world on it, whoever's) goes once a signed
+  word that ended it has stood 24 hours (`ident.View` `ended`, `place.Forget`,
   `box/forget-owner.sh`): the unenlist, their leaving, or a dated suspension
   past its window. A suspension in its window keeps it, as a suspended member
   keeps everything; being off the enlisted list for any other reason, or an
