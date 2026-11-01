@@ -39,6 +39,16 @@ anyone needs to trust it with.
 - **Its store** gets a key at each other box's store, sealed to the age
   recipient it joined with (`dd-store-joined`). When it is gone from the
   agreed state, so is its key; what it copied there stays.
+- **Its backup**: a member's box backs up as the release's boxes do, once
+  it is enlisted: every service's `dd.backup.paths`, to `backups-<box>` in its
+  own store, copied where the plan finds room, at most 100 GiB in each other
+  store. The box makes the password (`dd-backup-seal`,
+  [`backup-seal.nix`](../../nix/modules/storage/backup-seal.nix)) and seals it
+  to its owner's devices, root and paper key, as the agreed identity state
+  has them, kept beside the repository (`dd-devices.json`) and copied with it,
+  so a dead box's backup can be opened. It reseals when their keys change and
+  stops, and says so, if the box changes hands. A stranger, holding only
+  ciphertext copies, backs up nothing. No page or command opens one yet.
 - **Bounds:** at most 32 strangers at once, 4 joins an hour across the
   fleet, 8 joining at once at the relay. One unheard for 30 days is
   dropped from the agreed state.

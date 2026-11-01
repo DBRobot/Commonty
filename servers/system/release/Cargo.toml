@@ -19,9 +19,15 @@ path = "src/bin/dd-attest.rs"
 name = "dd-box-setup"
 path = "src/bin/dd-box-setup.rs"
 
+[[bin]]
+name = "dd-backup-seal"
+path = "src/bin/dd-backup-seal.rs"
+
 [dependencies]
 sha2 = "0.10"
 identity = { path = "../../../client/identity" }
+# a box's backup password, sealed to its owner's keys (dd-backup-seal)
+library = { path = "../../../client/library" }
 ed25519-dalek = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

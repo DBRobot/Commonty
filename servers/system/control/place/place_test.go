@@ -943,3 +943,28 @@ func TestAWriterEveryBoxRefusedIsTriedAgain(t *testing.T) {
 		t.Fatalf("a refusal not kept while another box could run it: %+v", p.Boxes)
 	}
 }
+
+func TestAMembersBoxsBackupIsKeptAsAReleaseBoxsIs(t *testing.T) {
+	in := Inputs{Buckets: map[string]Bucket{
+		"ente":          {Service: "s", Copies: 2},
+		"backups-node1": {Service: "restic-backup", Copies: 2, Box: "node1"},
+	}}
+	s := &state.State{Joined: map[string]*state.Joined{"jmember": {}, "jstranger": {}}}
+	got := withMemberBackups(in, s, map[string]bool{"jmember": true, "jgone": true})
+	if b := got.Buckets["backups-jmember"]; b.Box != "jmember" || b.Copies != 2 || b.Service != "restic-backup" {
+		t.Fatalf("a member's box: %+v", got.Buckets)
+	}
+	if _, ok := got.Buckets["backups-jstranger"]; ok {
+		t.Fatal("a stranger's backup takes room in other boxes' stores")
+	}
+	if _, ok := got.Buckets["backups-jgone"]; ok {
+		t.Fatal("a box not in the agreed state")
+	}
+	if _, ok := in.Buckets["backups-jmember"]; ok {
+		t.Fatal("the release's inputs were changed")
+	}
+	// with no member's box the plan is made from just what the release says
+	if same := withMemberBackups(in, s, nil); len(same.Buckets) != 2 {
+		t.Fatalf("%+v", same.Buckets)
+	}
+}

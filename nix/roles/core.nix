@@ -49,6 +49,7 @@ in
     ../modules/storage/postgres-isolation.nix
     ../modules/storage/postgres-backup.nix
     ../modules/storage/backup.nix
+    ../modules/storage/backup-seal.nix
     ../modules/storage/snapshots.nix
     ../modules/box/agent.nix
     # a box that joined hands on its work before a clean shutdown

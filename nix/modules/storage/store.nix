@@ -458,6 +458,11 @@ in
       default = { };
       description = "a service's units run to their end, in order, on its planned handover, before its final copy (the forge's own copy into this store)";
     };
+    memberBackupQuota = lib.mkOption {
+      type = lib.types.str;
+      default = "100GiB";
+      description = "the most a member's box's backup may hold in this store";
+    };
     publicPort = lib.mkOption {
       type = lib.types.port;
       default = 3443;
@@ -761,6 +766,25 @@ in
             echo "$p: its recipient is not one age takes"
           fi
         done
+        # a member's box's own backup, copied here: a bucket its key alone
+        # writes, while it is enlisted and to a limit. A stranger has none,
+        # and what one no longer enlisted copied here stays, read only
+        ids=$(curl -fsS --max-time 10 ${cfg.control}/identity) || ids=""
+        if [ -n "$ids" ]; then
+          enlisted=$(printf '%s' "$ids" | jq -r '.enlisted // {} | keys[]')
+          for p in $now; do
+            case "$p" in j[0-9a-f]*) ;; *) continue ;; esac
+            [ -s ${state}/from/$p.env ] || continue
+            id=$(awk -F= '/ACCESS_KEY_ID/ { print $2 }' ${state}/from/$p.env)
+            if printf '%s\n' $enlisted | grep -qx "$p"; then
+              g bucket info "backups-$p" >/dev/null 2>&1 || g bucket create "backups-$p" >/dev/null
+              g bucket set-quotas --max-size ${cfg.memberBackupQuota} "backups-$p" >/dev/null
+              g bucket allow --read --write "backups-$p" --key "$id" >/dev/null
+            elif g bucket info "backups-$p" >/dev/null 2>&1; then
+              g bucket deny --write "backups-$p" --key "$id" >/dev/null
+            fi
+          done
+        fi
         # a joined box gone from the agreed state: its key goes
         for f in ${state}/from/j*.env; do
           [ -e "$f" ] || continue

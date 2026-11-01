@@ -160,6 +160,7 @@ func ComputerService(id string) string { return "computer-" + id }
 // member has enlisted and that qualify (the agreed identity state's), which
 // keep copies as a box of the release does.
 func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool) Plan {
+	in = withMemberBackups(in, s, members)
 	p := Plan{Boxes: map[string][]Decision{}, Unplaced: map[string]string{}, Copies: map[string][]string{}, DoesNotFit: map[string][]string{}}
 	live := []string{}
 	for name := range in.Boxes {
@@ -981,6 +982,44 @@ func Decide(in Inputs, s *state.State, goneAfter int64, members map[string]bool)
 		}
 	}
 	return p
+}
+
+// withMemberBackups: a member's box writes its own backup as a box of the
+// release does, so the plan keeps it as it keeps theirs: backups-<box>, like
+// the release's own. No release names it, so it is added here, and no
+// stranger's: only what a member enlisted takes room in other boxes' stores.
+func withMemberBackups(in Inputs, s *state.State, members map[string]bool) Inputs {
+	if len(members) == 0 {
+		return in
+	}
+	var like *Bucket
+	names := []string{}
+	for b := range in.Buckets {
+		names = append(names, b)
+	}
+	sort.Strings(names)
+	for _, b := range names {
+		if bk := in.Buckets[b]; bk.Box != "" && b == "backups-"+bk.Box {
+			like = &bk
+			break
+		}
+	}
+	if like == nil {
+		return in
+	}
+	buckets := make(map[string]Bucket, len(in.Buckets)+len(members))
+	for b, bk := range in.Buckets {
+		buckets[b] = bk
+	}
+	for name, is := range members {
+		if _, joined := s.Joined[name]; is && joined {
+			bk := *like
+			bk.Box = name
+			buckets["backups-"+name] = bk
+		}
+	}
+	in.Buckets = buckets
+	return in
 }
 
 func contains(xs []string, x string) bool {

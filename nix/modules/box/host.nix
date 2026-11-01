@@ -205,8 +205,9 @@ in
           url = "https://store.${n}.${config.dd.domain}:${toString config.dd.store.publicPort}";
           recipient = secretsKey n;
         });
-        # a bucket for each of them where each writes its own (backups-<box>)
-        boxes = stores;
+        # a bucket for each of them where each writes its own (backups-<box>);
+        # a box that joined on its own key is in no list but its own
+        boxes = stores ++ lib.optional config.dd.box.joined config.networking.hostName;
       };
     }
     # the agent fetches each release's closure from the nix cache, in the
