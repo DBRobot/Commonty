@@ -40,7 +40,7 @@ function show(i) {
   $('back').hidden = i === 0 || i >= 4;
   $('next').hidden = i >= 4;
   $('next').disabled = !ready[STEPS[i]];
-  const enter = { firmware, network, disks, backup, install }[STEPS[i]];
+  const enter = { firmware, network, disk: disks, backup, install }[STEPS[i]];
   if (enter) enter();
 }
 function can(step, ok) {

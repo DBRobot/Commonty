@@ -56,6 +56,8 @@
   files = [
     "plaintext-label"
     "calendar-js"
+    # the box installer's screen, step by step
+    "installer-page"
     # the Git pages' early ask stays inside /repos/<owner>/<name>
     "git-path"
     "boxes"

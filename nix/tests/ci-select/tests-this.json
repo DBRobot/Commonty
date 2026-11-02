@@ -3921,5 +3921,18 @@
    "nix/modules/computers/computer-facts.sh": "the script under test"
   },
   "notes": ""
+ },
+ "installer-page": {
+  "paths": [
+   "nix/tests/installer-page.nix",
+   "nix/tests/installer-page/**",
+   "nix/installer/web/setup.js"
+  ],
+  "why": {
+   "nix/tests/installer-page.nix": "the check",
+   "nix/tests/installer-page/**": "steps.test.mjs",
+   "nix/installer/web/setup.js": "the screen's script under test"
+  },
+  "notes": ""
  }
 }
