@@ -422,38 +422,89 @@ pub(crate) async fn download_to(
     if hash_file(&at).await.as_deref() == Some(f.sha256.as_str()) {
         return Ok(at);
     }
-    // older images go: one is a gigabyte or so
+    let part = dir.join(format!("{}.part", f.name));
+    // older images go: one is a gigabyte or so. This one's part stays, to
+    // carry on from
     if let Ok(mut d) = tokio::fs::read_dir(&dir).await {
         while let Ok(Some(e)) = d.next_entry().await {
-            let _ = tokio::fs::remove_file(e.path()).await;
+            if e.path() != part {
+                let _ = tokio::fs::remove_file(e.path()).await;
+            }
         }
     }
-    let r = directory::http()
-        .map_err(|e| e.to_string())?
-        .get(&f.url)
-        .send()
-        .await
-        .map_err(|e| format!("the image did not download: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("the image did not download: {e}"))?;
-    let total = r.content_length().unwrap_or(0);
-    moved(total, 0, 0);
-    let part = dir.join(format!("{}.part", f.name));
-    let mut out = tokio::fs::File::create(&part)
-        .await
-        .map_err(|e| e.to_string())?;
+    // a connection that goes quiet is dropped and this carries on where it stopped
+    let http = long()?;
     let mut h = sha2::Sha256::new();
-    let mut done = 0u64;
+    let mut done: u64;
+    let mut total: u64;
+    let mut tries = 0;
     let started = std::time::Instant::now();
-    let mut stream = r.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("the image did not download: {e}"))?;
-        h.update(&chunk);
-        out.write_all(&chunk).await.map_err(|e| e.to_string())?;
-        done += chunk.len() as u64;
-        let bps = (done as f64 / started.elapsed().as_secs_f64().max(0.001)) as u64;
-        moved(total, done, bps);
-    }
+    let mut out = loop {
+        let had = match hash_into(&part, &mut h).await {
+            Some(n) if n > 0 => n,
+            _ => {
+                h = sha2::Sha256::new();
+                0
+            }
+        };
+        let mut req = http.get(&f.url);
+        if had > 0 {
+            req = req.header(reqwest::header::RANGE, format!("bytes={had}-"));
+        }
+        let r = match req.send().await.and_then(|r| r.error_for_status()) {
+            Ok(r) => r,
+            Err(e) if tries < 5 => {
+                tries += 1;
+                eprintln!("installer image: {e}; trying again");
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                continue;
+            }
+            Err(e) => return Err(format!("the image did not download: {e}")),
+        };
+        let resumed = had > 0 && r.status() == reqwest::StatusCode::PARTIAL_CONTENT;
+        if !resumed {
+            h = sha2::Sha256::new();
+        }
+        done = if resumed { had } else { 0 };
+        total = done + r.content_length().unwrap_or(0);
+        moved(total, done, 0);
+        let mut out = tokio::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .append(resumed)
+            .truncate(!resumed)
+            .open(&part)
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut stream = r.bytes_stream();
+        let mut broke = None;
+        while let Some(chunk) = stream.next().await {
+            let chunk = match chunk {
+                Ok(c) => c,
+                Err(e) => {
+                    broke = Some(e);
+                    break;
+                }
+            };
+            h.update(&chunk);
+            out.write_all(&chunk).await.map_err(|e| e.to_string())?;
+            done += chunk.len() as u64;
+            let bps = (done as f64 / started.elapsed().as_secs_f64().max(0.001)) as u64;
+            moved(total, done, bps);
+        }
+        match broke {
+            None => break out,
+            Some(e) if tries < 5 => {
+                tries += 1;
+                eprintln!("installer image stopped at {done} of {total}: {e}; carrying on");
+                out.flush().await.map_err(|e| e.to_string())?;
+                drop(out);
+                h = sha2::Sha256::new();
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+            Some(e) => return Err(format!("the image did not download: {e}")),
+        }
+    };
     out.flush().await.map_err(|e| e.to_string())?;
     drop(out);
     let got = hex(&h.finalize());
@@ -472,6 +523,34 @@ pub(crate) async fn download_to(
 
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+/// for big downloads: no limit on the whole, which takes minutes, only on
+/// a connection that goes quiet
+fn long() -> Result<reqwest::Client, String> {
+    directory::builder()
+        .map_err(|e| e.to_string())?
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(20))
+        .read_timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+/// what is in `p` so far, fed to `h`; its length
+async fn hash_into(p: &std::path::Path, h: &mut sha2::Sha256) -> Option<u64> {
+    use tokio::io::AsyncReadExt as _;
+    let mut f = tokio::fs::File::open(p).await.ok()?;
+    let mut buf = vec![0u8; 1 << 20];
+    let mut n = 0u64;
+    loop {
+        let got = f.read(&mut buf).await.ok()?;
+        if got == 0 {
+            return Some(n);
+        }
+        h.update(&buf[..got]);
+        n += got as u64;
+    }
 }
 
 async fn hash_file(p: &std::path::Path) -> Option<String> {
@@ -878,8 +957,7 @@ async fn fetch_backup<R: Runtime>(app: &AppHandle<R>, label: &str) -> Result<Bac
     let get = backup_url(app, label)
         .await?
         .ok_or("the box holds no backup of that home controller")?;
-    let r = directory::http()
-        .map_err(|e| e.to_string())?
+    let r = long()?
         .get(&get)
         .send()
         .await
@@ -1214,6 +1292,65 @@ pub(crate) mod card {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // the server drops the first connection halfway; the download asks for
+    // the rest and the whole still matches the signed hash
+    #[test]
+    fn a_dropped_download_carries_on() {
+        use std::io::{Read as _, Write as _};
+        let body: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
+        let sum = hex(&sha2::Sha256::digest(&body));
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        let served = body.clone();
+        let server = std::thread::spawn(move || {
+            let mut ranges = vec![];
+            for n in 0..2 {
+                let (mut c, _) = l.accept().unwrap();
+                let mut req = vec![0u8; 4096];
+                let got = c.read(&mut req).unwrap();
+                let req = String::from_utf8_lossy(&req[..got]).to_lowercase();
+                let from = req
+                    .lines()
+                    .find_map(|l| l.strip_prefix("range: bytes="))
+                    .map(|r| r.trim_end_matches('-').parse::<usize>().unwrap());
+                ranges.push(from);
+                let start = from.unwrap_or(0);
+                let rest = &served[start..];
+                let head = if from.is_some() {
+                    format!(
+                        "HTTP/1.1 206 Partial Content\r\ncontent-length: {}\r\ncontent-range: bytes {start}-{}/{}\r\n\r\n",
+                        rest.len(),
+                        served.len() - 1,
+                        served.len()
+                    )
+                } else {
+                    format!("HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n", rest.len())
+                };
+                c.write_all(head.as_bytes()).unwrap();
+                let send = if n == 0 {
+                    &rest[..rest.len() / 2]
+                } else {
+                    rest
+                };
+                c.write_all(send).unwrap();
+            }
+            ranges
+        });
+        let dir = std::env::temp_dir().join(format!("dd-dl-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let f = File {
+            name: "img.zst".into(),
+            url: format!("http://127.0.0.1:{port}/img.zst"),
+            sha256: sum,
+        };
+        let at =
+            tauri::async_runtime::block_on(download_to(&f, dir.clone(), &|_, _, _| {})).unwrap();
+        assert_eq!(std::fs::read(&at).unwrap(), body);
+        assert_eq!(server.join().unwrap(), vec![None, Some(150_000)]);
+        let _ = std::fs::remove_file(&at);
+        let _ = std::fs::remove_dir(&dir);
+    }
 
     #[test]
     fn the_card_out_of_a_checked_manifest() {
