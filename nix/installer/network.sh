@@ -15,6 +15,7 @@ d=/run/dd-installer-net
 sock=$d/tailscaled.sock
 case "${1:-}" in
   up)
+    : "${TICKET:?}"
     [ -s "$TICKET" ] || { echo "no join ticket on the drive" >&2; exit 1; }
     rm -rf "$d"
     install -d -m 0700 "$d"
@@ -22,8 +23,8 @@ case "${1:-}" in
     # this join's own recipient, in memory (/run) and gone with it
     age-keygen -o "$d/key" 2>/dev/null
     recipient=$(age-keygen -y "$d/key")
-    ticket=$(dd-box-setup --narrow-ticket "$TICKET" --recipient "$recipient")
-    jq -n --arg t "$ticket" --arg r "$recipient" '{ticket: $t, recipient: $r}' \
+    narrowed=$(dd-box-setup --narrow-ticket "$TICKET" --recipient "$recipient")
+    jq -n --arg t "$narrowed" --arg r "$recipient" '{ticket: $t, recipient: $r}' \
       | curl -fsS --max-time 60 -H 'content-type: application/json' --data-binary @- "$NET_DOOR" \
       | age -d -i "$d/key" > "$d/authkey" \
       || { echo "the fleet gave no way onto its network for the backup" >&2; exit 1; }
