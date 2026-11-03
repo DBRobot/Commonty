@@ -505,11 +505,11 @@ for t, r in ((narrowed, r2), (ticket, r2)):
     ).strip()
     assert refused == "403", refused
 # and gone when it leaves: at its logout, or once headscale stops waiting
-# for it (10 s here, network.nix)
+# for it (70 s here, headscale's least, network.nix)
 other.succeed("dd-installer-net down")
 box.wait_until_succeeds(
     "headscale nodes list -o json | jq -e '[.[] | select(.given_name | startswith(\"installer-\"))] | length == 0'",
-    timeout=120,
+    timeout=180,
 )
 assert mine not in box.succeed("headscale nodes list -o json")
 box.succeed("systemctl stop dd-control-standin.service")

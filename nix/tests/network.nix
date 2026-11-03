@@ -31,7 +31,7 @@
     # an installer's node goes at its logout, which a real one sends over
     # https; this control is plain http, which tailscale will not dial anew,
     # so here it goes when headscale stops waiting for it
-    services.headscale.settings.ephemeral_node_inactivity_timeout = pkgs.lib.mkForce "10s";
+    services.headscale.settings.ephemeral_node_inactivity_timeout = pkgs.lib.mkForce "70s";
     services.openssh.enable = true;
     # kim has the box at home; sarah is the fleet's admin. A host is not an
     # admin: kim's devices get its dns and nothing more
