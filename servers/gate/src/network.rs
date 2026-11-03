@@ -426,6 +426,11 @@ const COMPUTER_TAG: &str = "tag:computer";
 /// fleet's admin: beside tag:computer, the box-admin ports that tag has not
 const ADMIN_COMPUTER_TAG: &str = "tag:admin-computer";
 
+/// a box installer's node, on the network for its disk's backup alone
+const INSTALLER_TAG: &str = "tag:installer";
+/// how long an installer's node may stay: a whole disk's backup, and no more
+const INSTALLER_MAX_SECS: u64 = 24 * 3600;
+
 pub struct BoxKeys {
     signs: VerifyingKey,
     recipient: String,
@@ -773,6 +778,14 @@ impl Door {
                 whose = b.as_ref().map(|b| b.owner.clone()).unwrap_or_default();
                 b.map(|b| format!("{}'s computer {}", b.owner, b.id))
                     .unwrap_or_else(|| "no one's computer".into())
+            } else if tags.contains(&INSTALLER_TAG) {
+                let made = n["createdAt"].as_str().and_then(unix_of);
+                let old = made.is_none_or(|m| (now_ms / 1000) as u64 > m + INSTALLER_MAX_SECS);
+                if !old {
+                    continue;
+                }
+                whose = String::new();
+                "an installer's, done with".to_string()
             } else if !tags.is_empty() {
                 continue;
             } else {
@@ -901,17 +914,31 @@ impl Door {
     }
 
     async fn mint(&self, name: &str, tags: &[&str]) -> Result<(String, u64)> {
-        self.mint_any(name, tags).await.map(|(k, e, _)| (k, e))
+        self.mint_any(name, tags, false)
+            .await
+            .map(|(k, e, _)| (k, e))
+    }
+
+    /// a key whose node leaves the network when it disconnects
+    async fn mint_ephemeral(&self, name: &str, tags: &[&str]) -> Result<(String, u64)> {
+        self.mint_any(name, tags, true)
+            .await
+            .map(|(k, e, _)| (k, e))
     }
 
     /// a key, when it expires, and its id (what a node that joins with it
     /// names as its preAuthKey): a key with no id could bind no node
     async fn mint_id(&self, name: &str, tags: &[&str]) -> Result<(String, u64, u64)> {
-        let (k, e, id) = self.mint_any(name, tags).await?;
+        let (k, e, id) = self.mint_any(name, tags, false).await?;
         Ok((k, e, id.context("headscale gave no key id")?))
     }
 
-    async fn mint_any(&self, name: &str, tags: &[&str]) -> Result<(String, u64, Option<u64>)> {
+    async fn mint_any(
+        &self,
+        name: &str,
+        tags: &[&str],
+        ephemeral: bool,
+    ) -> Result<(String, u64, Option<u64>)> {
         let user = self.user_id(name).await?;
         let expires = SystemTime::now() + TTL;
         let stamp = humantime(expires);
@@ -922,7 +949,7 @@ impl Door {
                 Some(serde_json::json!({
                     "user": user,
                     "reusable": false,
-                    "ephemeral": false,
+                    "ephemeral": ephemeral,
                     "expiration": stamp,
                     "aclTags": tags
                 })),
@@ -1495,10 +1522,152 @@ pub(crate) async fn box_join(State(app): State<Arc<App>>, Json(ask): Json<BoxAsk
     }
 }
 
+#[derive(serde::Deserialize)]
+pub(crate) struct InstallerAsk {
+    ticket: String,
+    recipient: String,
+}
+
+/// What an installer's ask is good for: the member and ticket id, when the
+/// ticket is a member's join ticket narrowed by its holder to a network key
+/// sealed to `recipient` (setup::narrow_ticket). Narrowed, it opens no
+/// pending backup and gets no key sealed to anyone else, so whoever
+/// carries the ask (the front door, Cloudflare) can do nothing with it.
+pub(crate) fn installer_ticket(
+    entry_of: impl Fn(&str) -> anyhow::Result<Option<identity::SignedEntry>>,
+    token: &str,
+    recipient: &str,
+    now: u64,
+) -> anyhow::Result<(String, String)> {
+    anyhow::ensure!(
+        recipient.len() <= 100
+            && recipient.starts_with("age1")
+            && recipient[4..]
+                .bytes()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()),
+        "not an age recipient"
+    );
+    let blocks = biscuit_auth::UnverifiedBiscuit::from_base64(token)
+        .map_err(|e| anyhow::anyhow!("{e}"))?
+        .block_count();
+    // the whole ticket never comes this way: it is the pending backup's
+    anyhow::ensure!(blocks >= 2, "a ticket not narrowed to this ask");
+    let (user, _) =
+        crate::verify_device_token_at(entry_of, token, "join", &installer_here(recipient), now)?;
+    let id = crate::member_boxes::ticket_of(token)
+        .ok_or_else(|| anyhow::anyhow!("not one ticket fact"))?;
+    Ok((user, id))
+}
+
+/// the `here` a narrowed ticket names: a key sealed to this recipient
+pub(crate) fn installer_here(recipient: &str) -> String {
+    format!("installer-network:{recipient}")
+}
+
+/// POST /_dd/network/installer, {ticket, recipient} -> a key for one box
+/// installer, sealed to `recipient`: single-use, ten minutes, its node
+/// ephemeral and tagged an installer, which the network lets reach the
+/// boxes' front doors and nothing else. For a disk's backup before the
+/// installer wipes it (nix/installer/backup.sh); a ticket a box was
+/// enlisted with gets none.
+pub(crate) async fn installer_join(
+    State(app): State<Arc<App>>,
+    Json(ask): Json<InstallerAsk>,
+) -> Response {
+    let Some(door) = app.network.as_ref() else {
+        return (StatusCode::NOT_FOUND, "this box has no network door").into_response();
+    };
+    // nothing new while who is who is not known
+    if let Some(r) = app.no_new_session() {
+        return r;
+    }
+    let now = identity::now();
+    let (user, id) = match installer_ticket(|u| app.entry(u), &ask.ticket, &ask.recipient, now) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("network: an installer's ask refused: {e:#}");
+            return (StatusCode::FORBIDDEN, "not a join ticket for this").into_response();
+        }
+    };
+    if app.directory.ident.is_some() {
+        match crate::member_boxes::enlisted(&app) {
+            Some(e) if e.values().any(|o| o.ticket == id) => {
+                return (StatusCode::FORBIDDEN, "a box was set up with that ticket")
+                    .into_response();
+            }
+            Some(_) => {}
+            None => {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "who is who is not known yet",
+                )
+                    .into_response();
+            }
+        }
+    }
+    {
+        let mut asked = door.asked.lock().unwrap();
+        let k = format!("installer {id}");
+        if let Some(&(at, _)) = asked.get(&k)
+            && now < at + EVERY
+        {
+            return (StatusCode::TOO_MANY_REQUESTS, "one a minute").into_response();
+        }
+        asked.insert(k, (now, now));
+    }
+    let bad = |e: anyhow::Error| (StatusCode::BAD_GATEWAY, format!("{e:#}")).into_response();
+    let key = match door.mint_ephemeral("boxes", &[INSTALLER_TAG]).await {
+        Ok((k, _)) => k,
+        Err(e) => return bad(e),
+    };
+    eprintln!("network: an installer's key for {user}'s ticket {id}");
+    match seal(&door.age, &ask.recipient, &key) {
+        Ok(sealed) => sealed.into_response(),
+        Err(e) => bad(e),
+    }
+}
+
+/// seconds since 1970 of an RFC 3339 time as headscale gives it
+/// (2026-11-03T04:05:06Z, or with a fraction or an offset of +00:00)
+fn unix_of(s: &str) -> Option<u64> {
+    let b = s.as_bytes();
+    if b.len() < 19 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' {
+        return None;
+    }
+    let n = |r: std::ops::Range<usize>| s.get(r)?.parse::<i64>().ok();
+    let (y, m, d) = (n(0..4)?, n(5..7)?, n(8..10)?);
+    let (hh, mm, ss) = (n(11..13)?, n(14..16)?, n(17..19)?);
+    let rest = &s[19..];
+    let rest = rest.trim_start_matches(|c: char| c == '.' || c.is_ascii_digit());
+    if rest != "Z" && rest != "+00:00" {
+        return None;
+    }
+    // days from civil (Howard Hinnant's algorithm)
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    u64::try_from(days * 86400 + hh * 3600 + mm * 60 + ss).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;
+
+    #[test]
+    fn headscale_times_read_as_seconds() {
+        assert_eq!(unix_of("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(unix_of("2026-11-03T04:05:06Z"), Some(1793678706));
+        assert_eq!(unix_of("2026-11-03T04:05:06.123456789Z"), Some(1793678706));
+        assert_eq!(unix_of("2026-11-03T04:05:06+00:00"), Some(1793678706));
+        assert_eq!(unix_of("2000-02-29T12:00:00Z"), Some(951825600));
+        assert_eq!(unix_of("2026-11-03T04:05:06+05:00"), None);
+        assert_eq!(unix_of(""), None);
+    }
 
     /// A fake headscale with three nodes: a box, a member's laptop and a
     /// stranger's phone. Only the phone may go.

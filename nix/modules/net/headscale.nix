@@ -48,6 +48,10 @@ let
       # a box that joined on its own key (state/join.go): a stranger, which
       # keeps copies and nothing else
       tagOwners."tag:joined" = [ "boxes@" ];
+      # a box installer, for the backup of the disk it is about to wipe
+      # (nix/installer/backup.sh): an ephemeral node the gate keys on a
+      # member's join ticket, gone when it disconnects
+      tagOwners."tag:installer" = [ "boxes@" ];
       # A person's devices reach a box's front door and its game servers.
       # The fleet's admin's devices reach every box for what an admin needs:
       # ssh, its dns, the cache push (at its store). A box's host - whoever has it at home -
@@ -104,6 +108,13 @@ let
           action = "accept";
           src = [ "tag:joined" ];
           dst = [ "tag:box:3443" ];
+        }
+        # an installer reaches the boxes' front doors, where its ticket
+        # opens its one pending backup, and nothing else; nothing reaches it
+        {
+          action = "accept";
+          src = [ "tag:installer" ];
+          dst = [ "tag:box:443" ];
         }
       ]
       ++ lib.optional (cfg.admin != "") {

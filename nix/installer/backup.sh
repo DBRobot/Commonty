@@ -7,7 +7,8 @@
 # backup holds what was used and no free space, and what comes back is
 # files to open, not a disk image to restore whole.
 # Environment: DISK, TICKET (a file), BACKUP_KEY (a file), FILES (the
-# fleet's files address, https://files.<domain>).
+# fleet's files address, https://files.<domain>), and NET_DOOR and the rest
+# of network.sh's when Files is on the fleet's network.
 # Prints restic's --json lines (the screen reads its progress from them).
 set -euo pipefail
 trap 'echo "failed: line $LINENO: $BASH_COMMAND" >&2' ERR
@@ -20,6 +21,7 @@ w=$(mktemp -d)
 cleanup() {
   for m in "$w"/m/*; do umount "$m" 2>/dev/null || true; done
   zpool export -a 2>/dev/null || true
+  [ -z "${NET_DOOR:-}" ] || dd-installer-net down
   rm -rf "$w"
 }
 trap cleanup EXIT
@@ -46,6 +48,10 @@ while read -r part fs; do
   mountpoint -q "$m" && mounts+=("$m")
 done < <(lsblk -nrpo NAME,FSTYPE "$DISK" | tail -n +2)
 [ "${#mounts[@]}" -gt 0 ] || { echo "nothing on $DISK to back up" >&2; exit 0; }
+
+# Files is on the fleet's network: the installer joins it for this alone
+# (network.sh), and the whole ticket goes only over it
+[ -z "${NET_DOOR:-}" ] || dd-installer-net up
 
 # the member's pending backup, at the gate, on the ticket alone: it opens
 # that folder and nothing else of theirs

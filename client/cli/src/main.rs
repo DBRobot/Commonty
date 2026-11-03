@@ -270,7 +270,12 @@ enum Command {
     },
     /// Print a token for the services, signed by this device. Good for an
     /// hour, made offline; this is what scripts and rclone should call.
-    Token,
+    Token {
+        /// a join ticket instead, as the app writes to a box installer's
+        /// drive: good a week, for one box's join and its disk's backup
+        #[arg(long)]
+        join_ticket: bool,
+    },
     /// Encrypted archives of old computers. restic's format, in your own
     /// directory on the server; the password never leaves this machine.
     Image {
@@ -1901,15 +1906,19 @@ async fn main() -> Result<()> {
             println!("unlocked and stored for user_id {}", account.user_id);
         }
 
-        Command::Token => {
+        Command::Token { join_ticket } => {
             let kp = auth::device::load(&keys)?.context("no device key here - `dd device show`")?;
             let user = keys
                 .get(USER)?
                 .context("no name on this machine - `dd identity new` or `dd identity import`")?;
-            println!(
-                "{}",
-                auth::device::mint(&kp, &user, std::time::Duration::from_secs(3600))?
-            );
+            if join_ticket {
+                println!("{}", auth::device::mint_join_ticket(&kp, &user)?.0);
+            } else {
+                println!(
+                    "{}",
+                    auth::device::mint(&kp, &user, std::time::Duration::from_secs(3600))?
+                );
+            }
         }
 
         // rustic_core is synchronous and the token provider blocks on its own

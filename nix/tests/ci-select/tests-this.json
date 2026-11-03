@@ -778,7 +778,9 @@
    "client/identity/src/**",
    "client/directory/src/**",
    "client/auth/src/**",
-   "fleet/policy.json"
+   "fleet/policy.json",
+   "nix/installer/network.sh",
+   "nix/installer/network.nix"
   ],
   "why": {
    "nix/tests/network.nix": "test's own",
@@ -799,7 +801,9 @@
    "client/identity/src/**": "root/device keys, signatures the gate checks",
    "client/directory/src/**": "directory client used by identity new / member add",
    "client/auth/src/**": "dd token minting (bearer the gate verifies)",
-   "fleet/policy.json": "verify.nix reads identityFrom default"
+   "fleet/policy.json": "verify.nix reads identityFrom default",
+   "nix/installer/network.sh": "the installer's join, run by the test",
+   "nix/installer/network.nix": "its program"
   },
   "notes": "servers/gate/src/** chosen broadly: the test hits network.rs, ident.rs, leaving.rs, storage.rs, directory.rs, lib.rs, main.rs. Could be narrowed to those if desired. dd-control is used only for -sign-join, so only main.go.",
   "family": "vm"

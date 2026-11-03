@@ -16,6 +16,7 @@ let
     name = "dd-box-backup";
     runtimeInputs = [
       agent
+      network
       pkgs.restic
       pkgs.rclone
       pkgs.ntfs3g
@@ -26,12 +27,17 @@ let
     ];
     text = builtins.readFile ./backup.sh;
   };
+  # on the fleet's network for the backup alone (network.sh)
+  network = import ./network.nix { inherit pkgs self; };
 in
 {
   options.dd.setup.screen = lib.mkEnableOption "the full-screen browser showing the installer's steps";
 
   config = {
-    environment.systemPackages = [ backup ];
+    environment.systemPackages = [
+      backup
+      network
+    ];
     networking.networkmanager.enable = true;
     # the screen's secret, made at each boot: root's and the kiosk's alone.
     # The kiosk opens the page with it; the page sends it with every ask
@@ -70,6 +76,15 @@ in
           "NOT_BEFORE"
           "FILES"
         ] config.environment.variables
+        # where the backup joins the fleet's network, on a real installer
+        // lib.filterAttrs (
+          n: _:
+          builtins.elem n [
+            "NET_DOOR"
+            "NET_CONTROL"
+            "NET_BRIDGE"
+          ]
+        ) config.environment.variables
         // {
           SETUP_WEB = "${./web}";
           SETUP_SHARED = "${../../servers/web-shared}";

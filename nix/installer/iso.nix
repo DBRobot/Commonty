@@ -88,6 +88,11 @@ in
     NOT_BEFORE = toString (self.lastModified or 0);
     # where a disk's backup goes before it is wiped (backup.sh)
     FILES = "https://files.${domain}";
+    # Files answers on the fleet's network only: the backup joins it first,
+    # through the front door as a box does (network.sh)
+    NET_DOOR = "https://home.${domain}/_dd/network/installer";
+    NET_CONTROL = "https://headscale.${domain}";
+    NET_BRIDGE = "1";
   };
   # what it says at the console, before anyone types
   services.getty.helpLine = lib.mkForce ''

@@ -442,4 +442,59 @@ other.fail(f"nc -z -w 5 {box_ip} 22")
 ip = join_as_computer("tag:computer,tag:admin-computer")
 assert ip in box.succeed("ipset list dd-owner")
 other.wait_until_succeeds(f"nc -z -w 5 {box_ip} 22", timeout=60)
+
+# A box installer, for the backup of the disk it is about to wipe: on the
+# network by sarah's join ticket, narrowed to a key sealed to its own
+# recipient; the boxes' front doors and nothing else, and gone when it
+# leaves (nix/installer/network.sh, gate network.rs installer_join)
+box.succeed("systemctl start dd-verify.service")
+box.wait_for_open_port(4181)
+box.succeed("systemd-run --unit=door443 python3 -m http.server 443")
+box.wait_for_open_port(443)
+ticket = box.succeed(f"{env} {nix['dd']} token --join-ticket").strip()
+other.succeed(f"printf %s '{ticket}' > /root/ticket")
+other.succeed("systemctl stop tailscaled")
+net = (
+    "TICKET=/root/ticket NET_DOOR=http://box:4181/_dd/network/installer"
+    " NET_CONTROL=http://box:8085"
+)
+other.succeed(f"{net} dd-installer-net up")
+mine = other.succeed(
+    "tailscale --socket=/run/dd-installer-net/tailscaled.sock ip -4"
+).strip()
+nodes = json.loads(box.succeed("headscale nodes list -o json"))
+inst = [
+    n for n in nodes if "tag:installer" in (n.get("tags") or n.get("forcedTags") or [])
+]
+assert len(inst) == 1 and inst[0]["givenName"].startswith("installer-"), nodes
+keys = json.loads(box.succeed("headscale preauthkeys list -o json"))
+used = [
+    k for k in keys if "tag:installer" in (k.get("aclTags") or k.get("acl_tags") or [])
+]
+assert len(used) == 1 and used[0].get("ephemeral") and not used[0].get("reusable"), used
+# its own: the key never on its disk, the whole ticket never sent
+other.fail("test -e /run/dd-installer-net/authkey")
+# the boxes' front doors, and nothing else of them
+other.wait_until_succeeds(f"nc -z -w 5 {box_ip} 443", timeout=60)
+other.fail(f"nc -z -w 5 {box_ip} 22")
+other.fail(f"nc -z -w 5 {box_ip} 8085")
+# the ask as the front door carries it is no use to anyone else: another
+# recipient swapped in gets nothing, and the whole ticket asks for nothing
+r2 = box.succeed("age-keygen 2>/dev/null | age-keygen -y").strip()
+narrowed = other.succeed(
+    f"dd-box-setup --narrow-ticket /root/ticket --recipient $(age-keygen 2>/dev/null | age-keygen -y)"
+).strip()
+for t, r in ((narrowed, r2), (ticket, r2)):
+    code = other.succeed(
+        "curl -s -o /dev/null -w '%{http_code}' -H 'content-type: application/json' "
+        f"--data '{json.dumps({'ticket': t, 'recipient': r})}' http://box:4181/_dd/network/installer"
+    ).strip()
+    assert code == "403", code
+# and gone when it leaves
+other.succeed("dd-installer-net down")
+box.wait_until_succeeds(
+    "headscale nodes list -o json | jq -e '[.[] | select(.givenName | startswith(\"installer-\"))] | length == 0'",
+    timeout=60,
+)
+assert mine not in box.succeed("headscale nodes list -o json")
 box.succeed("systemctl stop dd-control-standin.service")

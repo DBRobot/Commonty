@@ -3711,6 +3711,7 @@ pub async fn start(
         .route("/_dd/network/box", post(network::box_join))
         .route("/_dd/network/controller", post(network::controller_join))
         .route("/_dd/network/computer", post(network::computer_join))
+        .route("/_dd/network/installer", post(network::installer_join))
         // a home controller's own requests, signed by its key (controller.rs)
         .route(
             "/_dd/controller/directory/{name}",
@@ -3989,6 +3990,7 @@ mod tests {
             ("*", "door.join_key("),
             ("*", "door.mint("),
             ("*", "door.mint_id("),
+            ("*", "door.mint_ephemeral("),
             ("photos.rs", "slots.insert("),
             ("adddevice.rs", "m.insert("),
             ("adddevice.rs", "p.offer = Some("),
@@ -4065,6 +4067,7 @@ mod tests {
             ("adddevice.rs", "reveal"),
             ("network.rs", "join"),
             ("network.rs", "controller_join"),
+            ("network.rs", "installer_join"),
             ("network.rs", "box_key"),
             ("network.rs", "computer_key"),
         ]

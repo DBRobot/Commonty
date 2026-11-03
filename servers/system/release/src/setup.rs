@@ -230,6 +230,25 @@ pub fn ticket_id(ticket: &str) -> Option<String> {
     (id.len() == 32 && id.bytes().all(|c| c.is_ascii_hexdigit())).then_some(id)
 }
 
+/// The ticket narrowed by its holder to one use: a check that the gate's
+/// `here` is `here` (a network key sealed to the installer's own
+/// recipient, network.rs installer_here), and that it is asked before
+/// `until`. What the gate is sent over the front door: it opens no
+/// pending backup, and is no use to whoever carries it.
+pub fn narrow_ticket(ticket: &str, here: &str, until: u64) -> Option<String> {
+    let block = biscuit_auth::builder::BlockBuilder::new()
+        .check(format!("check if here({here:?})").as_str())
+        .ok()?
+        .check(format!("check if time($t), $t < {until}").as_str())
+        .ok()?;
+    biscuit_auth::UnverifiedBiscuit::from_base64(ticket.trim())
+        .ok()?
+        .append(block)
+        .ok()?
+        .to_base64()
+        .ok()
+}
+
 /// When the ticket stops being good, seconds (its `check if time($t), $t <
 /// <n>`), unverified: enough to say so before a disk is wiped for it.
 pub fn ticket_expires(ticket: &str) -> Option<u64> {

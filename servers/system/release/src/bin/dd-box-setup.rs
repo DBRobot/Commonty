@@ -49,6 +49,12 @@ struct Args {
     /// print the id a join ticket's backup goes under, and exit
     #[arg(long)]
     ticket_id: Option<PathBuf>,
+    /// print the join ticket in this file narrowed to a network key sealed
+    /// to --recipient, good for five minutes, and exit
+    #[arg(long, requires = "recipient")]
+    narrow_ticket: Option<PathBuf>,
+    #[arg(long)]
+    recipient: Option<String>,
 }
 
 /// A step running: what it is, how far, the lines it said
@@ -92,6 +98,19 @@ struct App {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    if let (Some(t), Some(r)) = (&args.narrow_ticket, &args.recipient) {
+        let t = std::fs::read_to_string(t).context("the ticket")?;
+        let until = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs()
+            + 300;
+        let here = format!("installer-network:{}", r.trim());
+        match setup::narrow_ticket(&t, &here, until) {
+            Some(n) => println!("{n}"),
+            None => bail!("not a ticket that can be narrowed"),
+        }
+        return Ok(());
+    }
     if let Some(t) = &args.ticket_id {
         let t = std::fs::read_to_string(t).context("the ticket")?;
         match setup::ticket_id(&t) {

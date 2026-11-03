@@ -55,7 +55,7 @@ pub(crate) fn verify_ticket(
 
 /// The ticket id a token's authority block names, unchecked: a name for a
 /// pending folder, nothing more.
-fn ticket_of(token: &str) -> Option<String> {
+pub(crate) fn ticket_of(token: &str) -> Option<String> {
     let source = UnverifiedBiscuit::from_base64(token)
         .ok()?
         .print_block_source(0)
@@ -114,7 +114,7 @@ pub(crate) fn owners(
 
 /// The agreed identity state's enlistments; None when this box does not
 /// read it (identityFrom replay) or has not read it yet
-fn enlisted(app: &App) -> Option<HashMap<String, crate::ident::Owner>> {
+pub(crate) fn enlisted(app: &App) -> Option<HashMap<String, crate::ident::Owner>> {
     Some(app.directory.ident.as_ref()?.state()?.enlisted.clone())
 }
 
@@ -753,6 +753,53 @@ mod tests {
         let ann = entry_with("ann", &kp);
         let of = |u: &str| Ok((u == "ann").then(|| ann.clone()));
         assert!(verify_ticket(of, &t, identity::now()).is_err());
+    }
+
+    /// as setup::narrow_ticket narrows one, on the installer
+    fn narrowed(t: &str, here: &str, until: u64) -> String {
+        biscuit_auth::UnverifiedBiscuit::from_base64(t)
+            .unwrap()
+            .append(
+                biscuit_auth::builder::BlockBuilder::new()
+                    .check(format!("check if here({here:?})").as_str())
+                    .unwrap()
+                    .check(format!("check if time($t), $t < {until}").as_str())
+                    .unwrap(),
+            )
+            .unwrap()
+            .to_base64()
+            .unwrap()
+    }
+
+    #[test]
+    fn an_installer_gets_a_key_sealed_to_the_recipient_its_ticket_names_and_nothing_else() {
+        use crate::network::{installer_here, installer_ticket};
+        let kp = device();
+        let now = identity::now();
+        let whole = ticket(&kp, "ann", ID, now + 3600);
+        let ann = entry_with("ann", &kp);
+        let of = |u: &str| Ok((u == "ann").then(|| ann.clone()));
+        let me = "age1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs3290gq";
+        let them = "age1zvkyg2lqzraa2lnjvqej32nkuu0ues2s82hzrye869xeexvn73equnujwj";
+        let t = narrowed(&whole, &installer_here(me), now + 300);
+        assert_eq!(
+            installer_ticket(of, &t, me, now).unwrap(),
+            ("ann".to_string(), ID.to_string())
+        );
+        // the same ask with another recipient swapped in: nothing
+        assert!(installer_ticket(of, &t, them, now).is_err());
+        // the whole ticket never asks: it is the pending backup's
+        assert!(installer_ticket(of, &whole, me, now).is_err());
+        // past its five minutes
+        assert!(installer_ticket(of, &t, me, now + 301).is_err());
+        // not an age recipient
+        assert!(installer_ticket(of, &t, "age1 ; rm", now).is_err());
+        // another member's device did not sign it
+        let bob = entry_with("ann", &device());
+        assert!(installer_ticket(|_| Ok(Some(bob.clone())), &t, me, now).is_err());
+        // narrowed, it opens no pending backup
+        assert!(verify_ticket(of, &t, now).is_err());
+        assert!(verify_ticket(of, &whole, now).is_ok());
     }
 
     #[test]

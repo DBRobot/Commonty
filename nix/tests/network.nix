@@ -20,7 +20,13 @@
     ];
     # the admin's and the host's ports are the firewall's to keep
     networking.firewall.enable = pkgs.lib.mkForce true;
-    networking.firewall.allowedTCPPorts = [ 8085 ];
+    # 8085 headscale; 4181 the gate, which a real box serves behind its
+    # front door; 443 the front door an installer may reach on the network
+    networking.firewall.allowedTCPPorts = [
+      8085
+      4181
+      443
+    ];
     services.headscale.address = pkgs.lib.mkForce "0.0.0.0";
     services.openssh.enable = true;
     # kim has the box at home; sarah is the fleet's admin. A host is not an
@@ -90,6 +96,11 @@
     environment.systemPackages = [
       pkgs.netcat
       pkgs.jq
+      # last, a box installer on the network for its backup alone
+      (import ../installer/network.nix { inherit pkgs self; })
+      self.packages.${pkgs.stdenv.hostPlatform.system}.agent
+      pkgs.age
+      pkgs.curl
     ];
   };
   scriptEnv = {
