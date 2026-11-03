@@ -20,11 +20,11 @@
     ];
     # the admin's and the host's ports are the firewall's to keep
     networking.firewall.enable = pkgs.lib.mkForce true;
-    # 8085 headscale; 4181 the gate, which a real box serves behind its
+    # 8085 headscale; 4182 the gate as a real box serves it, behind its
     # front door; 443 the front door an installer may reach on the network
     networking.firewall.allowedTCPPorts = [
       8085
-      4181
+      4182
       443
     ];
     services.headscale.address = pkgs.lib.mkForce "0.0.0.0";
@@ -71,6 +71,7 @@
       pkgs.sqlite
       pkgs.openssl
       pkgs.age
+      pkgs.socat
       # the stand-in for dd-control (network/control.py)
       pkgs.python3
     ];

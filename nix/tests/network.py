@@ -449,13 +449,18 @@ other.wait_until_succeeds(f"nc -z -w 5 {box_ip} 22", timeout=60)
 # leaves (nix/installer/network.sh, gate network.rs installer_join)
 box.succeed("systemctl start dd-verify.service")
 box.wait_for_open_port(4181)
+# the gate answers on loopback; the front door is what reaches it
+box.succeed(
+    "systemd-run --unit=door socat TCP-LISTEN:4182,fork,reuseaddr TCP:127.0.0.1:4181"
+)
+box.wait_for_open_port(4182)
 box.succeed("systemd-run --unit=door443 python3 -m http.server 443")
 box.wait_for_open_port(443)
 ticket = box.succeed(f"{env} {nix['dd']} token --join-ticket").strip()
 other.succeed(f"printf %s '{ticket}' > /root/ticket")
 other.succeed("systemctl stop tailscaled")
 net = (
-    "TICKET=/root/ticket NET_DOOR=http://box:4181/_dd/network/installer"
+    "TICKET=/root/ticket NET_DOOR=http://box:4182/_dd/network/installer"
     " NET_CONTROL=http://box:8085"
 )
 other.succeed(f"{net} dd-installer-net up")
@@ -487,7 +492,7 @@ narrowed = other.succeed(
 for t, r in ((narrowed, r2), (ticket, r2)):
     refused = other.succeed(
         "curl -s -o /dev/null -w '%{http_code}' -H 'content-type: application/json' "
-        f"--data '{json.dumps({'ticket': t, 'recipient': r})}' http://box:4181/_dd/network/installer"
+        f"--data '{json.dumps({'ticket': t, 'recipient': r})}' http://box:4182/_dd/network/installer"
     ).strip()
     assert refused == "403", refused
 # and gone when it leaves
