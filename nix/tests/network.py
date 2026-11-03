@@ -89,6 +89,10 @@ got = json.loads(
 assert got["control_url"] == "http://box:8085", got
 assert got["user"] == "sarah", got
 assert len(got["key"]) > 20, got
+# her entry as published, for the agreed state the installer meets later
+box.succeed(
+    f"curl -sf -H 'Authorization: Bearer {token}' http://127.0.0.1:4181/_dd/directory/sarah > /root/sarah.json"
+)
 # in headscale: sarah exists, with a key that is hers alone and once (a
 # false in this json is a field left out)
 box.succeed("headscale users list -o json | jq -e '.[] | select(.name == \"sarah\")'")
@@ -447,6 +451,11 @@ other.wait_until_succeeds(f"nc -z -w 5 {box_ip} 22", timeout=60)
 # network by sarah's join ticket, narrowed to a key sealed to its own
 # recipient; the boxes' front doors and nothing else, and gone when it
 # leaves (nix/installer/network.sh, gate network.rs installer_join)
+# sarah's entry agreed, as the fleet's log has it
+box.succeed(
+    "jq --slurpfile e /root/sarah.json '.members.sarah.item = {entry: $e[0]} | .height += 1'"
+    " /run/dd-test/identity.json > /run/dd-test/i && mv /run/dd-test/i /run/dd-test/identity.json"
+)
 box.succeed("systemctl start dd-verify.service")
 box.wait_for_open_port(4181)
 # the gate answers on loopback; the front door is what reaches it
