@@ -480,7 +480,7 @@ nodes = json.loads(box.succeed("headscale nodes list -o json"))
 inst = [
     n for n in nodes if "tag:installer" in (n.get("tags") or n.get("forcedTags") or [])
 ]
-assert len(inst) == 1 and inst[0]["givenName"].startswith("installer-"), nodes
+assert len(inst) == 1 and inst[0]["given_name"].startswith("installer-"), nodes
 keys = json.loads(box.succeed("headscale preauthkeys list -o json"))
 used = [
     k for k in keys if "tag:installer" in (k.get("aclTags") or k.get("acl_tags") or [])
@@ -507,7 +507,7 @@ for t, r in ((narrowed, r2), (ticket, r2)):
 # and gone when it leaves
 other.succeed("dd-installer-net down")
 box.wait_until_succeeds(
-    "headscale nodes list -o json | jq -e '[.[] | select(.givenName | startswith(\"installer-\"))] | length == 0'",
+    "headscale nodes list -o json | jq -e '[.[] | select(.given_name | startswith(\"installer-\"))] | length == 0'",
     timeout=60,
 )
 assert mine not in box.succeed("headscale nodes list -o json")
