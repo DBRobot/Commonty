@@ -485,11 +485,11 @@ narrowed = other.succeed(
     f"dd-box-setup --narrow-ticket /root/ticket --recipient $(age-keygen 2>/dev/null | age-keygen -y)"
 ).strip()
 for t, r in ((narrowed, r2), (ticket, r2)):
-    code = other.succeed(
+    refused = other.succeed(
         "curl -s -o /dev/null -w '%{http_code}' -H 'content-type: application/json' "
         f"--data '{json.dumps({'ticket': t, 'recipient': r})}' http://box:4181/_dd/network/installer"
     ).strip()
-    assert code == "403", code
+    assert refused == "403", refused
 # and gone when it leaves
 other.succeed("dd-installer-net down")
 box.wait_until_succeeds(
