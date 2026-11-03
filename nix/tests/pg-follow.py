@@ -46,11 +46,11 @@ def sql(m, q):
     return m.succeed(f'sudo -u postgres psql -d app -tAc "{q}"').strip()
 
 
-def archived(m):
+def archived(m, timeout=60):
     seg = sql(m, "select pg_walfile_name(pg_switch_wal())")
     m.wait_until_succeeds(
         f"sudo -u postgres psql -tAc \"select last_archived_wal >= '{seg}' from pg_stat_archiver\" | grep -qx t",
-        timeout=60,
+        timeout=timeout,
     )
 
 
@@ -157,4 +157,6 @@ sql(a, "insert into t values (151)")
 a.sleep(60)
 b.start()
 b.wait_for_unit("garage.service")
-archived(a)
+# the store's two peers find each other again before a write is taken: on
+# a loaded runner b's garage was up a minute and still no quorum (CI run 994)
+archived(a, timeout=240)
