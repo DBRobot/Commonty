@@ -1,19 +1,30 @@
 {
   "payload": {
     "flake": "git+https://git.commonty.org/david/commonty",
-    "id": "v0.1.91-1-1793596185",
-    "issued": 1793596186,
+    "id": "v0.1.92-1-1793700126",
+    "issued": 1793700127,
     "jobs": [
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
         "builders": [
-          "node2",
-          "node1"
+          "node1",
+          "node2"
         ],
         "name": "android",
         "part": "android",
-        "path": "/nix/store/8mhdmzcp3kdn3fkc7xr243ysylig9bgg-commonty-android-0.1.91",
-        "version": "0.1.91"
+        "path": "/nix/store/vw9kifdbdn0hliamypaphwbab2hc9vzc-commonty-android-0.1.92",
+        "version": "0.1.92"
+      },
+      {
+        "attr": "legacyPackages.x86_64-linux.appRelease",
+        "builders": [
+          "node1",
+          "node2"
+        ],
+        "name": "box-installer",
+        "part": "box-installer",
+        "path": "/nix/store/gx2qn4sk03r3cbbrfirydky3024fxjfk-commonty-box-installer-0.1.92",
+        "version": "0.1.92"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
@@ -21,32 +32,21 @@
           "node2",
           "node1"
         ],
-        "name": "box-installer",
-        "part": "box-installer",
-        "path": "/nix/store/q6y96pv6w6fhhyb83pvj127ddnpi34ny-commonty-box-installer-0.1.91",
-        "version": "0.1.91"
-      },
-      {
-        "attr": "legacyPackages.x86_64-linux.appRelease",
-        "builders": [
-          "node1",
-          "node2"
-        ],
         "name": "dd-windows",
         "part": "dd-windows",
-        "path": "/nix/store/i8jaxm4ndazr32sma30hx5knq3v6adji-dd-windows-0.1.91",
-        "version": "0.1.91"
+        "path": "/nix/store/wv6n3d0j0lgcidbb3sj1485vblwlas82-dd-windows-0.1.92",
+        "version": "0.1.92"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
         "builders": [
-          "node1",
-          "node2"
+          "node2",
+          "node1"
         ],
         "name": "home-controller",
         "part": "home-controller",
-        "path": "/nix/store/jlqj5zy4d5iqy0zqs7d2s334fkaczdzv-commonty-home-controller-0.1.91",
-        "version": "0.1.91"
+        "path": "/nix/store/2vgqj729xf46i9k7ncn0032aaxm26p6z-commonty-home-controller-0.1.92",
+        "version": "0.1.92"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
@@ -56,24 +56,24 @@
         ],
         "name": "linux",
         "part": "linux",
-        "path": "/nix/store/6qby21z18a235hiniz3sl71fcd7804sf-commonty-linux-0.1.91",
-        "version": "0.1.91"
+        "path": "/nix/store/z7y5mmxar0xa41hyabvppmrr20cg3c7z-commonty-linux-0.1.92",
+        "version": "0.1.92"
       },
       {
         "attr": "legacyPackages.x86_64-linux.appRelease",
         "builders": [
-          "node1",
-          "node2"
+          "node2",
+          "node1"
         ],
         "name": "windows",
         "part": "windows",
-        "path": "/nix/store/q0w004pcj2aifx39dz6xzb6slchqamxa-commonty-windows-0.1.91",
-        "version": "0.1.91"
+        "path": "/nix/store/8x4zdgw21nn7h213hfi5lbm2b7wqsx3d-commonty-windows-0.1.92",
+        "version": "0.1.92"
       }
     ],
     "kind": "build-order",
-    "rev": "e9eaec1652f7c7c9d6796b14275f6202056baf81"
+    "rev": "6f548569ab9778ff60a7295b313746e63694b708"
   },
   "signer": "fdpYPlUGQCA+lolOtDKO1cgc4bM1syI3JX/0hFPthvo=",
-  "signature": "BT39B8UFpyd0RFdqJm5T8+2ewPf8YyM4rn3W3wKMEN080ZdCEF3BqQYvSNIalQshVdyJ6wgctz3uLh/zBzg+AQ=="
+  "signature": "ErvC+RlW7Qoofqw/fBdhPbLKhMPR7FEZMWix7aTsKjBayFpeQLf4uHx4DVz1+KXjfAdnrhWH/88tyHbG3x3GBg=="
 }
