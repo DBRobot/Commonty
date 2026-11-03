@@ -20,16 +20,18 @@
     ];
     # the admin's and the host's ports are the firewall's to keep
     networking.firewall.enable = pkgs.lib.mkForce true;
-    # 8085 headscale, and 80 for the installer: tailscale speaks plain http
-    # to a control on port 80 alone; 4182 the gate as a real box serves it,
-    # behind its front door; 443 the front door an installer may reach
+    # 8085 headscale; 4182 the gate as a real box serves it, behind its
+    # front door; 443 the front door an installer may reach on the network
     networking.firewall.allowedTCPPorts = [
       8085
       4182
       443
-      80
     ];
     services.headscale.address = pkgs.lib.mkForce "0.0.0.0";
+    # an installer's node goes at its logout, which a real one sends over
+    # https; this control is plain http, which tailscale will not dial anew,
+    # so here it goes when headscale stops waiting for it
+    services.headscale.settings.ephemeral_node_inactivity_timeout = pkgs.lib.mkForce "10s";
     services.openssh.enable = true;
     # kim has the box at home; sarah is the fleet's admin. A host is not an
     # admin: kim's devices get its dns and nothing more
