@@ -23,11 +23,11 @@ struct Args {
     #[arg(long, env = "SETUP_LISTEN", default_value = "127.0.0.1:8090")]
     listen: String,
     /// its pages (index.html, setup.css, setup.js)
-    #[arg(long, env = "SETUP_WEB")]
-    web: PathBuf,
+    #[arg(long, env = "SETUP_WEB", required_unless_present_any = ["ticket_id", "narrow_ticket"])]
+    web: Option<PathBuf>,
     /// the shared stylesheet and fonts (servers/web-shared)
-    #[arg(long, env = "SETUP_SHARED")]
-    shared: PathBuf,
+    #[arg(long, env = "SETUP_SHARED", required_unless_present_any = ["ticket_id", "narrow_ticket"])]
+    shared: Option<PathBuf>,
     /// the drive's commonty/ folder: ticket, backup.key, wifi.json, version
     #[arg(long, env = "SETUP_DRIVE", default_value = "/boot/commonty")]
     drive: PathBuf,
@@ -90,6 +90,8 @@ impl Job {
 
 struct App {
     args: Args,
+    web: PathBuf,
+    shared: PathBuf,
     token: String,
     job: Mutex<Job>,
     // the Wi-Fi the box is given: the drive's, or one typed here
@@ -131,7 +133,11 @@ fn main() -> Result<()> {
     }
     let listener = TcpListener::bind(&args.listen).context("listening")?;
     let wifi = args.drive.join("wifi.json");
+    let web = args.web.clone().context("--web")?;
+    let shared = args.shared.clone().context("--shared")?;
     let app = Arc::new(App {
+        web,
+        shared,
         token,
         wifi: Mutex::new(wifi.exists().then_some(wifi)),
         args,
@@ -284,9 +290,9 @@ fn sh(cmd: &str, args: &[&str]) -> Result<String> {
 fn route(app: &Arc<App>, method: &str, path: &str, body: &Value) -> Result<Reply> {
     let a = &app.args;
     Ok(match (method, path) {
-        ("GET", "/") => file(&a.web, "index.html"),
-        ("GET", p) if p.starts_with("/_dd/static/") => file(&a.shared, &p[12..]),
-        ("GET", p) if p.starts_with("/s/") => file(&a.web, &p[3..]),
+        ("GET", "/") => file(&app.web, "index.html"),
+        ("GET", p) if p.starts_with("/_dd/static/") => file(&app.shared, &p[12..]),
+        ("GET", p) if p.starts_with("/s/") => file(&app.web, &p[3..]),
         ("GET", "/api/checks") => {
             let c = setup::checks(Path::new("/sys"), Path::new("/dev"));
             let p = setup::plan(
