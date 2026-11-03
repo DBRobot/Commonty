@@ -20,12 +20,14 @@
     ];
     # the admin's and the host's ports are the firewall's to keep
     networking.firewall.enable = pkgs.lib.mkForce true;
-    # 8085 headscale; 4182 the gate as a real box serves it, behind its
-    # front door; 443 the front door an installer may reach on the network
+    # 8085 headscale, and 80 for the installer: tailscale speaks plain http
+    # to a control on port 80 alone; 4182 the gate as a real box serves it,
+    # behind its front door; 443 the front door an installer may reach
     networking.firewall.allowedTCPPorts = [
       8085
       4182
       443
+      80
     ];
     services.headscale.address = pkgs.lib.mkForce "0.0.0.0";
     services.openssh.enable = true;

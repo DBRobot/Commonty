@@ -463,6 +463,10 @@ box.succeed(
     "systemd-run --unit=door socat TCP-LISTEN:4182,fork,reuseaddr TCP:127.0.0.1:4181"
 )
 box.wait_for_open_port(4182)
+box.succeed(
+    "systemd-run --unit=control80 socat TCP-LISTEN:80,fork,reuseaddr TCP:127.0.0.1:8085"
+)
+box.wait_for_open_port(80)
 box.succeed("systemd-run --unit=door443 python3 -m http.server 443")
 box.wait_for_open_port(443)
 ticket = box.succeed(f"{env} {nix['dd']} token --join-ticket").strip()
@@ -470,7 +474,7 @@ other.succeed(f"printf %s '{ticket}' > /root/ticket")
 other.succeed("systemctl stop tailscaled")
 net = (
     "TICKET=/root/ticket NET_DOOR=http://box:4182/_dd/network/installer"
-    " NET_CONTROL=http://box:8085"
+    " NET_CONTROL=http://box"
 )
 other.succeed(f"{net} dd-installer-net up")
 mine = other.succeed(

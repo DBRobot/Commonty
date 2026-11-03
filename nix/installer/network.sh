@@ -45,13 +45,9 @@ case "${1:-}" in
   down)
     [ -d "$d" ] || exit 0
     # off the network at once: the node is gone, not left to time out
-    if [ -S "$sock" ]; then
-      left=
-      for _ in 1 2 3 4 5; do
-        if timeout 20 tailscale --socket="$sock" logout; then left=1; break; fi
-        sleep 3
-      done
-      [ -n "$left" ] || echo "could not leave the fleet's network: the node goes when headscale times it out" >&2
+    # one ask: a failed logout has already dropped the node key
+    if [ -S "$sock" ] && ! timeout 30 tailscale --socket="$sock" logout; then
+      echo "could not leave the fleet's network: the node goes when headscale times it out" >&2
     fi
     for p in tailscaled bridge; do
       [ -s "$d/$p.pid" ] && kill "$(cat "$d/$p.pid")" 2>/dev/null || true
