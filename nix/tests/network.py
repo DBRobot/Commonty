@@ -482,7 +482,7 @@ other.fail(f"nc -z -w 5 {box_ip} 8085")
 # recipient swapped in gets nothing, and the whole ticket asks for nothing
 r2 = box.succeed("age-keygen 2>/dev/null | age-keygen -y").strip()
 narrowed = other.succeed(
-    f"dd-box-setup --narrow-ticket /root/ticket --recipient $(age-keygen 2>/dev/null | age-keygen -y)"
+    "dd-box-setup --narrow-ticket /root/ticket --recipient $(age-keygen 2>/dev/null | age-keygen -y)"
 ).strip()
 for t, r in ((narrowed, r2), (ticket, r2)):
     refused = other.succeed(
