@@ -3,19 +3,12 @@ import time
 
 blank.wait_for_unit("NetworkManager.service")
 blank.wait_for_unit("dd-box-setup.service")
-# the house's router in a namespace of its own, as a separate machine: its
-# radio, the access point on it, and an address for whoever joins
-blank.succeed("ip netns add house")
-blank.succeed("iw phy $(cat /sys/class/net/wlan0/phy80211/name) set netns name house")
-house = "ip netns exec house"
-blank.succeed(f"{house} ip link set lo up")
-blank.succeed(f"{house} ip addr add 10.9.0.1/24 dev wlan0")
-print(blank.succeed(f"{house} hostapd -B -f /run/hostapd.log /etc/hostapd.conf; sleep 2; cat /run/hostapd.log; {house} ip -o link"))
-blank.wait_until_succeeds(
-    f"{house} ip -o link show wlan0 | grep -c 'state UP'", timeout=60
-)
+# the house's router: the access point, and an address for whoever joins
+blank.succeed("ip addr add 10.9.0.1/24 dev wlan0")
+blank.succeed("hostapd -B /etc/hostapd.conf")
+blank.wait_until_succeeds("ip -o link show wlan0 | grep -c 'state UP'", timeout=60)
 blank.succeed(
-    f"systemd-run --unit=dhcp {house} dnsmasq -d --port=0 -i wlan0 --bind-interfaces "
+    "systemd-run --unit=dhcp dnsmasq -d --port=0 -i wlan0 --bind-interfaces "
     "--dhcp-range=10.9.0.10,10.9.0.50,1h"
 )
 

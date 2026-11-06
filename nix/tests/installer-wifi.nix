@@ -23,11 +23,12 @@
       networking.wireless.enable = lib.mkOverride 5 true;
       # the access point's radio is hostapd's alone
       networking.networkmanager.unmanaged = [ "wlan0" ];
+      # its DHCP server, for the installer's radio to be given an address
+      networking.firewall.interfaces.wlan0.allowedUDPPorts = [ 67 ];
       systemd.services.dd-box-setup.environment.SETUP_DRIVE = "/root/drive";
       environment.systemPackages = [
         pkgs.hostapd
         pkgs.dnsmasq
-        pkgs.iw
         pkgs.curl
         pkgs.jq
       ];
