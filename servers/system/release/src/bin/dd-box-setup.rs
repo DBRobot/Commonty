@@ -394,24 +394,30 @@ fn route(app: &Arc<App>, method: &str, path: &str, body: &Value) -> Result<Reply
             if ssid.is_empty() {
                 bail!("no network named");
             }
-            // a profile with its password, in NetworkManager's in-memory
-            // keyfiles (root's alone, gone at the next boot), brought up with
+            // a profile with its password, in NetworkManager's keyfiles
+            // (root's alone) only while it is brought up, with
             // no agent: a wrong password is said at once, where an agent was
             // asked for it again until the wait ran out. Never in argv
             let _ = sh("nmcli", &["connection", "delete", "dd-setup"]);
             let profile =
-                PathBuf::from("/run/NetworkManager/system-connections/dd-setup.nmconnection");
+                PathBuf::from("/etc/NetworkManager/system-connections/dd-setup.nmconnection");
             write_private(
                 &profile,
                 wifi_profile(&ssid, &psk, wifi_key_mgmt(&ssid))?.as_bytes(),
             )?;
-            sh(
+            if let Err(e) = sh(
                 "nmcli",
                 &["connection", "load", &profile.display().to_string()],
-            )?;
+            ) {
+                let _ = std::fs::remove_file(&profile);
+                return Err(e);
+            }
             let mut c = Command::new("nmcli");
             c.args(["--wait", "60", "connection", "up", "dd-setup"]);
-            let out = c.output()?;
+            let out = c.output();
+            // NetworkManager holds it now; the drive keeps no second copy
+            let _ = std::fs::remove_file(&profile);
+            let out = out?;
             if !out.status.success() {
                 let _ = sh("nmcli", &["connection", "delete", "dd-setup"]);
                 let why = String::from_utf8_lossy(&out.stderr);
