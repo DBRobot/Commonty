@@ -50,6 +50,9 @@ let
   # so a nixpkgs bump that moves it stops here until they are checked.
   webvaultVersion = "2026.6.4+0";
 
+  # what lets the app's copy of the web vault call its server (below)
+  vaultLoopback = ../../../servers/vault/web-vault-loopback.sed;
+
   # The web vault asks the breach list on this box (pwned.nix) instead of
   # api.pwnedpasswords.com: checking a password never leaves the box.
   webvault =
@@ -63,6 +66,17 @@ let
       for f in $hits; do
         sed -i 's|https://api.pwnedpasswords.com/range/|/pwned/range/|g' "$f"
       done
+      # The app serves this copy on the member's own computer over plain
+      # http (app/src/local.rs): 127.0.0.1:41662 for its window,
+      # v-<32 hex>.localhost:41662 for a browser it let in. The vault refuses
+      # every call that is not https, so there it never reached its server
+      # and Passwords fell back to asking for an SSO identifier. Those two
+      # origins pass; any other http one is still refused.
+      main=$(grep -rl --include='main.*.js' 'startsWith("https://")&&!this.platformUtilsService.isDev()' $out/share/vaultwarden/vault/app)
+      [ -n "$main" ] || { echo "the web vault's https checks moved; find them again" >&2; exit 1; }
+      sed -i -E -f ${vaultLoopback} $main
+      if grep -q 'startsWith("https://")&&!this.platformUtilsService.isDev()' $main; then echo "a web vault https check is unpatched" >&2; exit 1; fi
+      [ "$(grep -o 'localhost):41662' $main | wc -l)" = 3 ] || { echo "the web vault no longer has three https checks" >&2; exit 1; }
       # Commonty's own name and mark on every page. Bitwarden's name, its
       # vault safe and its favicon on a login page at a domain that is not
       # Bitwarden's is what browsers' phishing checks look for, and Chrome
