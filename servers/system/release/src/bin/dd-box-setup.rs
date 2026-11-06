@@ -412,6 +412,9 @@ fn route(app: &Arc<App>, method: &str, path: &str, body: &Value) -> Result<Reply
                 // a wrong password is said at once, not tried for a minute
                 "connection.auth-retries",
                 "1",
+                // up once, as asked: no retrying behind the screen's back
+                "connection.autoconnect",
+                "no",
             ];
             let mgmt = wifi_key_mgmt(&ssid);
             if !psk.is_empty() {

@@ -27,6 +27,7 @@
       environment.systemPackages = [
         pkgs.hostapd
         pkgs.dnsmasq
+        pkgs.iw
         pkgs.curl
         pkgs.jq
       ];
