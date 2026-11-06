@@ -721,8 +721,15 @@ fn multistatus(body: String) -> Response {
         .into_response()
 }
 
+// where a client asked for it, so a listing's names are under the path it
+// listed: a member's disk images are served at /_dd/images/, and rclone
+// passes over an entry named under any other path
 fn href(lib: &str, path: &str, dir: bool) -> String {
-    let mut h = format!("/_dd/dav/{lib}/");
+    let mut h = if lib.starts_with("images-") {
+        "/_dd/images/".to_string()
+    } else {
+        format!("/_dd/dav/{lib}/")
+    };
     if !path.is_empty() {
         h.push_str(
             &path
@@ -1898,6 +1905,31 @@ mod tests {
         .await;
         let body = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
         assert!(String::from_utf8_lossy(&body).contains("<D:getetag>"));
+    }
+
+    // the installer's restic (through rclone) lists its pending backup at
+    // /_dd/images/...: an entry named under another path it passes over, and
+    // found no key in a repository it had just made (2026-11-05)
+    #[tokio::test]
+    async fn disk_images_are_listed_under_the_path_they_are_served_at() {
+        let (g, _b) = bucket().await;
+        let ask = |m: &str, p: &str, hs: &[(&str, &str)], body: &str| {
+            let mut r = Request::builder()
+                .method(m)
+                .uri(format!("/_dd/images/{p}"));
+            for (k, v) in hs {
+                r = r.header(*k, *v);
+            }
+            let req = r.body(Body::from(body.to_string())).unwrap();
+            serve(&g, "images-tom".into(), p.into(), Role::Owner, req)
+        };
+        let put = ask("PUT", "pending/t/keys/k", &[], "key").await;
+        assert_eq!(put.status(), StatusCode::CREATED);
+        let r = ask("PROPFIND", "pending/t/keys/", &[("depth", "1")], "").await;
+        let body = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+        let body = String::from_utf8_lossy(&body);
+        assert!(body.contains("/_dd/images/pending/t/keys/k<"), "{body}");
+        assert!(!body.contains("/_dd/dav/"), "{body}");
     }
 
     #[tokio::test]

@@ -10,7 +10,7 @@ blank.succeed("iw phy $(cat /sys/class/net/wlan0/phy80211/name) set netns name h
 house = "ip netns exec house"
 blank.succeed(f"{house} ip link set lo up")
 blank.succeed(f"{house} ip addr add 10.9.0.1/24 dev wlan0")
-blank.succeed(f"systemd-run --unit=ap {house} hostapd /etc/hostapd.conf")
+print(blank.succeed(f"{house} hostapd -B -f /run/hostapd.log /etc/hostapd.conf; sleep 2; cat /run/hostapd.log; {house} ip -o link"))
 blank.wait_until_succeeds(
     f"{house} ip -o link show wlan0 | grep -c 'state UP'", timeout=60
 )
