@@ -18,6 +18,9 @@
       imports = [ ../installer/setup.nix ];
       boot.kernelModules = [ "mac80211_hwsim" ];
       boot.extraModprobeConfig = "options mac80211_hwsim radios=2";
+      # the test VM turns NetworkManager's wpa_supplicant off (qemu-vm.nix,
+      # mkVMOverride); a real installer has it
+      networking.wireless.enable = lib.mkOverride 5 true;
       # the access point's radio is hostapd's alone
       networking.networkmanager.unmanaged = [ "wlan0" ];
       systemd.services.dd-box-setup.environment.SETUP_DRIVE = "/root/drive";
