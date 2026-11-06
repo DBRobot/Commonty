@@ -20,6 +20,19 @@ case "${1:-}" in
     rm -rf "$d"
     install -d -m 0700 "$d"
     id=$(dd-box-setup --ticket-id "$TICKET")
+    # the narrowed ticket's five minutes are this machine's clock's, which a
+    # machine fresh from its firmware can have hours off: the door's (over
+    # its checked TLS) sets it first
+    now=$(curl -sS --max-time 30 -o /dev/null -D - "$NET_DOOR" \
+      | awk 'tolower($1) == "date:" { sub(/^[^:]*: */, ""); sub(/\r$/, ""); print; exit }')
+    if [ -n "$now" ]; then
+      there=$(date -u -d "$now" +%s)
+      off=$(( there - $(date -u +%s) ))
+      if [ "${off#-}" -gt 60 ]; then
+        echo "this machine's clock was ${off}s off; set from the fleet's" >&2
+        date -u -s "@$there" > /dev/null
+      fi
+    fi
     # this join's own recipient, in memory (/run) and gone with it
     age-keygen -o "$d/key" 2>/dev/null
     recipient=$(age-keygen -y "$d/key")

@@ -472,7 +472,13 @@ net = (
     "TICKET=/root/ticket NET_DOOR=http://box:4182/_dd/network/installer"
     " NET_CONTROL=http://box:8085"
 )
+# a machine fresh from its firmware, its clock hours behind: the narrowed
+# ticket's five minutes would be long gone by the gate's clock
+other.succeed("systemctl stop systemd-timesyncd.service || true")
+other.succeed("date -u -s @$(( $(date -u +%s) - 9 * 3600 ))")
 other.succeed(f"{net} dd-installer-net up")
+skew = int(other.succeed("date -u +%s")) - int(box.succeed("date -u +%s"))
+assert abs(skew) < 60, f"the installer's clock is still {skew}s off"
 mine = other.succeed(
     "tailscale --socket=/run/dd-installer-net/tailscaled.sock ip -4"
 ).strip()

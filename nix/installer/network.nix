@@ -14,6 +14,7 @@ pkgs.writeShellApplication {
     pkgs.jq
     pkgs.curl
     pkgs.coreutils
+    pkgs.gawk
     pkgs.iproute2
   ];
   text = builtins.readFile ./network.sh;
