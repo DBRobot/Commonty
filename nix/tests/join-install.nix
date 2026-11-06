@@ -90,7 +90,7 @@ in
           root = "/srv";
           # the gate's pending backups, as the gate takes them: the
           # ticket's own folder, on the ticket alone, and no deleting
-          locations."/files/images/pending/${ticketId}/".extraConfig = ''
+          locations."/files/_dd/images/pending/${ticketId}/".extraConfig = ''
             include /run/gate/want.conf;
             if ($http_authorization != $want) { return 403; }
             limit_except GET HEAD PROPFIND PUT MKCOL { deny all; }
@@ -106,7 +106,7 @@ in
       systemd.services.fake-gate = {
         wantedBy = [ "multi-user.target" ];
         preStart = "mkdir -p /srv/gate";
-        script = "exec ${pkgs.rclone}/bin/rclone serve webdav --addr 127.0.0.1:8081 --baseurl /files/images/pending /srv/gate";
+        script = "exec ${pkgs.rclone}/bin/rclone serve webdav --addr 127.0.0.1:8081 --baseurl /files/_dd/images/pending /srv/gate";
       };
       networking.firewall.allowedTCPPorts = [ 80 ];
       environment.systemPackages = [

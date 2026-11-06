@@ -1914,9 +1914,7 @@ mod tests {
     async fn disk_images_are_listed_under_the_path_they_are_served_at() {
         let (g, _b) = bucket().await;
         let ask = |m: &str, p: &str, hs: &[(&str, &str)], body: &str| {
-            let mut r = Request::builder()
-                .method(m)
-                .uri(format!("/_dd/images/{p}"));
+            let mut r = Request::builder().method(m).uri(format!("/_dd/images/{p}"));
             for (k, v) in hs {
                 r = r.header(*k, *v);
             }

@@ -396,6 +396,14 @@ assert code(f"{img}/data/big2") == "404"
 # what fits lands, and then counts: 600 of 1000 used, 400 left
 assert code(f"-X PUT --data-binary @/root/small {img}/data/small") == "201"
 assert code(f"-X PUT --data-binary @/root/small {img}/data/small2") == "507"
+# rclone lists them where it asked: the installer's restic found no key in
+# a repository it had just made when the names were under another path
+listed = box.succeed(
+    f"RCLONE_CONFIG_IMG_TYPE=webdav RCLONE_CONFIG_IMG_URL={img} "
+    f"RCLONE_CONFIG_IMG_VENDOR=other RCLONE_CONFIG_IMG_BEARER_TOKEN={token} "
+    "rclone lsf img:data"
+).split()
+assert listed == ["small"], listed
 # a copy adds what it copies
 assert (
     code(

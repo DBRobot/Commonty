@@ -56,7 +56,7 @@ done < <(lsblk -nrpo NAME,FSTYPE "$DISK" | tail -n +2)
 # the member's pending backup, at the gate, on the ticket alone: it opens
 # that folder and nothing else of theirs
 export RCLONE_CONFIG_PENDING_TYPE=webdav
-export RCLONE_CONFIG_PENDING_URL="$FILES/images/pending/$id"
+export RCLONE_CONFIG_PENDING_URL="$FILES/_dd/images/pending/$id"
 export RCLONE_CONFIG_PENDING_VENDOR=other
 RCLONE_CONFIG_PENDING_BEARER_TOKEN=$(tr -d '\n' < "$TICKET")
 export RCLONE_CONFIG_PENDING_BEARER_TOKEN
