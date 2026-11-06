@@ -65,7 +65,8 @@
   "switch-remote",
   "cache-front",
   "wired-watch",
-  "net-detect"
+  "net-detect",
+  "installer-wifi"
  ],
  "acme": {
   "paths": [
@@ -3936,6 +3937,23 @@
    "nix/tests/installer-page.nix": "the check",
    "nix/tests/installer-page/**": "steps.test.mjs",
    "nix/installer/web/setup.js": "the screen's script under test"
+  },
+  "notes": ""
+ },
+ "installer-wifi": {
+  "paths": [
+   "nix/tests/installer-wifi.nix",
+   "nix/tests/installer-wifi.py",
+   "nix/installer/setup.nix",
+   "nix/installer/box.json",
+   "servers/system/release/src/**",
+   "servers/system/release/Cargo.toml"
+  ],
+  "why": {
+   "nix/installer/setup.nix": "dd-box-setup on :8090 and NetworkManager, the units the test drives",
+   "nix/installer/box.json": "BOX_JSON in dd-box-setup's environment",
+   "servers/system/release/src/**": "dd-box-setup's /api/wifi and /api/network (src/bin/dd-box-setup.rs)",
+   "servers/system/release/Cargo.toml": "dd-box-setup's build"
   },
   "notes": ""
  }
