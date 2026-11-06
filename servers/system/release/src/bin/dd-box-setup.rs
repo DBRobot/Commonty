@@ -348,11 +348,29 @@ fn route(app: &Arc<App>, method: &str, path: &str, body: &Value) -> Result<Reply
             let up =
                 sh("nmcli", &["-t", "-f", "TYPE,STATE,CONNECTION", "device"]).unwrap_or_default();
             let wired = up.lines().any(|l| l.starts_with("ethernet:connected"));
+            // the network's name, not its profile's (dd-setup)
             let wifi = up
                 .lines()
-                .find(|l| l.starts_with("wifi:connected"))
-                .and_then(|l| l.rsplit(':').next())
-                .map(str::to_string);
+                .any(|l| l.starts_with("wifi:connected"))
+                .then(|| {
+                    sh(
+                        "nmcli",
+                        &[
+                            "-t",
+                            "-f",
+                            "ACTIVE,SSID",
+                            "device",
+                            "wifi",
+                            "list",
+                            "--rescan",
+                            "no",
+                        ],
+                    )
+                    .unwrap_or_default()
+                    .lines()
+                    .find_map(|l| l.strip_prefix("yes:").map(|s| s.replace("\\:", ":")))
+                })
+                .flatten();
             let drive = std::fs::read(a.drive.join("wifi.json"))
                 .ok()
                 .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
@@ -421,9 +439,16 @@ fn route(app: &Arc<App>, method: &str, path: &str, body: &Value) -> Result<Reply
             if !out.status.success() {
                 let _ = sh("nmcli", &["connection", "delete", "dd-setup"]);
                 let why = String::from_utf8_lossy(&out.stderr);
+                if why.contains("Secrets were required") {
+                    bail!("could not join {ssid}: the password is not right");
+                }
                 bail!(
                     "could not join {ssid}: {}",
-                    why.trim().trim_start_matches("Error: ")
+                    why.lines()
+                        .last()
+                        .unwrap_or("")
+                        .trim()
+                        .trim_start_matches("Error: ")
                 );
             }
             let keep = PathBuf::from("/run/dd-setup/wifi.json");

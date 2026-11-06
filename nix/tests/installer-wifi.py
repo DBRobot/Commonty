@@ -37,7 +37,7 @@ wrong = ask("wifi", {"ssid": "House Wi-Fi", "psk": "not the password"})
 took = time.monotonic() - began
 assert took < 40, f"a wrong password took {took:.0f}s to be said"
 print(wrong)
-assert "could not join House Wi-Fi" in wrong, wrong
+assert "could not join House Wi-Fi: the password is not right" in wrong, wrong
 assert json.loads(ask("network"))["wifi"] is None
 blank.fail("test -e /run/dd-setup/psk")
 blank.fail("test -e /run/dd-setup/wifi.json")
