@@ -394,10 +394,30 @@ fn route(app: &Arc<App>, method: &str, path: &str, body: &Value) -> Result<Reply
             if ssid.is_empty() {
                 bail!("no network named");
             }
-            let mut c = Command::new("nmcli");
-            c.args(["device", "wifi", "connect", &ssid]);
+            // a profile without its password, brought up with the password
+            // from a file: `device wifi connect` takes no passwd-file, and
+            // the password never goes in argv
+            let _ = sh("nmcli", &["connection", "delete", "dd-setup"]);
+            let mut add = vec![
+                "connection",
+                "add",
+                "type",
+                "wifi",
+                "con-name",
+                "dd-setup",
+                "ifname",
+                "*",
+                "ssid",
+                &ssid,
+            ];
+            let mgmt = wifi_key_mgmt(&ssid);
             if !psk.is_empty() {
-                // the password goes in by a file nmcli reads, never argv
+                add.extend(["wifi-sec.key-mgmt", mgmt]);
+            }
+            sh("nmcli", &add)?;
+            let mut c = Command::new("nmcli");
+            c.args(["--wait", "60", "connection", "up", "dd-setup"]);
+            if !psk.is_empty() {
                 let f = PathBuf::from("/run/dd-setup/psk");
                 write_private(
                     &f,
@@ -408,7 +428,12 @@ fn route(app: &Arc<App>, method: &str, path: &str, body: &Value) -> Result<Reply
             let out = c.output()?;
             let _ = std::fs::remove_file("/run/dd-setup/psk");
             if !out.status.success() {
-                bail!("could not join {ssid}: check the password");
+                let _ = sh("nmcli", &["connection", "delete", "dd-setup"]);
+                let why = String::from_utf8_lossy(&out.stderr);
+                bail!(
+                    "could not join {ssid}: {}",
+                    why.trim().trim_start_matches("Error: ")
+                );
             }
             let keep = PathBuf::from("/run/dd-setup/wifi.json");
             write_private(
@@ -502,6 +527,23 @@ fn drive_expired(a: &Args) -> bool {
 
 fn drive_env(a: &Args, k: &'static str, f: &str) -> (&'static str, String) {
     (k, a.drive.join(f).display().to_string())
+}
+
+// WPA3-only networks take sae; WPA2 and mixed ones wpa-psk
+fn wifi_key_mgmt(ssid: &str) -> &'static str {
+    let list = sh(
+        "nmcli",
+        &["-t", "-f", "SSID,SECURITY", "device", "wifi", "list"],
+    )
+    .unwrap_or_default();
+    let sec = list.lines().find_map(|l| {
+        let (s, sec) = l.rsplit_once(':')?;
+        (s.replace("\\:", ":") == ssid).then(|| sec.to_string())
+    });
+    match sec {
+        Some(s) if s.contains("WPA3") && !s.contains("WPA2") && !s.contains("WPA1") => "sae",
+        _ => "wpa-psk",
+    }
 }
 
 fn write_private(p: &Path, b: &[u8]) -> Result<()> {

@@ -50,6 +50,8 @@
     "placed"
     "wired-watch"
     "net-detect"
+    # the installer joins Wi-Fi, typed or from the drive
+    "installer-wifi"
   ];
   # checks that are a file of their own, nix/tests/<name>.nix (or
   # <name>/default.nix), given the flake's usual args
