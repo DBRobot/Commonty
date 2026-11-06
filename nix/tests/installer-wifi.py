@@ -3,7 +3,7 @@ import json
 blank.wait_for_unit("NetworkManager.service")
 blank.wait_for_unit("dd-box-setup.service")
 blank.succeed("systemd-run --unit=ap hostapd /etc/hostapd.conf")
-blank.wait_until_succeeds("ip link show wlan0 | grep -q 'state UP'", timeout=60)
+blank.wait_until_succeeds("ip -o link show wlan0 | grep -c 'state UP'", timeout=60)
 
 token = blank.succeed("cat /run/dd-setup-token/token").strip()
 mine = f"-H 'x-setup-token: {token}'"
@@ -19,7 +19,7 @@ def ask(path, body=None):
 
 
 blank.wait_until_succeeds(
-    f"curl -sf {mine} http://127.0.0.1:8090/api/wifi | grep -q 'House Wi-Fi'",
+    f"curl -sf {mine} -o /tmp/nets http://127.0.0.1:8090/api/wifi && grep -c 'House Wi-Fi' /tmp/nets",
     timeout=90,
 )
 assert json.loads(ask("network"))["wifi"] is None
