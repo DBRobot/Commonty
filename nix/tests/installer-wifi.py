@@ -3,6 +3,12 @@ import json
 blank.wait_for_unit("NetworkManager.service")
 blank.wait_for_unit("dd-box-setup.service")
 blank.succeed("systemd-run --unit=ap hostapd /etc/hostapd.conf")
+# the house's router: an address for whoever joins
+blank.succeed("ip addr add 10.9.0.1/24 dev wlan0")
+blank.succeed(
+    "systemd-run --unit=dhcp dnsmasq -d --port=0 -i wlan0 --bind-interfaces "
+    "--dhcp-range=10.9.0.10,10.9.0.50,1h"
+)
 blank.wait_until_succeeds("ip -o link show wlan0 | grep -c 'state UP'", timeout=60)
 
 token = blank.succeed("cat /run/dd-setup-token/token").strip()

@@ -26,6 +26,7 @@
       systemd.services.dd-box-setup.environment.SETUP_DRIVE = "/root/drive";
       environment.systemPackages = [
         pkgs.hostapd
+        pkgs.dnsmasq
         pkgs.curl
         pkgs.jq
       ];

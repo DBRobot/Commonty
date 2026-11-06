@@ -409,6 +409,9 @@ fn route(app: &Arc<App>, method: &str, path: &str, body: &Value) -> Result<Reply
                 "*",
                 "ssid",
                 &ssid,
+                // a wrong password is said at once, not tried for a minute
+                "connection.auth-retries",
+                "1",
             ];
             let mgmt = wifi_key_mgmt(&ssid);
             if !psk.is_empty() {
