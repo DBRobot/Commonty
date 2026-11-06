@@ -394,45 +394,24 @@ fn route(app: &Arc<App>, method: &str, path: &str, body: &Value) -> Result<Reply
             if ssid.is_empty() {
                 bail!("no network named");
             }
-            // a profile without its password, brought up with the password
-            // from a file: `device wifi connect` takes no passwd-file, and
-            // the password never goes in argv
+            // a profile with its password, in NetworkManager's in-memory
+            // keyfiles (root's alone, gone at the next boot), brought up with
+            // no agent: a wrong password is said at once, where an agent was
+            // asked for it again until the wait ran out. Never in argv
             let _ = sh("nmcli", &["connection", "delete", "dd-setup"]);
-            let mut add = vec![
-                "connection",
-                "add",
-                "type",
-                "wifi",
-                "con-name",
-                "dd-setup",
-                "ifname",
-                "*",
-                "ssid",
-                &ssid,
-                // a wrong password is said at once, not tried for a minute
-                "connection.auth-retries",
-                "1",
-                // up once, as asked: no retrying behind the screen's back
-                "connection.autoconnect",
-                "no",
-            ];
-            let mgmt = wifi_key_mgmt(&ssid);
-            if !psk.is_empty() {
-                add.extend(["wifi-sec.key-mgmt", mgmt]);
-            }
-            sh("nmcli", &add)?;
+            let profile =
+                PathBuf::from("/run/NetworkManager/system-connections/dd-setup.nmconnection");
+            write_private(
+                &profile,
+                wifi_profile(&ssid, &psk, wifi_key_mgmt(&ssid))?.as_bytes(),
+            )?;
+            sh(
+                "nmcli",
+                &["connection", "load", &profile.display().to_string()],
+            )?;
             let mut c = Command::new("nmcli");
             c.args(["--wait", "60", "connection", "up", "dd-setup"]);
-            if !psk.is_empty() {
-                let f = PathBuf::from("/run/dd-setup/psk");
-                write_private(
-                    &f,
-                    format!("802-11-wireless-security.psk:{psk}\n").as_bytes(),
-                )?;
-                c.args(["passwd-file", "/run/dd-setup/psk"]);
-            }
             let out = c.output()?;
-            let _ = std::fs::remove_file("/run/dd-setup/psk");
             if !out.status.success() {
                 let _ = sh("nmcli", &["connection", "delete", "dd-setup"]);
                 let why = String::from_utf8_lossy(&out.stderr);
@@ -533,6 +512,31 @@ fn drive_expired(a: &Args) -> bool {
 
 fn drive_env(a: &Args, k: &'static str, f: &str) -> (&'static str, String) {
     (k, a.drive.join(f).display().to_string())
+}
+
+// NetworkManager's keyfile for the one network: the name as its bytes, so
+// nothing in it is read as the file's syntax; the password printable, as
+// WPA's are, its backslashes and a leading space escaped as the file has them
+fn wifi_profile(ssid: &str, psk: &str, mgmt: &str) -> Result<String> {
+    if !psk.bytes().all(|b| (0x20..0x7f).contains(&b)) {
+        bail!("a Wi-Fi password is letters, digits, spaces and punctuation");
+    }
+    let uuid = std::fs::read_to_string("/proc/sys/kernel/random/uuid")?;
+    let name: String = ssid.bytes().map(|b| format!("{b};")).collect();
+    let mut f = format!(
+        "[connection]\nid=dd-setup\nuuid={}\ntype=wifi\nautoconnect=false\nauth-retries=1\n\n\
+         [wifi]\nmode=infrastructure\nssid={name}\n\n",
+        uuid.trim()
+    );
+    if !psk.is_empty() {
+        let mut p = psk.replace('\\', "\\\\");
+        if p.starts_with(' ') {
+            p.replace_range(..1, "\\s");
+        }
+        f.push_str(&format!("[wifi-security]\nkey-mgmt={mgmt}\npsk={p}\n\n"));
+    }
+    f.push_str("[ipv4]\nmethod=auto\n\n[ipv6]\nmethod=auto\n");
+    Ok(f)
 }
 
 // WPA3-only networks take sae; WPA2 and mixed ones wpa-psk

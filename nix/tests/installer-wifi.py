@@ -41,6 +41,7 @@ assert "could not join House Wi-Fi" in wrong, wrong
 assert json.loads(ask("network"))["wifi"] is None
 blank.fail("test -e /run/dd-setup/psk")
 blank.fail("test -e /run/dd-setup/wifi.json")
+blank.fail("test -e /run/NetworkManager/system-connections/dd-setup.nmconnection")
 
 # the right one, typed: joined, and kept for the install
 assert json.loads(
