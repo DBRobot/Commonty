@@ -3931,12 +3931,14 @@
   "paths": [
    "nix/tests/installer-page.nix",
    "nix/tests/installer-page/**",
-   "nix/installer/web/setup.js"
+   "nix/installer/web/setup.js",
+   "app/web/boxsetup.js"
   ],
   "why": {
    "nix/tests/installer-page.nix": "the check",
-   "nix/tests/installer-page/**": "steps.test.mjs",
-   "nix/installer/web/setup.js": "the screen's script under test"
+   "nix/tests/installer-page/**": "steps.test.mjs, boxsetup.test.mjs",
+   "nix/installer/web/setup.js": "the screen's script under test",
+   "app/web/boxsetup.js": "the set-up-a-box page under test"
   },
   "notes": ""
  },
