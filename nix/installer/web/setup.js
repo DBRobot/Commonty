@@ -133,10 +133,17 @@ $('fw-set').onclick = async () => {
 };
 
 let chosen = null;
+// the drive's Wi-Fi is tried once on its own, so a computer with no cable
+// is not asked for a password the drive already carries
+let driveTried = false, driveFailed = false;
 async function network() {
   $('net-error').hidden = true;
   let v;
   try { v = await api('network'); } catch (e) { return fail('net-error', e); }
+  if (!v.wired && !v.wifi && v.drive && !driveTried) {
+    driveTried = true;
+    try { await api('wifi', { drive: true }); return network(); } catch { driveFailed = true; }
+  }
   if (v.wired || v.wifi) {
     $('net-lead').textContent = v.wired ? 'Connected by cable.' : `Connected to ${v.wifi}.`;
     $('net-drive-row').hidden = true;
@@ -146,7 +153,9 @@ async function network() {
   }
   can('network', false);
   if (v.drive) {
-    $('net-lead').textContent = 'No cable. The drive carries the Wi-Fi from the computer that made it.';
+    $('net-lead').textContent = driveFailed
+      ? `No cable, and the drive's Wi-Fi (${v.drive}) would not connect. Try it again, or pick a network.`
+      : 'No cable. The drive carries the Wi-Fi from the computer that made it.';
     $('net-drive-name').textContent = v.drive;
     $('net-drive-row').hidden = false;
   } else {
