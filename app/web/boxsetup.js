@@ -155,7 +155,10 @@ async function write() {
   $('hi-next').disabled = true;
   $('hi-write-error').hidden = true;
   const now = await (await api('/progress')).json();
-  if (now.stage !== 'written' && !['manifest', 'download', 'write', 'key'].includes(now.stage)) {
+  // only a write still running is picked up again (the window was reloaded
+  // under it). The last run's `written` stays in the app until it restarts,
+  // and treating it as this run's made the second box silently not write.
+  if (!['manifest', 'download', 'write', 'key'].includes(now.stage)) {
     const r = await api('/write', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
