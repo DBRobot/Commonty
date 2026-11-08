@@ -502,7 +502,7 @@ fn route(app: &Arc<App>, method: &str, path: &str, body: &Value) -> Result<Reply
                 "eta": j.eta,
                 "stages": j.stages,
                 "build": j.build,
-                "said": j.said.iter().rev().take(6).rev().collect::<Vec<_>>(),
+                "said": j.said.iter().rev().take(14).rev().collect::<Vec<_>>(),
                 "seconds": j.started.map(|s| s.elapsed().as_secs()),
             }))
         }
@@ -692,8 +692,19 @@ fn start(app: &Arc<App>, kind: &str, prog: &str, env: Vec<(&'static str, String)
     let out = child.stdout.take().context("stdout")?;
     let err = child.stderr.take().context("stderr")?;
     let (app, mine) = (app.clone(), app.clone());
+    // all of what it says, on the drive too: when the machine freezes or the
+    // screen is lost, the drive still has it to read on another computer
+    let mut log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(app.args.drive.join(format!("{kind}.log")))
+        .ok();
     let errs = std::thread::spawn(move || {
         for l in BufReader::new(err).lines().map_while(Result::ok) {
+            if let Some(f) = log.as_mut() {
+                use std::io::Write;
+                let _ = writeln!(f, "{l}").and_then(|_| f.sync_data());
+            }
             let mut j = mine.job.lock().unwrap();
             if let Some(said) = j.build.line(&l) {
                 if j.said.len() >= 200 {

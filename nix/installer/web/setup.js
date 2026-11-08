@@ -49,6 +49,7 @@ function can(step, ok) {
 }
 function fail(id, e) {
   $(id).textContent = e.message || String(e);
+  $(id).style.whiteSpace = 'pre-wrap';
   $(id).hidden = false;
 }
 function human(b) {
@@ -288,9 +289,18 @@ function building(b, pct) {
 
 // a running step, every second, until it ends
 function follow(p, done) {
+  let lost = 0;
   const tick = async () => {
     let j;
-    try { j = await api('job'); } catch { return setTimeout(tick, 1000); }
+    try { j = await api('job'); lost = 0; } catch {
+      // the installer itself gone quiet: a machine out of memory looks so
+      if (++lost === 20) {
+        $(`${p}-state`).textContent = 'Not answering';
+        fail(`${p}-error`, new Error('The installer has stopped answering. The machine may have run out of memory. Give it a minute; if this stays, restart it and try again. What it said is in commonty/install.log on the drive.'));
+      }
+      return setTimeout(tick, 1000);
+    }
+    if (lost === 0 && !$(`${p}-error`).hidden && j.state === 'running') $(`${p}-error`).hidden = true;
     const pct = Math.round((j.done || 0) * 100);
     $(`${p}-fill`).style.width = `${pct}%`;
     $(`${p}-bar`).setAttribute('aria-valuenow', pct);
@@ -301,7 +311,7 @@ function follow(p, done) {
     $(`${p}-state`).dataset.state = j.state === 'done' ? 'ok' : 'broken';
     if (j.state === 'done') return done();
     $(`${p}-state`).textContent = 'Stopped';
-    fail(`${p}-error`, new Error(j.said.slice(-2).join(' ') || 'It stopped.'));
+    fail(`${p}-error`, new Error(j.said.slice(-12).join('\n') || 'It stopped, and said nothing. commonty/' + p.replace('in', 'install').replace('bk', 'backup') + '.log on the drive may have more.'));
     if (p === 'bk') { $('bk-yes').disabled = $('bk-no').disabled = false; }
     else $('in-go').disabled = false;
   };
