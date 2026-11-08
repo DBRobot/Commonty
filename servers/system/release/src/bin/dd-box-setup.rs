@@ -692,21 +692,17 @@ fn start(app: &Arc<App>, kind: &str, prog: &str, env: Vec<(&'static str, String)
     let out = child.stdout.take().context("stdout")?;
     let err = child.stderr.take().context("stderr")?;
     let (app, mine) = (app.clone(), app.clone());
-    // all of what it says, on the drive too: when the machine freezes or the
-    // screen is lost, the drive still has it to read on another computer
-    let mut log = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(app.args.drive.join(format!("{kind}.log")))
-        .ok();
+    let log = DriveLog::open(&app.args.drive, kind);
+    log.put(&format!("== {kind} starts"));
+    let sampler = log.clone();
+    let watched = app.clone();
+    std::thread::spawn(move || sampler.watch(&watched));
+    let errlog = log.clone();
     let errs = std::thread::spawn(move || {
         for l in BufReader::new(err).lines().map_while(Result::ok) {
-            if let Some(f) = log.as_mut() {
-                use std::io::Write;
-                let _ = writeln!(f, "{l}").and_then(|_| f.sync_data());
-            }
             let mut j = mine.job.lock().unwrap();
             if let Some(said) = j.build.line(&l) {
+                errlog.put(&said);
                 if j.said.len() >= 200 {
                     j.said.remove(0);
                 }
@@ -717,6 +713,7 @@ fn start(app: &Arc<App>, kind: &str, prog: &str, env: Vec<(&'static str, String)
         }
     });
     let prog = prog.to_string();
+    let (outlog, kind) = (log.clone(), kind.to_string());
     std::thread::spawn(move || {
         for l in BufReader::new(out).lines().map_while(Result::ok) {
             let mut j = app.job.lock().unwrap();
@@ -724,6 +721,7 @@ fn start(app: &Arc<App>, kind: &str, prog: &str, env: Vec<(&'static str, String)
                 j.done = d;
                 j.eta = eta;
             } else if let Some(s) = l.strip_prefix("== ") {
+                outlog.put(&l);
                 j.stages.push(s.to_string());
                 if j.stages.len() == 3 {
                     j.building_since = Some(Instant::now());
@@ -740,6 +738,8 @@ fn start(app: &Arc<App>, kind: &str, prog: &str, env: Vec<(&'static str, String)
         }
         let mut j = app.job.lock().unwrap();
         j.state = if ok { "done" } else { "failed" }.into();
+        outlog.put(&format!("== {kind} ended: {}", j.state));
+        outlog.flush();
         if ok {
             j.done = 1.0;
             j.eta = Some(0);
@@ -748,4 +748,84 @@ fn start(app: &Arc<App>, kind: &str, prog: &str, env: Vec<(&'static str, String)
         }
     });
     Ok(())
+}
+
+/// What a step says, kept on the drive beside the ticket, for reading on
+/// another computer after a freeze: stamped, flushed every few seconds, and
+/// every failure to write it ignored, so it can never stop the install
+struct DriveLog(Mutex<Option<std::fs::File>>, Instant);
+
+impl DriveLog {
+    fn open(dir: &Path, kind: &str) -> Arc<Self> {
+        let f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join(format!("{kind}.log")))
+            .ok();
+        Arc::new(Self(Mutex::new(f), Instant::now()))
+    }
+
+    fn put(&self, line: &str) {
+        let Ok(mut g) = self.0.lock() else { return };
+        if let Some(f) = g.as_mut()
+            && writeln!(f, "[{:>5}s] {line}", self.1.elapsed().as_secs()).is_err()
+        {
+            *g = None;
+        }
+    }
+
+    fn flush(&self) {
+        if let Ok(g) = self.0.lock()
+            && let Some(f) = g.as_ref()
+        {
+            let _ = f.sync_data();
+        }
+    }
+
+    /// While the step runs: memory and swap every few seconds, and every
+    /// time the kernel kills something for want of memory
+    fn watch(&self, app: &App) {
+        let mut killed = 0;
+        let mut tick = 0u64;
+        while app.job.lock().unwrap().state == "running" {
+            if tick.is_multiple_of(3) {
+                let m = std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
+                let kb = |k: &str| {
+                    m.lines()
+                        .find_map(|l| l.strip_prefix(k))
+                        .and_then(|v| v.trim_start_matches(':').trim().split(' ').next())
+                        .and_then(|v| v.parse::<u64>().ok())
+                        .map_or(0, |v| v / 1024)
+                };
+                let load = std::fs::read_to_string("/proc/loadavg").unwrap_or_default();
+                self.put(&format!(
+                    "memory: {} MB free of {}, swap {} MB free, load {}",
+                    kb("MemAvailable"),
+                    kb("MemTotal"),
+                    kb("SwapFree"),
+                    load.split(' ').next().unwrap_or("?")
+                ));
+                if let Ok(o) = Command::new("dmesg").output() {
+                    let all = String::from_utf8_lossy(&o.stdout);
+                    let bad: Vec<&str> = all
+                        .lines()
+                        .filter(|l| {
+                            l.contains("Out of memory")
+                                || l.contains("Killed process")
+                                || l.contains("oom-kill")
+                                || l.contains("I/O error")
+                        })
+                        .collect();
+                    for l in bad.iter().skip(killed) {
+                        self.put(&format!("kernel: {l}"));
+                    }
+                    killed = bad.len();
+                }
+            }
+            self.flush();
+            tick += 1;
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
+        self.flush();
+    }
 }
