@@ -131,6 +131,7 @@ NOT_THROUGH_NGINX = {
     "/_dd/house/here",
     "/_dd/house/wifi/relay",
     "/verify",
+    "/git-verify",
     "/health",
     "/directory",
     "/identity",

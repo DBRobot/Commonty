@@ -134,6 +134,45 @@ pub fn mint_at(
     token.build(kp).map_err(err)?.to_base64().map_err(err)
 }
 
+/// The most a git token may live, and what the gate (git_verify) holds it to.
+pub const GIT_TOKEN_MAX: Duration = Duration::from_secs(12 * 3600);
+
+/// A token for pushing and fetching one repository over https at the push
+/// door (docs/dev/forge.md): purpose `git`, good at `host` alone, for
+/// `owner/name` alone, never longer than GIT_TOKEN_MAX. It opens nothing
+/// else of the member's anywhere.
+pub fn mint_git(kp: &KeyPair, user: &str, ttl: Duration, host: &str, repo: &str) -> Result<String> {
+    if ttl > GIT_TOKEN_MAX {
+        return Err(crate::Error::Token(format!("a git token lives {}h at most", GIT_TOKEN_MAX.as_secs() / 3600)));
+    }
+    let exp = (SystemTime::now() + ttl)
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let err = |e: biscuit_auth::error::Token| crate::Error::Token(format!("mint: {e}"));
+    Biscuit::builder()
+        .fact(format!("user({user:?})").as_str())
+        .map_err(err)?
+        .fact(format!("device({:?})", fingerprint(kp)).as_str())
+        .map_err(err)?
+        .fact(format!("audience({host:?})").as_str())
+        .map_err(err)?
+        .fact("purpose(\"git\")")
+        .map_err(err)?
+        .fact(format!("repo({:?})", repo.to_lowercase()).as_str())
+        .map_err(err)?
+        .check(format!("check if time($t), $t < {exp}").as_str())
+        .map_err(err)?
+        .check(format!("check if here({host:?})").as_str())
+        .map_err(err)?
+        .check("check if operation(\"git\")")
+        .map_err(err)?
+        .build(kp)
+        .map_err(err)?
+        .to_base64()
+        .map_err(err)
+}
+
 /// How long a join ticket is good for: the drive it is written to can sit
 /// a week before the box is set up.
 pub const JOIN_TICKET_TTL: Duration = Duration::from_secs(7 * 24 * 3600);
@@ -205,5 +244,24 @@ mod join_ticket_tests {
         }
         // two tickets are never one
         assert_ne!(mint_join_ticket(&kp, "ann").unwrap().1, id);
+    }
+}
+
+#[cfg(test)]
+mod git_token_tests {
+    use super::*;
+
+    #[test]
+    fn a_git_token_names_its_repo_and_its_end_and_lives_twelve_hours_at_most() {
+        let kp = generate();
+        let t = mint_git(&kp, "ann", Duration::from_secs(3600), "push.x", "Ann/Thing").unwrap();
+        let src = biscuit_auth::UnverifiedBiscuit::from_base64(&t)
+            .unwrap()
+            .print_block_source(0)
+            .unwrap();
+        for want in ["user(\"ann\")", "repo(\"ann/thing\")", "purpose(\"git\")", "audience(\"push.x\")", "$t < "] {
+            assert!(src.contains(want), "{want} in {src}");
+        }
+        assert!(mint_git(&kp, "ann", GIT_TOKEN_MAX + Duration::from_secs(1), "push.x", "ann/t").is_err());
     }
 }

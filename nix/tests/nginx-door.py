@@ -16,6 +16,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 conf, nginx, tmp, door, members, repo = sys.argv[1:7]
+push = sys.argv[7] if len(sys.argv) > 7 else None
 seen = []
 
 
@@ -35,6 +36,15 @@ class Stub(BaseHTTPRequestHandler):
                 "body": len(body),
             }
         )
+        # the push door's question: a token with "good" in it is ann's
+        if self.to == "gate" and self.path == "/git-verify":
+            ok = "good" in (self.headers.get("authorization") or "")
+            self.send_response(200 if ok else 401)
+            if ok:
+                self.send_header("X-Auth-Request-Preferred-Username", "ann")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         # a private repository, as Forgejo answers a stranger about one
         if "/secret" in self.path:
             self.send_response(401)
@@ -408,6 +418,92 @@ codes = [ask("GET", R + "/archive/main.zip")[0] for _ in range(10)]
 told.append(f"  pace   10 archives at once: {codes.count('429')} told to wait")
 if "429" not in codes:
     failures.append(f"10 archives at once were all let through: {codes}")
+
+# -- the push door: git over https for a token, and nothing else
+if push:
+    GOOD = ["Authorization: Bearer good-token"]
+    P = "/ann/thing"
+
+    def pushed(method, path, body=None, headers=GOOD):
+        before = len(seen)
+        code, head, _ = ask(method, path, host=push, headers=headers + [SNEAKY[0]] + SNEAKY[2:], body=body)
+        got = [g for g in seen[before:] if g["to"] == "forge"]
+        told.append(f"  push   {code}  {method} {path}")
+        return code, head, got
+
+    # no credential, or a bad one: git's challenge, and the forge never asked
+    for m, p in [
+        ("GET", P + ".git/info/refs?service=git-receive-pack"),
+        ("POST", P + ".git/git-receive-pack"),
+        ("POST", P + "/git-upload-pack"),
+    ]:
+        code, head, got = pushed(m, p, b"x" if m == "POST" else None, headers=["Authorization: Bearer bad"])
+        if code != "401" or got or 'www-authenticate: basic' not in head:
+            failures.append(f"push {m} {p} with a bad token: {code}, forge asked {len(got)}, challenge {'www-authenticate' in head}")
+    # a good one: the forge is asked, as ann, with no credential of its own
+    for m, p, b in [
+        ("GET", P + ".git/info/refs?service=git-receive-pack", None),
+        ("GET", P + "/info/refs?service=git-upload-pack", None),
+        ("POST", P + ".git/git-receive-pack", b"0000"),
+        ("POST", P + ".git/git-upload-pack", b"0000"),
+    ]:
+        code, head, got = pushed(m, p, b)
+        if code != "200" or len(got) != 1:
+            failures.append(f"push {m} {p}: {code}, forge asked {len(got)}")
+            continue
+        h = got[0]["headers"]
+        if h.get("x-webauth-user") != "ann":
+            failures.append(f"push {m} {p}: the forge was told {h.get('x-webauth-user')!r}")
+        for k in ("authorization", "cookie", "sudo"):
+            if h.get(k):
+                failures.append(f"push {m} {p}: the forge got {k}")
+        if "set-cookie" in head:
+            failures.append(f"push {m} {p}: a cookie came back")
+    # the client cannot name itself, whatever it sends
+    code, head, got = pushed("GET", P + ".git/info/refs?service=git-receive-pack", headers=GOOD + ["X-WEBAUTH-USER: david"])
+    if len(got) != 1 or got[0]["headers"].get("x-webauth-user") != "ann":
+        failures.append("push: a client-sent X-WEBAUTH-USER got through")
+    # nothing else is there, with any credential
+    for m, p in [
+        ("GET", "/"),
+        ("GET", "/api/v1/user"),
+        ("GET", "/_dd/git-verify"),
+        ("GET", "/_dd/login"),
+        ("GET", P),
+        ("GET", P + "/raw/branch/main/x"),
+        ("GET", P + "/archive/main.zip"),
+        ("POST", P + "/info/lfs/objects/batch"),
+        ("GET", "/api/actions/x/y"),
+        ("GET", P + ".git/info/refs"),
+        ("GET", P + ".git/info/refs?service=git-foo"),
+        ("GET", P + ".git/git-upload-pack"),
+        ("GET", P + ".git/git-receive-pack"),
+        ("PUT", P + ".git/git-receive-pack"),
+        ("GET", P + ".git/info/refs?service=git-receive-pack&token=x"),
+        ("GET", "/a/b/c/git-receive-pack"),
+        ("GET", "/a/%2e%2e/git-receive-pack"),
+        ("GET", "/a/../git-receive-pack"),
+    ]:
+        code, head, got = pushed(m, p, b"x" if m in ("POST", "PUT") else None)
+        if code not in ("400", "403", "404", "405") or got:
+            failures.append(f"push {m} {p}: {code}, forge asked {len(got)}; wanted a refusal")
+    # a push over what Cloudflare would take is ours to refuse, the forge never asked
+    before = len(seen)
+    with open(tmp + "/big", "wb") as f:
+        f.truncate(91 * 1024 * 1024)
+    code, _, _ = ask("POST", P + ".git/git-receive-pack", host=push, headers=GOOD, body="@" + tmp + "/big")
+    told.append(f"  push   {code}  91 MB receive-pack")
+    if code != "413" or any(g["to"] == "forge" for g in seen[before:]):
+        failures.append(f"push of 91 MB: {code}, wanted 413 and the forge not asked")
+    # and floods are told to wait
+    codes = [ask("GET", P + ".git/info/refs?service=git-receive-pack", host=push, headers=GOOD)[0] for _ in range(40)]
+    told.append(f"  pace   40 ref listings at the push door: {codes.count('429')} told to wait")
+    if "429" not in codes:
+        failures.append(f"40 ref listings at the push door were all let through: {codes}")
+    # the code door still takes no push, whatever the token
+    code, _, _ = ask("POST", P + ".git/git-receive-pack", host=door, headers=GOOD, body=b"x")
+    if code != "404":
+        failures.append(f"code door took a receive-pack with a token: {code}")
 
 # -- the members' forge, from inside: no person reaches its admin api, and
 # nobody acts as another through its sudo, header or query

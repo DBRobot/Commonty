@@ -31,7 +31,8 @@ let
     # the right place as nobody, and every other is refused before it does
     + lib.optionalString (c.config.services.nginx.virtualHosts ? "code.${c.config.dd.domain}") ''
       python3 ${./nginx-door.py} "$conf" ${nginx} "$tmp" \
-        code.${c.config.dd.domain} git.${c.config.dd.domain} ${c.config.dd.repo}
+        code.${c.config.dd.domain} git.${c.config.dd.domain} ${c.config.dd.repo} \
+        push.${c.config.dd.domain}
     ''
     # the bare name's front page served at /, home's / still signing in, and
     # the docs and the download as they were; Passwords' public name hands

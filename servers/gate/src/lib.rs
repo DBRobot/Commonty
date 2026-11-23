@@ -1419,6 +1419,76 @@ async fn verify(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     r
 }
 
+/// The push door's subrequest (nix/modules/forge/push.nix, docs/dev/forge.md):
+/// a member's git token - purpose `git`, one repository, one host, at most
+/// 12 hours - as Bearer or as the password of Basic. Answers the name for
+/// the forge, or 401 (which nginx turns into git's challenge).
+async fn git_verify(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
+    let no = || StatusCode::UNAUTHORIZED.into_response();
+    let Some((basic_user, token)) = git_credential(&headers) else {
+        return no();
+    };
+    let here = app.directory.here(&headers);
+    let Ok((user, _)) = app.verify_biscuit_device(&token, "git", &here) else {
+        return no();
+    };
+    if basic_user.is_some_and(|b| b != user) || app.role(&user) != Some(pages::Role::Member) {
+        return no();
+    }
+    let source = UnverifiedBiscuit::from_base64(&token)
+        .ok()
+        .and_then(|b| b.print_block_source(0).ok())
+        .unwrap_or_default();
+    let uri = headers
+        .get("x-original-uri")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    if git_scope(&source, uri, SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs()))
+        .is_none()
+    {
+        return no();
+    }
+    let mut r = StatusCode::OK.into_response();
+    r.headers_mut().insert(
+        "X-Auth-Request-Preferred-Username",
+        HeaderValue::from_str(&user).unwrap(),
+    );
+    r
+}
+
+/// The token, and the name beside it if it came as Basic's password.
+fn git_credential(headers: &HeaderMap) -> Option<(Option<String>, String)> {
+    if let Some(t) = bearer(headers) {
+        return Some((None, t.to_string()));
+    }
+    let v = headers.get(AUTHORIZATION)?.to_str().ok()?.strip_prefix("Basic ")?;
+    let plain = String::from_utf8(B64.decode(v.trim()).ok()?).ok()?;
+    let (u, p) = plain.split_once(':')?;
+    Some((Some(u.to_string()), p.to_string()))
+}
+
+/// Whether a git token's own words (its authority block) are for this
+/// request's repository and end within the cap: `repo("o/n")` is the first
+/// two path segments (a trailing `.git` aside), and its `$t < <end>` is at
+/// most GIT_TOKEN_MAX from `now`. Unscoped or unbounded is None.
+fn git_scope(source: &str, uri: &str, now: u64) -> Option<()> {
+    let fact = |key: &str| {
+        let i = source.find(key)? + key.len();
+        let rest = &source[i..];
+        Some(&rest[..rest.find(['"', ' ', ';', ',', ')']).unwrap_or(rest.len())])
+    };
+    let want = fact("repo(\"")?;
+    let end: u64 = fact("$t < ")?.parse().ok()?;
+    if end > now + 12 * 3600 {
+        return None;
+    }
+    let path = routed_path(uri);
+    let mut segs = path.trim_start_matches('/').split('/');
+    let (o, n) = (segs.next()?, segs.next()?);
+    let n = n.strip_suffix(".git").unwrap_or(n);
+    (format!("{o}/{n}").to_lowercase() == want).then_some(())
+}
+
 /// The pages this gate serves, as origins: "https://<host>.<domain>" for each
 /// of VERIFY_HOSTS, and home. Nothing else may ask for a passkey here.
 /// every name a token may be for on this box: the configured extras, and
@@ -3553,6 +3623,7 @@ pub async fn start(
     }
     let router = Router::new()
         .route("/verify", get(verify))
+        .route("/git-verify", get(git_verify))
         .route("/_dd/back", get(back))
         .route("/_dd/metrics/sources", get(metrics_sources))
         .route("/health", get(|| async { "ok" }))
@@ -5795,5 +5866,26 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(pipe.status(), 403);
+    }
+}
+
+#[cfg(test)]
+mod git_scope_tests {
+    use super::git_scope;
+
+    const SRC: &str = "user(\"ann\");\nrepo(\"ann/thing\");\npurpose(\"git\");\ncheck if time($t), $t < 5000;\n";
+
+    #[test]
+    fn a_git_token_is_for_its_repo_and_a_short_life() {
+        let ok = |uri| git_scope(SRC, uri, 1000).is_some();
+        assert!(ok("/ann/thing.git/info/refs?service=git-receive-pack"));
+        assert!(ok("/Ann/Thing/git-receive-pack"));
+        assert!(ok("//ann/thing/git-upload-pack"));
+        assert!(!ok("/ann/other.git/git-receive-pack"));
+        assert!(!ok("/bob/thing/git-receive-pack"));
+        assert!(ok("/ann/x/../thing/git-receive-pack"));
+        // ends too far ahead, or names no repository: refused
+        assert!(git_scope(&SRC.replace("5000", "100000"), "/ann/thing/git-receive-pack", 1000).is_none());
+        assert!(git_scope(&SRC.replace("repo(", "rep("), "/ann/thing/x", 1000).is_none());
     }
 }

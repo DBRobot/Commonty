@@ -178,6 +178,7 @@ in
     ./live.nix
     # code.<domain>: the public repositories, for anyone, as nobody
     ./door.nix
+    ./push.nix
     # with failover on, it follows its lease from box to box
     ./follow.nix
     # the runners' registration tokens, made here and sealed to each
