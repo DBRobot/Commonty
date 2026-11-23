@@ -1421,7 +1421,7 @@ async fn verify(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
 
 /// The push door's subrequest (nix/modules/forge/push.nix, docs/dev/forge.md):
 /// a member's git token - purpose `git`, one repository, one host, at most
-/// 12 hours - as Bearer or as the password of Basic. Answers the name for
+/// 4 hours (GIT_TOKEN_MAX) - as Bearer or as the password of Basic. Answers the name for
 /// the forge, or 401 (which nginx turns into git's challenge).
 async fn git_verify(State(app): State<Arc<App>>, headers: HeaderMap) -> Response {
     let no = || StatusCode::UNAUTHORIZED.into_response();
@@ -1443,10 +1443,15 @@ async fn git_verify(State(app): State<Arc<App>>, headers: HeaderMap) -> Response
         .get("x-original-uri")
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default();
-    if git_scope(&source, uri, SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs()))
-        .is_none()
-    {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let Some(repo) = git_scope(&source, uri, now) else {
         return no();
+    };
+    // push-create is the forge's, for every door; here a push (or the ref
+    // listing before it) to a repository that is not there is refused (403: nginx
+    // passes no other status on), so a token never makes one. Repositories are made in the Git pages.
+    if git_pushes(uri) && !app.repo_exists(&repo).await {
+        return StatusCode::FORBIDDEN.into_response();
     }
     let mut r = StatusCode::OK.into_response();
     r.headers_mut().insert(
@@ -1469,9 +1474,10 @@ fn git_credential(headers: &HeaderMap) -> Option<(Option<String>, String)> {
 
 /// Whether a git token's own words (its authority block) are for this
 /// request's repository and end within the cap: `repo("o/n")` is the first
-/// two path segments (a trailing `.git` aside), and its `$t < <end>` is at
-/// most GIT_TOKEN_MAX from `now`. Unscoped or unbounded is None.
-fn git_scope(source: &str, uri: &str, now: u64) -> Option<()> {
+/// two path segments (a trailing `.git` aside; the repository, lowercase,
+/// is what it answers), and its `$t < <end>` is at
+/// most GIT_TOKEN_MAX_SECS from `now`. Unscoped or unbounded is None.
+fn git_scope(source: &str, uri: &str, now: u64) -> Option<String> {
     let fact = |key: &str| {
         let i = source.find(key)? + key.len();
         let rest = &source[i..];
@@ -1479,14 +1485,50 @@ fn git_scope(source: &str, uri: &str, now: u64) -> Option<()> {
     };
     let want = fact("repo(\"")?;
     let end: u64 = fact("$t < ")?.parse().ok()?;
-    if end > now + 12 * 3600 {
+    if end > now + GIT_TOKEN_MAX_SECS {
         return None;
     }
     let path = routed_path(uri);
     let mut segs = path.trim_start_matches('/').split('/');
     let (o, n) = (segs.next()?, segs.next()?);
     let n = n.strip_suffix(".git").unwrap_or(n);
-    (format!("{o}/{n}").to_lowercase() == want).then_some(())
+    let have = format!("{o}/{n}").to_lowercase();
+    (have == want).then_some(have)
+}
+
+/// Longest a git token may live (client/auth device.rs GIT_TOKEN_MAX), under
+/// the 8 hours a session lives.
+const GIT_TOKEN_MAX_SECS: u64 = 4 * 3600;
+
+/// A request that would write: the ref listing for, or the, receive-pack.
+fn git_pushes(uri: &str) -> bool {
+    let u = uri.to_lowercase();
+    u.split('?').next().is_some_and(|p| p.ends_with("/git-receive-pack"))
+        || u.contains("service=git-receive-pack")
+}
+
+impl App {
+    /// Whether the forge has `owner/name`, asked of this box's own public
+    /// door over loopback (every repository is public, so what it says is
+    /// what anyone may see); anything but a plain yes is no.
+    async fn repo_exists(&self, repo: &str) -> bool {
+        let code = format!("code.{}", self.domain);
+        let Ok(http) = reqwest::Client::builder()
+            .resolve(&code, ([127, 0, 0, 1], 443).into())
+            // our own nginx on this box's loopback, by name: nobody to trust
+            // but the connection, and the answer only ever says no
+            .danger_accept_invalid_certs(true)
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(Duration::from_secs(5))
+            .build()
+        else {
+            return false;
+        };
+        http.get(format!("https://{code}/api/v1/repos/{repo}"))
+            .send()
+            .await
+            .is_ok_and(|r| r.status() == reqwest::StatusCode::OK)
+    }
 }
 
 /// The pages this gate serves, as origins: "https://<host>.<domain>" for each
@@ -5886,6 +5928,11 @@ mod git_scope_tests {
         assert!(ok("/ann/x/../thing/git-receive-pack"));
         // ends too far ahead, or names no repository: refused
         assert!(git_scope(&SRC.replace("5000", "100000"), "/ann/thing/git-receive-pack", 1000).is_none());
+        assert!(git_scope(&SRC.replace("5000", "16000"), "/ann/thing/git-receive-pack", 1000).is_none());
+        assert!(git_scope(&SRC.replace("5000", "15400"), "/ann/thing/git-receive-pack", 1000).is_some());
+        assert!(super::git_pushes("/ann/thing.git/git-receive-pack"));
+        assert!(super::git_pushes("/ann/thing/info/refs?service=git-receive-pack"));
+        assert!(!super::git_pushes("/ann/thing/info/refs?service=git-upload-pack"));
         assert!(git_scope(&SRC.replace("repo(", "rep("), "/ann/thing/x", 1000).is_none());
     }
 }

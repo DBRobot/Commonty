@@ -3,6 +3,7 @@
 # over https, clone and push, and nothing else: three addresses, each asked
 # of the gate first. The forge sees the member the way the Git UI does, by
 # X-WEBAUTH-USER, and decides what they may write; the token never reaches it.
+# A push never makes a repository: the gate says 403 for one that is not there.
 {
   config,
   lib,
@@ -39,10 +40,16 @@ let
       proxy_hide_header Set-Cookie;
       proxy_hide_header WWW-Authenticate;
       proxy_max_temp_file_size 0;
-      limit_conn dd_push_addr 2;
-      limit_conn dd_push_all 8;
-      limit_conn_status 429;
+      # the public door's own zones (door.nix): a few at a time from anyone,
+      # a handful from everyone together, each one bounded
+      limit_req zone=dd_code_git burst=20 nodelay;
       limit_req_status 429;
+      limit_conn dd_code_addr 2;
+      limit_conn dd_code_all 8;
+      limit_conn_status 429;
+      proxy_read_timeout 60s;
+      proxy_send_timeout 60s;
+      send_timeout 60s;
     ''
     + challenge
     + extra;
@@ -56,13 +63,6 @@ in
     {
       # tokens are for this name: its audience, as the gate counts names
       dd.verify.names = [ host ];
-      services.nginx.appendHttpConfig = ''
-        limit_req_zone $binary_remote_addr zone=dd_push_refs:2m rate=2r/s;
-        limit_req_zone $binary_remote_addr zone=dd_push_pull:2m rate=2r/s;
-        limit_req_zone $binary_remote_addr zone=dd_push_send:2m rate=6r/m;
-        limit_conn_zone $binary_remote_addr zone=dd_push_addr:2m;
-        limit_conn_zone $server_name zone=dd_push_all:1m;
-      '';
       services.nginx.virtualHosts.${host} = {
         useACMEHost = base;
         forceSSL = true;
@@ -77,23 +77,18 @@ in
           "~ ^${repo}/info/refs$" = toForge ''
             if ($request_method !~ ^(GET|HEAD)$) { return 405; }
             if ($arg_service !~ ^git-(upload|receive)-pack$) { return 403; }
-            limit_req zone=dd_push_refs burst=20 nodelay;
           '';
           "~ ^${repo}/git-upload-pack$" = toForge ''
             if ($request_method != POST) { return 405; }
             client_max_body_size 4m;
             client_body_timeout 15s;
-            limit_req zone=dd_push_pull burst=20 nodelay;
           '';
-          # Cloudflare turns away a request body over 100 MB (free plan) before
-          # it reaches us; this is under that, so the refusal is ours and says so
+          # 90m only because Cloudflare turns away a body over 100 MB (free
+          # plan) before it reaches us: under that, the refusal is ours
           "~ ^${repo}/git-receive-pack$" = toForge ''
             if ($request_method != POST) { return 405; }
             client_max_body_size 90m;
             client_body_timeout 60s;
-            proxy_read_timeout 300s;
-            proxy_send_timeout 300s;
-            limit_req zone=dd_push_send burst=5 nodelay;
           '';
           "= /_dd/git-verify" = {
             proxyPass = "${gate}/git-verify";

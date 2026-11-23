@@ -317,7 +317,7 @@ does nothing there).
 on the member's device with no round trip, and printed once:
 
 ```
-dd git-token <owner>/<repo> [--hours 4]      12 hours at most
+dd git-token <owner>/<repo> [--hours 1]      4 hours at most (a session lives 8)
 git push https://<name>:<token>@push.<domain>/<owner>/<repo>
 ```
 
@@ -338,7 +338,9 @@ git                      nginx (push.<domain>)                 gate             
                                                                  Basic name is the token's user;
                                                                  a member; repo(...) is the
                                                                  request's owner/repo; end is
-                                                                 within 12 h of now
+                                                                 within 4 h of now; for a push,
+                                                                 the repository exists (asked of
+                                                                 code.<domain> on loopback)
                           <── 200 X-Auth-Request-Preferred-Username
                           X-WEBAUTH-USER: <name>, Authorization/Cookie/Sudo emptied ──────────────> the member
  POST git-receive-pack ─> same, body up to 90 MB ────────────────────────────────────────────────> Forgejo's own
@@ -362,17 +364,21 @@ with the token's `repo`.
 **Who may write** is two checks. The gate: the token names this repository
 and no other. Forgejo: the member's own rights (owner, collaborator,
 organisation team), exactly as in the Git UI; a push to a repository they
-may not write is refused by the forge (403) however good the token. A push
-to a repository that does not exist creates it under the member's own name
-(`ENABLE_PUSH_CREATE_USER`), public, as everywhere here. The box's own
+may not write is refused by the forge (403) however good the token. **No repository is made by a push here.** Forgejo's push-create is a
+global setting the Git pages' members use elsewhere, so the door refuses
+instead: for the ref listing and the push of `git-receive-pack`, the gate
+asks this box's own `code.<domain>` (`/api/v1/repos/<o>/<r>`, public
+because every repository is) and answers 403 unless it is there. Repositories
+are made in the Git pages. The box's own
 identities map to nobody (`$forge_user`), so a token cannot be theirs.
 
-**Limits**: 2 ref listings a second per address (burst 20), 2 pulls a
-second (burst 20), 6 pushes a minute (burst 5); 2 connections per address,
-8 at once for everyone; 15 s to send an upload-pack request, 60 s between
-reads of a push, 5 minutes for the forge to unpack one. Each failed
-credential costs the gate one signature check and an authorizer capped at
-200 ms; tokens are not guessable (Ed25519), so the limit is for load.
+**Limits** are the public door's own zones (door.nix), none new:
+`dd_code_git` (2 a second per address, burst 20) for all three addresses,
+`dd_code_addr` 2 connections per address, `dd_code_all` 8 at once for
+everyone, 60 s between reads either way, 4 MB for an upload-pack request
+read in 15 s. Each failed credential costs the gate one signature check and
+an authorizer capped at 200 ms; tokens are not guessable (Ed25519), so the
+limit is for load. The zones are shared with `code.<domain>` per address.
 
 **The size cap.** Cloudflare refuses a request body over 100 MB on the free
 plan, before it reaches the tunnel (a 413 from Cloudflare, with no
@@ -389,29 +395,28 @@ The forge's own 100 MB attachment limits do not apply to git. Nothing is
 spooled by nginx beyond the request it holds (`client_body_temp_path`), at
 most 90 MB each, two per address, eight in all.
 
-**Revocation.** In the order of how fast: the token ends by itself within
-hours (the gate refuses one that says more than 12 h, whatever its
-signature); removing the device that signed it from Devices ends every
-token it made at the next gate read (the signature is checked against the
-entry's devices on every request, so there is no cache to wait out);
-removing the member's access (`role` is not Member) ends all of them. One
-token alone cannot be revoked before its end: see the open decisions.
+**Revocation** is expiry plus what already exists, and no list of
+tokens is kept: a token ends by itself within hours (the gate refuses one
+that says more than 4 h, whatever its signature, and the CLI will not mint
+it); removing the device that signed it from Devices ends every token it
+made at the next request (the signature is checked against the entry's
+devices each time); a member who stops being a member ends all of theirs.
+One token alone cannot be taken back before its end; that is accepted.
 
 **Where Cloudflare sits.** It terminates TLS, so it sees the token, the
-packs and the request line for the minutes a push takes. Nothing here relies
-on it for secrecy beyond TLS: a copy of the token is good for one
-repository at this one name for a few hours, and the repository is public
-anyway. A leaked token cannot read or write anything private (there is
-nothing private on the forge), cannot reach git.<domain>, files, mail,
-the directory or any other service.
+packs and the request line for the minutes a push takes. Nothing here
+relies on it for secrecy beyond TLS. That exposure is known and bounded and
+accepted: a copy of the token is good for one repository, at this one name,
+for at most 4 hours, and the repository is public anyway. It cannot reach
+git.<domain>, files, mail, the directory or any other service.
 
 ```
 threat                                   what stops it
-a token read off the wire or a log       audience, purpose, one repo, <=12 h, the nginx access log has no
+a token read off the wire or a log       audience, purpose, one repo, <=4 h, the nginx access log has no
                                          credentials (Authorization is not a logged field)
 a token used on another service          audience and purpose rules (gate), different name
 a token for repo A pushing to repo B     repo fact against the request's owner/repo, in the gate
-a long-lived token                       gate refuses an end more than 12 h away
+a long-lived token                       gate refuses an end more than 4 h away
 a stolen device                          Devices: remove it; every token it signed dies
 a client naming itself (X-WEBAUTH-USER,  nginx replaces the header with the gate's answer
  Sudo, ?sudo=, ?token=)                  and empties the rest; the query forms are 403
@@ -420,21 +425,29 @@ a path trick (%2e, //, ..)               % is 400, dot segments 400, gate compar
 one address flooding auth or packs       per-address rates and connections, 8 packs at once in all
 an oversize push                         90 MB cap; 413 before the forge sees it
 the forge made someone it should not     the box's identities map to nobody; Forgejo's permissions decide
-disk filled by pushes to new repos       only members have tokens; see the open decisions
+a push making a repository               the gate asks code.<domain> first; 403 unless it exists
 the code door growing a write            untouched: receive-pack there stays 404, tested with a token
 ```
 
-**Not here yet**: a button in the Git settings page that mints the token in
-the browser with the passkey (the browser's device key can sign the same
-biscuit; the page needs a repository field and a one-time display), and a
-single-token revoke list. Both are small and separate from the door.
+**Later**: minting in the browser with the passkey (the CLI is the only way
+now).
 
-**Unproven**: that Forgejo takes `X-WEBAUTH-USER` for the git smart-HTTP
-routes as it does for pages and the API. Members push to git.<domain> with
-Forgejo's own tokens today (remote-computers.md), which never exercised it.
-`nix/tests/forge.py` (the VM test) needs a push through the push door's
-config before this ships; if Forgejo ignores the header for git, the door cannot ship as it
-is (the fallback would be a per-push Forgejo token made by the box).
+**Forgejo and the header, read in the source** (v15.0.7, the pinned
+`forgejo-lts`): `buildAuthGroup` in `routers/web/web.go` is the one group
+for every web route, git smart-HTTP included, and it adds `ReverseProxy`
+when `ENABLE_REVERSE_PROXY_AUTHENTICATION` is on (it is: forgejo.nix).
+`ReverseProxy.Verify` names the user from `X-WEBAUTH-USER` and expressly
+makes no session for git paths. `httpBase` in `routers/web/repo/githttp.go`
+then only asks `ctx.IsSigned` ("rely on the results of Contexter"), then the
+repository's permission for the doer, so the header is enough, and
+`ENABLE_REVERSE_PROXY_AUTHENTICATION_API` is not involved (that is /api).
+A header-authenticated doer is not "password authentication", so the
+two-factor refusal does not apply. Nothing else of Forgejo's changed, and
+the other doors are as they were. What only a VM test shows is the whole
+path through nginx: `nix/tests/forge.py` pushes through `push.test.invalid`
+with a token, and checks a wrong one, another repository's, a repository
+that is not there, and a five-hour mint all fail.
+
 
 ## Forgejo's settings
 

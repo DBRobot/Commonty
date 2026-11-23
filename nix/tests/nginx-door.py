@@ -409,16 +409,6 @@ told.append(f"  shut   {code}  GET {members}/ from outside")
 if code != "000":
     failures.append(f"{members} from outside: {code}, wanted the connection closed")
 
-# -- clone floods and archive floods are told to wait
-codes = [ask("GET", R + ".git/info/refs?service=git-upload-pack")[0] for _ in range(40)]
-told.append(f"  pace   40 ref listings at once: {codes.count('429')} told to wait")
-if "429" not in codes:
-    failures.append(f"40 ref listings at once were all let through: {codes}")
-codes = [ask("GET", R + "/archive/main.zip")[0] for _ in range(10)]
-told.append(f"  pace   10 archives at once: {codes.count('429')} told to wait")
-if "429" not in codes:
-    failures.append(f"10 archives at once were all let through: {codes}")
-
 # -- the push door: git over https for a token, and nothing else
 if push:
     GOOD = ["Authorization: Bearer good-token"]
@@ -495,15 +485,26 @@ if push:
     told.append(f"  push   {code}  91 MB receive-pack")
     if code != "413" or any(g["to"] == "forge" for g in seen[before:]):
         failures.append(f"push of 91 MB: {code}, wanted 413 and the forge not asked")
+    # the code door still takes no push, whatever the token
+    code, _, _ = ask("POST", P + ".git/git-receive-pack", host=door, headers=GOOD, body=b"x")
+    if code != "404":
+        failures.append(f"code door took a receive-pack with a token: {code}")
+
     # and floods are told to wait
     codes = [ask("GET", P + ".git/info/refs?service=git-receive-pack", host=push, headers=GOOD)[0] for _ in range(40)]
     told.append(f"  pace   40 ref listings at the push door: {codes.count('429')} told to wait")
     if "429" not in codes:
         failures.append(f"40 ref listings at the push door were all let through: {codes}")
-    # the code door still takes no push, whatever the token
-    code, _, _ = ask("POST", P + ".git/git-receive-pack", host=door, headers=GOOD, body=b"x")
-    if code != "404":
-        failures.append(f"code door took a receive-pack with a token: {code}")
+
+# -- clone floods and archive floods are told to wait
+codes = [ask("GET", R + ".git/info/refs?service=git-upload-pack")[0] for _ in range(40)]
+told.append(f"  pace   40 ref listings at once: {codes.count('429')} told to wait")
+if "429" not in codes:
+    failures.append(f"40 ref listings at once were all let through: {codes}")
+codes = [ask("GET", R + "/archive/main.zip")[0] for _ in range(10)]
+told.append(f"  pace   10 archives at once: {codes.count('429')} told to wait")
+if "429" not in codes:
+    failures.append(f"10 archives at once were all let through: {codes}")
 
 # -- the members' forge, from inside: no person reaches its admin api, and
 # nobody acts as another through its sudo, header or query

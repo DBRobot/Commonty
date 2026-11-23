@@ -135,11 +135,11 @@ pub fn mint_at(
 }
 
 /// The most a git token may live, and what the gate (git_verify) holds it to.
-pub const GIT_TOKEN_MAX: Duration = Duration::from_secs(12 * 3600);
+pub const GIT_TOKEN_MAX: Duration = Duration::from_secs(4 * 3600);
 
 /// A token for pushing and fetching one repository over https at the push
 /// door (docs/dev/forge.md): purpose `git`, good at `host` alone, for
-/// `owner/name` alone, never longer than GIT_TOKEN_MAX. It opens nothing
+/// `owner/name` alone, never longer than GIT_TOKEN_MAX (under the 8 hours a session lives). It opens nothing
 /// else of the member's anywhere.
 pub fn mint_git(kp: &KeyPair, user: &str, ttl: Duration, host: &str, repo: &str) -> Result<String> {
     if ttl > GIT_TOKEN_MAX {
@@ -252,7 +252,7 @@ mod git_token_tests {
     use super::*;
 
     #[test]
-    fn a_git_token_names_its_repo_and_its_end_and_lives_twelve_hours_at_most() {
+    fn a_git_token_names_its_repo_and_its_end_and_lives_four_hours_at_most() {
         let kp = generate();
         let t = mint_git(&kp, "ann", Duration::from_secs(3600), "push.x", "Ann/Thing").unwrap();
         let src = biscuit_auth::UnverifiedBiscuit::from_base64(&t)

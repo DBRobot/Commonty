@@ -282,9 +282,12 @@ enum Command {
     GitToken {
         /// owner/name
         repo: String,
-        /// hours it is good for, 12 at most
-        #[arg(long, default_value_t = 4)]
+        /// hours it is good for, 4 at most
+        #[arg(long, default_value_t = 1)]
         hours: u64,
+        /// the push door's name, when it is not push.<domain> (tests)
+        #[arg(long, hide = true)]
+        host: Option<String>,
     },
     /// Encrypted archives of old computers. restic's format, in your own
     /// directory on the server; the password never leaves this machine.
@@ -1916,12 +1919,12 @@ async fn main() -> Result<()> {
             println!("unlocked and stored for user_id {}", account.user_id);
         }
 
-        Command::GitToken { repo, hours } => {
+        Command::GitToken { repo, hours, host } => {
             let kp = auth::device::load(&keys)?.context("no device key here - `dd device show`")?;
             let user = keys
                 .get(USER)?
                 .context("no name on this machine - `dd identity new` or `dd identity import`")?;
-            let host = format!("push.{}", identity::fleet::DOMAIN);
+            let host = host.unwrap_or_else(|| format!("push.{}", identity::fleet::DOMAIN));
             println!(
                 "{}",
                 auth::device::mint_git(&kp, &user, std::time::Duration::from_secs(hours * 3600), &host, &repo)?

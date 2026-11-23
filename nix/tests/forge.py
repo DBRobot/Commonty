@@ -363,6 +363,42 @@ assert (
     == pushed
 )
 
+# The push door (push.<domain>, docs/dev/forge.md): the same push with no
+# forge token, only a device-signed git token for this one repository. The
+# forge must take X-WEBAUTH-USER on the git routes (read in v15.0.7's
+# routers/web/web.go and githttp.go; proven here)
+gp = "GIT_SSL_NO_VERIFY=1 git -c http.curloptResolve=push.test.invalid:443:127.0.0.1"
+repo = f"{nix['owner']}/commonty"
+mint = f"{env} {nix['dd']} git-token {repo} --host push.test.invalid"
+gtok = box.succeed(mint).strip()
+premote = f"push.test.invalid/{repo}.git"
+box.succeed(
+    "cd /tmp/push && git -c user.name=sarah -c user.email=s@test.invalid"
+    " commit -q --allow-empty -m 'through the push door'"
+)
+box.fail(f"cd /tmp/push && {gp} push -q https://sarah:wrong@{premote} HEAD:refs/heads/via-push")
+# a token for another repository is no token for this one, and no repository
+# is made by a push, whoever the token names
+other = box.succeed(mint.replace("commonty", "elsewhere")).strip()
+box.fail(f"cd /tmp/push && {gp} push -q https://sarah:{other}@{premote} HEAD:refs/heads/via-push")
+fresh = box.succeed(f"{env} {nix['dd']} git-token sarah/not-there --host push.test.invalid").strip()
+box.fail(
+    f"cd /tmp/push && {gp} push -q https://sarah:{fresh}@push.test.invalid/sarah/not-there.git HEAD:refs/heads/main"
+)
+assert (
+    box.succeed(f"{as_admin} -o /dev/null -w '%{{http_code}}' {api.replace(repo, 'sarah/not-there')}").strip()
+    == "404"
+)
+# sarah may write the repository (made a collaborator above)
+box.succeed(f"cd /tmp/push && {gp} push -q https://sarah:{gtok}@{premote} HEAD:refs/heads/via-push")
+pushed = box.succeed("cd /tmp/push && git rev-parse HEAD").strip()
+assert (
+    json.loads(box.succeed(f"{as_admin} {api}/branches/via-push"))["commit"]["id"]
+    == pushed
+)
+# a token more than four hours long is refused at the mint
+box.fail(f"{mint} --hours 5")
+
 # A failed run is stopped by the boxes' CI identity (ci-cancel.py, and
 # ci-resume.py reruns one the same way): no person, and no admin. The
 # forge's own setup lets it write to the fleet's repository, once that is
