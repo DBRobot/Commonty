@@ -5,14 +5,13 @@ P = nix["port"]
 box.wait_for_open_port(P, "127.0.0.1")
 
 # loopback only: the tunnel is the one way in
-listen = box.succeed(f'ss -Hltn "sport = :{P}"')
-assert "127.0.0.1:" + str(P) in listen, listen
-assert "0.0.0.0" not in listen and "[::]" not in listen and "*:" not in listen, listen
+listen = box.succeed(f"ss -Hltn 'sport = :{P}' | awk '{{print $4}}'").split()
+assert listen == [f"127.0.0.1:{P}"], listen
 
 # the forge's key line, as Forgejo writes them: forced command, no pty, no forwarding
 box.succeed("install -d -m 700 /root/k && ssh-keygen -q -t ed25519 -N '' -f /root/k/id")
 pub = box.succeed("cat /root/k/id.pub").strip()
-line = f'command="echo FORCED $SSH_ORIGINAL_COMMAND",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty {pub}'
+line = f'command="echo FORCED $SSH_ORIGINAL_COMMAND; tty",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty {pub}'
 for user, home in [("forgejo", "/var/lib/forgejo"), ("alice", "/home/alice")]:
     box.succeed(f"install -d -m 700 -o {user} {home}/.ssh")
     box.succeed(f"echo '{line}' > {home}/.ssh/authorized_keys")
@@ -31,17 +30,16 @@ assert "FORCED id" in out and "uid=" not in out, out
 out = box.succeed(f"{ssh} {dest} </dev/null")
 assert "FORCED" in out and "uid=" not in out, out
 
-# a pty is refused
-_, out = box.execute(f"{ssh} -tt {dest} true </dev/null 2>&1")
-assert "PTY allocation request failed" in out, out
+# a pty is refused: the forced command's `tty` finds none
+_, out = box.execute(f"{ssh} -tt {dest} </dev/null 2>&1")
+assert "/dev/pts" not in out, out
 
 # no forwarding of any kind
 status, out = box.execute(f"{ssh} -W 127.0.0.1:22 {dest} </dev/null 2>&1")
 assert status != 0, out
-status, out = box.execute(
-    f"timeout 20 {ssh} -N -R 9000:127.0.0.1:22 -o ExitOnForwardFailure=yes {dest} 2>&1"
-)
-assert status not in (0, 124), out
+box.execute(f"(timeout 15 {ssh} -N -R 9000:127.0.0.1:22 {dest} >/dev/null 2>&1 &)")
+box.sleep(5)
+assert box.succeed("ss -Hltn 'sport = :9000'").strip() == ""
 
 # nobody but forgejo, though the key is in alice's authorized_keys too
 for user in ["alice", "root"]:
@@ -50,7 +48,9 @@ for user in ["alice", "root"]:
 
 # key only: the server offers no password and no keyboard-interactive
 _, out = box.execute(f"{ssh} -o PubkeyAuthentication=no {dest} true </dev/null 2>&1")
-assert "Permission denied (publickey)" in out, out
+assert "password" not in out.lower() and "keyboard" not in out.lower(), out
+status, _ = box.execute(f"{ssh} -o PubkeyAuthentication=no {dest} true </dev/null")
+assert status != 0
 
 
 # its own host key, kept in its own place, not the admin sshd's, and the same after a restart

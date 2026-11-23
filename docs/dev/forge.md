@@ -324,7 +324,7 @@ the last rule is `http_status:404`.
 
 **What that sshd allows.** `AllowUsers forgejo`, public key only (no
 password, no keyboard-interactive), `MaxAuthTries 3`, `LoginGraceTime 20`,
-`MaxStartups 10:30:30`, no tty, no forwarding of any kind
+`MaxStartups 30:30:100` (every connection is cloudflared's, so the limit is global: Access is the first line, and one abuser cannot fill it), no tty, no forwarding of any kind
 (`DisableForwarding`, tcp, streamlocal, agent, X11, tunnel), no user
 environment. Each key is a line Forgejo wrote, forcing `forgejo serv` for
 that member: a shell or exec request runs that command, never a shell, and
@@ -332,10 +332,16 @@ Forgejo decides what the member may read or push. Every connection comes
 from cloudflared, so sshd's log shows 127.0.0.1; who it was is for Forgejo
 (the key) and Cloudflare Access (the token) to say.
 
-**The host key** is made once, in `<stateDir>/sshd` on the forge's dataset,
-and travels with the forge's files on a takeover (follow.nix skips only its
-config, sessions and scratch), so a client sees the same key after a
-failover. It is never the admin sshd's.
+**The host key** is made once, in `<stateDir>/sshd` on the forge's dataset.
+follow.nix copies everything but its skip list, which does not name it, and a
+takeover's restore brings it back before the forge starts (it also leaves
+files forgejo's and without a mode, so the unit makes them root's and 0600 at
+each start). The unit starts after the forge, so a key made too early is
+never set aside by the restore. A client sees the same key after a failover;
+it is per forge, never per box and never the admin sshd's. A copy made before
+this existed has no key: the first holder makes one, once. The forge's own
+process and the forge's backups can read it between a restore and the unit's
+start; the forge is plaintext on its box already.
 
 **Names and failover.** `ssh` is in the forge's needs `hosts`, so the DNS
 Worker points it at the box holding the forge's lease, as it does `git`

@@ -47,16 +47,20 @@ let
     PermitOpen none
     PermitUserEnvironment no
     PermitUserRC no
-    AcceptEnv GIT_PROTOCOL
     MaxSessions 4
     PrintMotd no
     Banner none
     Compression no
 
-    # every connection comes from the tunnel, so these limits are global
+    # every connection comes from cloudflared, so these limits are global, not
+    # per visitor: Cloudflare Access is the first line (a token to connect at
+    # all), and the start limit is high enough that one abuser holding
+    # connections cannot lock everyone else out
     MaxAuthTries 3
     LoginGraceTime 20
-    MaxStartups 10:30:30
+    MaxStartups 30:30:100
+    # the per-source ban would ban cloudflared itself (127.0.0.1 is every source)
+    PerSourcePenalties no
     ClientAliveInterval 30
     ClientAliveCountMax 4
     UseDNS no
@@ -84,9 +88,13 @@ in
     systemd.services.dd-forge-sshd = {
       description = "The forge's own sshd, for git over ssh through the tunnel";
       wantedBy = [ "multi-user.target" ];
+      # after the forge's start: a takeover restores the forge's files (the
+      # host key among them) in its ExecStartPre (follow.nix), and a key made
+      # before that would be set aside by it
       after = [
         "network.target"
         "zfs-datasets.service"
+        "forgejo.service"
       ];
       unitConfig.RequiresMountsFor = cfg.keyDir;
       path = [
@@ -100,6 +108,8 @@ in
             set -eu
             install -d -m 0700 -o root -g root ${cfg.keyDir}
             [ -e ${hostKey} ] || ssh-keygen -q -t ed25519 -N "" -C dd-forge-sshd -f ${hostKey}
+            # a restore leaves files forgejo's, with no mode (follow.nix)
+            chown -R root:root ${cfg.keyDir}
             chmod 600 ${hostKey}
           '')
           "${sshd} -t -f ${conf}"
