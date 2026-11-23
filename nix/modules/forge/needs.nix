@@ -18,6 +18,7 @@
     hosts = [
       "git"
       "code"
+      "ssh" # git over ssh through the tunnel, once dd.public.ssh is on (ssh-door.nix)
     ];
     units = [
       "forgejo"
@@ -27,6 +28,7 @@
       "forgejo-protection"
       "forgejo-secrets"
       "dd-forge-dirs" # its directories on its dataset, once mounted
+      "dd-forge-sshd" # its own sshd for the tunnel, never the admin one (ssh-door.nix)
       "dd-ci-cancel"
       "dd-ci-resume"
       "dd-forge-notify"

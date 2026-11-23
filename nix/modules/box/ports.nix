@@ -148,6 +148,7 @@ in
       })
       (lib.mkIf (has "dd-control") { control = [ 4195 ]; })
       (lib.mkIf (has "dd-ci-cancel") { ci-cancel = [ 3003 ]; })
+      (lib.mkIf (has "dd-forge-sshd") { forge-sshd = [ config.dd.forgejo.sshDoor.port ]; })
       (lib.mkIf (has "ente") {
         museum = [
           8080

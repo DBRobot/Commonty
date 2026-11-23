@@ -10,6 +10,8 @@ in
   zone = config.dd.domain;
   address = config.dd.box.net;
   inherit (cfg) tunnel bare;
-  hosts = cfg.hosts ++ map (h: "demo-${h}") cfg.demoDoors;
+  # ssh.<domain> follows the forge like git does (needs hosts), but is a
+  # proxied name only because it has its own route (door-ingress.nix)
+  hosts = cfg.hosts ++ map (h: "demo-${h}") cfg.demoDoors ++ (if cfg.ssh != null then [ "ssh" ] else [ ]);
   open = cfg.enable;
 }

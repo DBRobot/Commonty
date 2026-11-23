@@ -180,6 +180,8 @@ in
     ./door.nix
     # with failover on, it follows its lease from box to box
     ./follow.nix
+    # git over ssh from outside the fleet's network, off until dd.public.ssh is set
+    ./ssh-door.nix
     # the runners' registration tokens, made here and sealed to each
     ./runner-keys.nix
     ../storage/usage.nix
@@ -250,7 +252,9 @@ in
             HTTP_ADDR = sock;
             UNIX_SOCKET_PERMISSION = "660";
             # git over ssh goes through the box's own sshd on 22: forgejo keeps
-            # the forgejo user's authorized_keys, sshd does the rest
+            # the forgejo user's authorized_keys, sshd does the rest. From
+            # outside the fleet's network it is a second sshd of its own, not
+            # this one (ssh-door.nix)
             START_SSH_SERVER = false;
             SSH_DOMAIN = host;
             SSH_PORT = 22;

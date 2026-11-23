@@ -208,7 +208,8 @@ view. The two lists must agree: each says where the other is.
 
 Git over ssh goes through the box's own sshd on port 22
 (`START_SSH_SERVER = false`): Forgejo keeps the `forgejo` user's
-`authorized_keys`, sshd does the rest.
+`authorized_keys`, sshd does the rest. From outside the fleet's network
+it is a second sshd, [below](#git-over-ssh-from-outside).
 
 The gateway also reaches the socket, for the app's downloads:
 `<domain>/download/v<x.y.z>/<file>` is rewritten to that tag's release
@@ -302,6 +303,86 @@ git-core.js). Only the views registered with `route(…, true)` are drawn
 list of public repositories; an owner's), nothing asks who is looking, the
 bell and "Running now" are not there, and the forge's own `git.<domain>`
 links (clone addresses, avatars, downloads) are drawn as this name's.
+
+## Git over ssh from outside
+
+`ssh.<domain>` carries `git clone` and `git push` over ssh through the
+Cloudflare tunnel, for a member away from the fleet's network. It is off
+until `dd.public.ssh = { };` is set (default port 2223); off, there is no
+name, no route and no second sshd.
+
+**Why the admin sshd is not behind it.** The box's sshd on 22 is how an
+administrator gets a shell, and stays on the fleet's network only. The
+tunnel's route for `ssh.<domain>` ends at a second sshd
+([`ssh-door.nix`](../../nix/modules/forge/ssh-door.nix), unit
+`dd-forge-sshd`) that listens on 127.0.0.1 only, with its own config and its
+own host key. The rules are built in
+[`door-ingress.nix`](../../nix/lib/door-ingress.nix), the one place for both
+ways cloudflared runs: every other name goes to nginx's tunnel listener,
+`ssh.<domain>` is the one rule that goes elsewhere, nothing goes to 22, and
+the last rule is `http_status:404`.
+
+**What that sshd allows.** `AllowUsers forgejo`, public key only (no
+password, no keyboard-interactive), `MaxAuthTries 3`, `LoginGraceTime 20`,
+`MaxStartups 10:30:30`, no tty, no forwarding of any kind
+(`DisableForwarding`, tcp, streamlocal, agent, X11, tunnel), no user
+environment. Each key is a line Forgejo wrote, forcing `forgejo serv` for
+that member: a shell or exec request runs that command, never a shell, and
+Forgejo decides what the member may read or push. Every connection comes
+from cloudflared, so sshd's log shows 127.0.0.1; who it was is for Forgejo
+(the key) and Cloudflare Access (the token) to say.
+
+**The host key** is made once, in `<stateDir>/sshd` on the forge's dataset,
+and travels with the forge's files on a takeover (follow.nix skips only its
+config, sessions and scratch), so a client sees the same key after a
+failover. It is never the admin sshd's.
+
+**Names and failover.** `ssh` is in the forge's needs `hosts`, so the DNS
+Worker points it at the box holding the forge's lease, as it does `git`
+and `code`, and that box's own tunnel (every box has one) carries the route.
+A box that is not the holder has the route too but nothing listens: the
+connection is refused. While no one holds the lease the name stays with the
+gateway, which has no such sshd, so it is down, not open.
+
+**Cloning from outside.** Install `cloudflared` and have a service token's id
+and secret (below), then in `~/.ssh/config`:
+
+```
+Host ssh.example.org
+  User forgejo
+  ProxyCommand cloudflared access ssh --hostname %h --service-token-id <id> --service-token-secret <secret>
+```
+
+and `git clone forgejo@ssh.example.org:<owner>/<repo>.git`. Your key is one
+you added in Forgejo's settings. The token's secret is a credential: keep it
+out of the repository, and out of the command line where `ps` shows it if
+you can (cloudflared reads `TUNNEL_SERVICE_TOKEN_ID` and
+`TUNNEL_SERVICE_TOKEN_SECRET` from the environment in its place).
+
+**What must be done by hand in Cloudflare, not automated.** Cloudflare
+Access is what keeps strangers from reaching sshd at all; sshd's own checks
+are the second layer. In the Zero Trust dashboard, before setting
+`dd.public.ssh`:
+
+- Access, Applications: add a self-hosted application for `ssh.<domain>`;
+- add one policy with action *Service Auth* that includes the service token
+  you make under Access, Service Auth, Service Tokens (one per person or
+  device, so one can be revoked alone);
+- no other policy, in particular no "everyone" allow.
+
+The DNS record is not made by hand: the DNS Worker makes the proxied
+`ssh.<domain>` CNAME to the holder's tunnel once `dd.public.ssh` is on.
+The Access application and the tokens are not created by this repository,
+and nothing here checks that they exist. Without the application the name
+is open to anyone who runs `cloudflared access ssh`, and only the key check
+stands; that is why it is off by default.
+
+**The test.** `forge-ssh` ([`nix/tests/forge-ssh.nix`](../../nix/tests/forge-ssh.nix))
+runs the second sshd beside an admin sshd: only forgejo gets in, a shell,
+exec, pty, `-W` and `-R` are refused, no password is offered, its host key
+is its own and survives a restart, and the tunnel's rules (checked when the
+test is evaluated) hold one ssh route, to that port, ending in the 404.
+It does not run cloudflared, Cloudflare Access, or Forgejo's own key lines.
 
 ## Forgejo's settings
 

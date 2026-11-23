@@ -32,13 +32,10 @@ let
   demoNames = map (h: "demo-${h}.${base}") cfg.demoDoors;
   outside = publicNames ++ demoNames;
   # the same rules, as cloudflared reads them from a config of this box's own
-  ingress =
-    map (host: {
-      hostname = host;
-      service = "https://127.0.0.1:${toString tunnelPort}";
-      originRequest.originServerName = host;
-    }) outside
-    ++ [ { service = "http_status:404"; } ];
+  ingress = import ../../lib/door-ingress.nix {
+    inherit lib base outside tunnelPort;
+    sshPort = if cfg.ssh == null then null else cfg.ssh.port;
+  };
   doorAsk = pkgs.writeShellScript "door-ask" (
     builtins.readFile ./box-sign.sh + builtins.readFile ./door-ask.sh
   );
@@ -72,6 +69,19 @@ in
       type = lib.types.bool;
       default = (config.dd.failover or false) && config.dd.dnsWorker != "";
       description = "a tunnel of this box's own, made through the DNS Worker with a secret this box makes (door-ask.sh), in place of the one tunnel and its credentials file: with failover, every box able to be the gateway has its door ready, and the names follow the gateway's lease";
+    };
+    ssh = lib.mkOption {
+      default = null;
+      description = "git over ssh from outside the fleet's network, as ssh.<domain> through the tunnel to the forge's own sshd (modules/forge/ssh-door.nix), never the box's admin sshd. Null: off, no name and no route. Only turn it on once the Cloudflare Access application for ssh.<domain> exists (docs/dev/forge.md)";
+      type = lib.types.nullOr (
+        lib.types.submodule {
+          options.port = lib.mkOption {
+            type = lib.types.port;
+            default = 2223;
+            description = "where the forge's sshd listens, on 127.0.0.1 only";
+          };
+        }
+      );
     };
     tokenFile = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
@@ -126,10 +136,10 @@ in
       tunnels.${cfg.tunnel} = {
         credentialsFile = cfg.credentialsFile;
         default = "http_status:404";
-        ingress = lib.genAttrs outside (host: {
-          service = "https://127.0.0.1:${toString tunnelPort}";
-          originRequest.originServerName = host;
-        });
+        # the same rules; the module adds the 404 itself (default above)
+        ingress = lib.listToAttrs (
+          map (r: lib.nameValuePair r.hostname (removeAttrs r [ "hostname" ])) (lib.init ingress)
+        );
       };
     };
 

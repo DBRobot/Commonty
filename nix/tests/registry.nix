@@ -52,6 +52,8 @@
     "net-detect"
     # the installer joins Wi-Fi, typed or from the drive
     "installer-wifi"
+    # the forge's own sshd behind the tunnel: forgejo only, no shell or forwarding
+    "forge-ssh"
   ];
   # checks that are a file of their own, nix/tests/<name>.nix (or
   # <name>/default.nix), given the flake's usual args
