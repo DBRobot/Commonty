@@ -110,6 +110,8 @@ function refPicker(r, ref, to) {
 function cloneBox(r) {
   // over ssh is for members, on the fleet's network
   const ways = open ? [['HTTPS', local(r.clone_url)]] : [['HTTPS', r.clone_url], ['SSH', r.ssh_url]];
+  // no VPN needed: the public door serves every public repository read-only
+  if (!open && !r.private) ways.push(['No VPN', r.clone_url.replace('//git.', '//code.')]);
   let pick = 0;
   const input = el('input', { readonly: true, value: ways[0][1], 'aria-label': 'Clone address' });
   const cp = el('button', { 'aria-label': 'Copy' }, ic('copy'));

@@ -215,6 +215,15 @@ The gateway also reaches the socket, for the app's downloads:
 file on the fleet's repository, sent as nobody with no cookie and no
 `Authorization` ([`nix/roles/gateway.nix`](../../nix/roles/gateway.nix)).
 
+## Cloning from outside
+
+`https://code.<domain>/<owner>/<repo>` clones any public repository with no
+VPN or account, read-only. `git.<domain>` is the members' forge on the fleet's
+network and times out from anywhere else. The wrong-address cases point at the
+right one: `AGENTS.md` and `README.md` give the command, `code.<domain>/llms.txt`
+says it in plain text, and a member's repository page lists a "No VPN" address
+beside HTTPS and SSH.
+
 ## The public door
 
 `code.<domain>` is the forge for anyone: every public repository, to read

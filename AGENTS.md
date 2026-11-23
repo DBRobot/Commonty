@@ -4,6 +4,10 @@ This repository is Commonty: NixOS boxes that run a household's services,
 the `dd` client, and the identity that no server issues. The boxes are
 rebuilt from it, so a change here reaches real machines.
 
+- **Cloning, without the VPN or an account:** `git clone https://code.commonty.org/david/commonty`.
+  That public address is read-only and works from anywhere. `git.commonty.org` is
+  the members' forge on the fleet's network; if it times out, you are on the
+  wrong address, use `code.` instead.
 - **How things work: [`docs/`](docs/).** Each page covers one part of the
   system; read the one for the area you are changing before you change it.
   When you change how something works, change its page in the same pull

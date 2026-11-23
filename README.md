@@ -4,6 +4,14 @@ NixOS configuration for a self-hosted family server. Everything here is
 declarative: the machines are rebuilt from this repository, and secrets are
 committed encrypted rather than kept out of tree.
 
+## Clone it
+
+    git clone https://code.commonty.org/david/commonty
+
+That address is public and read-only, with no VPN or account. Members push and
+open pull requests at `git.commonty.org`, on the fleet's network. If that name
+times out for you, use `code.commonty.org`.
+
 ## Layout
 
     flake.nix          entry point; `nixosConfigurations.<box>` from fleet/boxes.json

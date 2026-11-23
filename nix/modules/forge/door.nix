@@ -214,6 +214,11 @@ in
             default_type text/plain;
             return 200 "User-agent: *\nAllow: /_dd/\nDisallow: /api/\nDisallow: /*/*/\nDisallow: /*?\n";
           '';
+          # for an agent that landed on the wrong page: the clone command
+          "= /llms.txt".extraConfig = ''
+            default_type text/plain;
+            return 200 "Commonty's code: clone it without any VPN or account.\n\n  git clone https://${host}/${config.dd.repo}\n\nThis is the public, read-only address. Pull requests and pushes are made by members on git.${base}, which needs the fleet network.\n";
+          '';
           # what a 401 or 403 from the forge becomes. nginx carries the
           # forge's WWW-Authenticate into an intercepted 401, which would say
           # "this exists, sign in"; an access check that passes under
